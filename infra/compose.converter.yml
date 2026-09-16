@@ -1,0 +1,32 @@
+name: fruition-local-tools
+
+services:
+  markitdown:
+    build:
+      context: ../../AI
+      dockerfile: converter/Dockerfile
+    container_name: fruition-markitdown
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    environment:
+      MAX_UPLOAD_MB: 50
+      OCR_LANGUAGE: kor+eng
+      OCR_TIMEOUT_SECONDS: 600
+      MARKDOWN_TIMEOUT_SECONDS: 300
+      PDF_DIAGNOSTIC_TIMEOUT_SECONDS: 60
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "127.0.0.1:8010:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

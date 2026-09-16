@@ -1,0 +1,78 @@
+# Environment의 required reviewers와 배포 branch 제한은 GitHub 관리자가 별도로 설정한다.
+name: Deploy (EKS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "deploy 또는 동일 schema의 성공 SHA 재배포"
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+      release_sha:
+        description: "deploy할 이미지 묶음의 기존 40자리 release 태그 (platform 커밋 SHA가 아님)"
+        type: string
+        default: ""
+      rollback_sha:
+        description: "rollback일 때 기존 성공 release의 40자리 SHA"
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-eks-feedback
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment: feedback
+    # 고정 egress 또는 VPC 안에서 운영하는 전용 runner. PR 검증 runner와 분리한다.
+    runs-on: [self-hosted, linux, x64, fruition-feedback]
+    timeout-minutes: 90
+    env:
+      AWS_REGION: ap-northeast-2
+      EKS_CLUSTER: fruition-eks
+      DEPLOY_CONFIG: ${{ vars.AWS_DEPLOY_CONFIG_JSON }}
+      ACTION: ${{ inputs.action }}
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      ROLLBACK_SHA: ${{ inputs.rollback_sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install render dependency
+        run: pip install PyYAML==6.0.2
+      - name: Validate and render before AWS mutation
+        run: |
+          set -euo pipefail
+          SHA="$RELEASE_SHA"
+          if [ "$ACTION" = rollback ]; then SHA="$ROLLBACK_SHA"; fi
+          printf '%s' "$DEPLOY_CONFIG" > "$RUNNER_TEMP/deploy-config.json"
+          python scripts/aws_deploy.py render --config "$RUNNER_TEMP/deploy-config.json" --sha "$SHA" > "$RUNNER_TEMP/rendered.yaml"
+          echo "IMAGE_SHA=$SHA" >> "$GITHUB_ENV"
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Verify target account
+        run: |
+          set -euo pipefail
+          ACTUAL=$(aws sts get-caller-identity --query Account --output text)
+          EXPECTED=$(python -c 'import json,os; print(json.loads(os.environ["DEPLOY_CONFIG"])["account_id"])')
+          test "$ACTUAL" = "$EXPECTED"
+      - name: Verify published immutable images
+        run: |
+          set -euo pipefail
+          for service in document-svc access-svc pipeline converter; do
+            TAGS=$(aws ecr list-images --repository-name "fruition-$service" --filter tagStatus=TAGGED --query 'imageIds[].imageTag' --output json)
+            IMAGE_TAGS="$TAGS" python -c 'import json,os,sys; sys.exit(0 if os.environ["IMAGE_SHA"] in json.loads(os.environ["IMAGE_TAGS"]) else 1)'
+          done
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+      - name: Deploy with DB, migration, rollout and smoke gates
+        run: python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA"

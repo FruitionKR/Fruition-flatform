@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-svc
+  namespace: fruition
+  labels:
+    app: document-svc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: document-svc
+  template:
+    metadata:
+      labels:
+        app: document-svc
+    spec:
+      containers:
+        - name: document-svc
+          # 로컬 빌드 이미지 (kind load docker-image로 주입)
+          image: fruition-document-svc:dev
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+            # actuator 전용. 아래 env의 MANAGEMENT_PORT와 같아야 한다.
+            - containerPort: 8082
+          # 관리 포트를 probe 옆에 못박는다. application.properties 기본값은 서비스마다
+          # 다른데(document 8082 / access 8083) k8s는 ALB healthcheck-port 주석이
+          # Ingress 단위라 두 서비스가 같은 번호를 써야 한다. envFrom보다 우선한다.
+          env:
+            - name: CORE_DB_RUNTIME_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: CORE_DB_RUNTIME_PASSWORD
+            - name: CORE_DB_MIGRATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: CORE_DB_MIGRATION_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: JWT_SECRET
+            - name: INTERNAL_CALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: INTERNAL_CALLBACK_TOKEN
+            - name: AGENT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AGENT_INTERNAL_TOKEN
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_SECRET_KEY
+            - name: MANAGEMENT_PORT
+              value: "8082"
+          envFrom:
+            - configMapRef:
+                name: fruition-config
+          # 로컬에서는 자기 core_db migration 후 기동한다. AWS는 별도 Job으로 실행한다.
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              memory: 1536Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-svc
+  namespace: fruition
+spec:
+  # 클러스터 내부에서는 http://document-svc:8080, 호스트에서는 http://localhost:30080
+  type: NodePort
+  selector:
+    app: document-svc
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080

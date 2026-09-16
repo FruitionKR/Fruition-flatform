@@ -1,0 +1,10 @@
+# Grafana 기동 시 데이터소스를 자동 등록한다 — UI에서 주소를 손으로 넣는 단계를 없앤다.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # compose 네트워크 안에서는 서비스명으로 닿는다.
+    url: http://prometheus:9090
+    isDefault: true

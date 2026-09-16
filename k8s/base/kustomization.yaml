@@ -1,0 +1,20 @@
+# 앱 계층만 포함한다. 상태 계층(postgres/redis/minio)과 secret.yaml은 kind 로컬 전용이라
+# 여기서 제외 — kind 절차는 README.md대로 kubectl apply -f로 개별 적용한다.
+# AWS에서는 overlays/aws가 이 base를 참조하고 상태 계층은 RDS·ElastiCache·S3로 대체된다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - document-svc.yaml
+  - access-svc.yaml
+  - pipeline-api.yaml
+  - pipeline-agent-worker.yaml
+  - ingest-worker.yaml
+  - task-workers.yaml
+  - edit-event-consumer.yaml
+  - converter.yaml
+  - kafka.yaml
+  - networkpolicy.yaml
+  - keda-scaledobject.yaml

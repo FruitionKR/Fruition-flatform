@@ -1,0 +1,36 @@
+name: AWS IaC contracts
+
+on:
+  pull_request:
+    paths: ['infra/**', 'k8s/**', 'scripts/**', '.github/workflows/**']
+  push:
+    branches: [dev, main, dev-msa]
+    paths: ['infra/**', 'k8s/**', 'scripts/**', '.github/workflows/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aws-iac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.15.8'
+          terraform_wrapper: false
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.35.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install contract test dependencies
+        run: pip install PyYAML==6.0.2 redis==5.2.1
+      - name: Validate without AWS credentials
+        run: AWS_VALIDATION_PYTHON="$(command -v python)" bash scripts/aws-iac-validate.sh

@@ -1,0 +1,86 @@
+# 인프라 관리자가 설치한다. 앱 deployer는 Role/Binding·cluster 리소스를 변경하지 못한다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: application-deployer
+  namespace: fruition
+rules:
+  - apiGroups: [""]
+    resources: [configmaps, serviceaccounts, services]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    resourceNames: [internal-only-ingress]
+    verbs: [delete]
+  - apiGroups: [external-secrets.io]
+    resources: [externalsecrets]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [kafka.strimzi.io]
+    resources: [kafkas, kafkanodepools, kafkatopics]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [keda.sh]
+    resources: [scaledobjects]
+    verbs: [get, list, watch, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: application-deployer
+  namespace: fruition
+subjects:
+  - kind: Group
+    name: fruition:deployers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: application-deployer
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fruition-platform-reader
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    resourceNames: [fruition]
+    verbs: [get]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    resourceNames: [gp3]
+    verbs: [get]
+  - apiGroups: [external-secrets.io]
+    resources: [clustersecretstores]
+    resourceNames: [aws-secrets-manager]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fruition-platform-reader
+subjects:
+  - kind: Group
+    name: fruition:deployers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: fruition-platform-reader
+  apiGroup: rbac.authorization.k8s.io

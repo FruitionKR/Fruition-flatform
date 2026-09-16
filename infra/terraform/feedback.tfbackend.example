@@ -1,0 +1,4 @@
+# state bootstrap으로 만든 실제 bucket 이름을 입력한다. 인증정보는 넣지 않는다.
+bucket = "REPLACE_ME_STATE_BUCKET"
+key    = "feedback/terraform.tfstate"
+region = "ap-northeast-2"

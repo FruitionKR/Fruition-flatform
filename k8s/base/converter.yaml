@@ -1,0 +1,94 @@
+# markitdown 변환기 (infra/compose.converter.yml 대응).
+# compose와 동일하게 read-only rootfs + 권한 축소, /tmp만 쓰기 허용.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: converter
+  namespace: fruition
+  labels:
+    app: converter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: converter
+  template:
+    metadata:
+      labels:
+        app: converter
+    spec:
+      containers:
+        - name: converter
+          image: fruition-converter:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MAX_UPLOAD_MB
+              value: "50"
+            - name: OCR_LANGUAGE
+              value: "kor+eng"
+            - name: OCR_TIMEOUT_SECONDS
+              value: "600"
+            - name: MARKDOWN_TIMEOUT_SECONDS
+              value: "300"
+            - name: PDF_DIAGNOSTIC_TIMEOUT_SECONDS
+              value: "60"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: OPENAI_API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: GEMINI_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: ANTHROPIC_API_KEY
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: converter
+  namespace: fruition
+spec:
+  type: ClusterIP
+  selector:
+    app: converter
+  ports:
+    - port: 8000
+      targetPort: 8000

@@ -1,0 +1,89 @@
+.env
+.env.local
+.env.*.local
+
+!.env.example
+
+# IDE/editor local settings
+.vscode/
+
+# Claude Code 개인 로컬 설정
+.claude/settings.local.json
+
+# 로컬 입력 데이터
+input-data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+**/.venv*/
+venv/
+.tmp
+.runtime/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
+# Node dependencies and package manager caches
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Next.js build output and caches
+.next/
+out/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Java/Gradle build output and local state
+.gradle/
+build/
+**/build/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# LLM pipeline generated outputs
+pipeline_api/runs/
+AI/pipeline/runs/
+AI/pipeline/.langgraph_api/
+/tmp/
+/paddle_cache/
+
+# Playwright 실행 산출물 (스크린샷/스냅샷/리포트/trace)
+**/.playwright/
+**/.playwright-mcp/
+**/.playwright-cli/
+**/playwright-report/
+**/blob-report/
+**/test-results/
+**/output/playwright/
+/*.png
+
+# Terraform 로컬 캐시 (lock 파일은 커밋 대상)
+**/.terraform/
+*.tfstate*
+*.tfvars
+*.tfvars.json
+*.tfbackend
+*.tfplan
+*.plan
+!*.tfvars.example
+!*.tfbackend.example
+
+# 로컬 통합 환경의 비밀 설정
+.env.*
+!.env.example
+!.env.*.example

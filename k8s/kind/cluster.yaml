@@ -1,0 +1,14 @@
+# kind 로컬 클러스터 구성.
+# document-svc NodePort(30080)·access-svc NodePort(30081)를 호스트 동일 포트로 노출한다.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: fruition
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
+      - containerPort: 30081
+        hostPort: 30081
+        protocol: TCP

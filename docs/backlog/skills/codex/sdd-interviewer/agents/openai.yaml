@@ -1,0 +1,4 @@
+interface:
+  display_name: "SDD 인터뷰"
+  short_description: "질문과 확인을 통해 구체적인 SDD 문서를 작성합니다"
+  default_prompt: "Use $sdd-interviewer to interview me and produce an approved SDD document."

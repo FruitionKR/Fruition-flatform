@@ -1,0 +1,251 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-task-worker
+  namespace: fruition
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: query-task-worker
+  template:
+    metadata:
+      labels:
+        app: query-task-worker
+    spec:
+      containers:
+        - name: query-task-worker
+          image: fruition-mvp-dev-pipeline-api:latest
+          imagePullPolicy: Never
+          command: ["python", "-m", "app.workers.task_worker"]
+          envFrom:
+            - configMapRef: {name: fruition-config}
+          env:
+            - name: AI_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DATABASE_URL
+            - name: AI_DB_MIGRATION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DB_MIGRATION_URL
+            - name: INTERNAL_CALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: INTERNAL_CALLBACK_TOKEN
+            - name: AGENT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AGENT_INTERNAL_TOKEN
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_SECRET_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: OPENAI_API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: GEMINI_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: ANTHROPIC_API_KEY
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: LANGSMITH_API_KEY
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: TAVILY_API_KEY
+            - {name: AI_COMMAND_TOPIC, value: ai.query.command}
+            - {name: AI_COMMAND_CONSUMER_GROUP, value: query-task-worker}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-task-worker
+  namespace: fruition
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-task-worker
+  template:
+    metadata:
+      labels:
+        app: agent-task-worker
+    spec:
+      containers:
+        - name: agent-task-worker
+          image: fruition-mvp-dev-pipeline-api:latest
+          imagePullPolicy: Never
+          command: ["python", "-m", "app.workers.task_worker"]
+          envFrom:
+            - configMapRef: {name: fruition-config}
+          env:
+            - name: AI_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DATABASE_URL
+            - name: AI_DB_MIGRATION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DB_MIGRATION_URL
+            - name: INTERNAL_CALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: INTERNAL_CALLBACK_TOKEN
+            - name: AGENT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AGENT_INTERNAL_TOKEN
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_SECRET_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: OPENAI_API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: GEMINI_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: ANTHROPIC_API_KEY
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: LANGSMITH_API_KEY
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: TAVILY_API_KEY
+            - {name: AI_COMMAND_TOPIC, value: ai.agent.command}
+            - {name: AI_COMMAND_CONSUMER_GROUP, value: agent-task-worker}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maintenance-task-worker
+  namespace: fruition
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maintenance-task-worker
+  template:
+    metadata:
+      labels:
+        app: maintenance-task-worker
+    spec:
+      containers:
+        - name: maintenance-task-worker
+          image: fruition-mvp-dev-pipeline-api:latest
+          imagePullPolicy: Never
+          command: ["python", "-m", "app.workers.task_worker"]
+          envFrom:
+            - configMapRef: {name: fruition-config}
+          env:
+            - name: AI_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DATABASE_URL
+            - name: AI_DB_MIGRATION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DB_MIGRATION_URL
+            - name: INTERNAL_CALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: INTERNAL_CALLBACK_TOKEN
+            - name: AGENT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AGENT_INTERNAL_TOKEN
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_SECRET_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: OPENAI_API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: GEMINI_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: ANTHROPIC_API_KEY
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: LANGSMITH_API_KEY
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: TAVILY_API_KEY
+            - {name: AI_COMMAND_TOPIC, value: ai.maintenance.command}
+            - {name: AI_COMMAND_CONSUMER_GROUP, value: maintenance-task-worker}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}

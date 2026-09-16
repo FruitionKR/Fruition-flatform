@@ -1,0 +1,29 @@
+# 커밋된 api-specs 명세를 한 화면에서 보는 읽기 전용 Swagger UI.
+# 백엔드를 띄우지 않아도 계약을 열람할 수 있다 — 명세가 파일이라 서버가 필요 없다.
+# pipeline은 프론트가 직접 부르지 않는 서비스 간 API다. document-svc가 Wiki Schema·Skill을
+# 그대로 위임하므로, 그쪽 실제 계약을 확인하려면 여기를 본다.
+name: fruition-openapi
+
+services:
+  swagger-ui:
+    image: docker.swagger.io/swaggerapi/swagger-ui:v5.32.11
+    container_name: fruition-swagger-ui
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      URLS: >-
+        [
+          {"url":"/specs/document-svc/openapi.yaml","name":"document-svc"},
+          {"url":"/specs/access-svc/openapi.yaml","name":"access-svc"},
+          {"url":"/specs/pipeline/openapi.yaml","name":"pipeline (내부)"}
+        ]
+      URLS_PRIMARY_NAME: document-svc
+      DOC_EXPANSION: none
+      # 명세에서 servers를 제거해 호출 대상이 없다. 실제 호출은 각 서비스의 /swagger-ui.html에서 한다.
+      TRY_IT_OUT_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${SWAGGER_UI_PORT:-8090}:8080"
+    volumes:
+      - ../../Access/api-specs:/usr/share/nginx/html/specs/Access/api-specs:ro
+      - ../../Document/api-specs:/usr/share/nginx/html/specs/Document/api-specs:ro
+      - ../../AI/pipeline/api-specs:/usr/share/nginx/html/specs/AI/pipeline/api-specs:ro

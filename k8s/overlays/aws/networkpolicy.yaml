@@ -1,0 +1,540 @@
+# 앱과 migration/preflight에만 적용한다. Strimzi·KEDA는 이 deny 정책 대상이 아니다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-app-default-deny
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+      - document-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+      - converter
+      - access-migration
+      - access-db-preflight
+      - document-migration
+      - document-db-preflight
+      - ai-migration
+      - ai-db-preflight
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-app-dns
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+      - document-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+      - converter
+      - access-migration
+      - access-db-preflight
+      - document-migration
+      - document-db-preflight
+      - ai-migration
+      - ai-db-preflight
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-app-https
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+      - document-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+      - converter
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+    ports:
+    - protocol: TCP
+      port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-access-mail
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+    ports:
+    - protocol: TCP
+      port: REPLACE_ME_SMTP_PORT
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-app-database
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+      - document-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+      - access-migration
+      - access-db-preflight
+      - document-migration
+      - document-db-preflight
+      - ai-migration
+      - ai-db-preflight
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: REPLACE_ME_VPC_CIDR
+    ports:
+    - protocol: TCP
+      port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-app-redis
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+      - document-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: REPLACE_ME_VPC_CIDR
+    ports:
+    - protocol: TCP
+      port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-internal-access-svc
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - document-svc
+          - pipeline-api
+          - ingest-worker
+          - pipeline-agent-worker
+          - edit-event-consumer
+          - query-task-worker
+          - agent-task-worker
+          - maintenance-task-worker
+    ports:
+    - protocol: TCP
+      port: 8081
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-call-access-svc
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - document-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - access-svc
+    ports:
+    - protocol: TCP
+      port: 8081
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-internal-document-svc
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - document-svc
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - access-svc
+          - pipeline-api
+          - ingest-worker
+          - pipeline-agent-worker
+          - edit-event-consumer
+          - query-task-worker
+          - agent-task-worker
+          - maintenance-task-worker
+    ports:
+    - protocol: TCP
+      port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-call-document-svc
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - document-svc
+    ports:
+    - protocol: TCP
+      port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-internal-pipeline-api
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - pipeline-api
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - document-svc
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-call-pipeline-api
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - document-svc
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - pipeline-api
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-internal-converter
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - converter
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - document-svc
+          - pipeline-api
+          - ingest-worker
+          - pipeline-agent-worker
+          - edit-event-consumer
+          - query-task-worker
+          - agent-task-worker
+          - maintenance-task-worker
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-call-converter
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - document-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - converter
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-alb-access-svc
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - access-svc
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: REPLACE_ME_ALB_SUBNET_CIDR_1
+    - ipBlock:
+        cidr: REPLACE_ME_ALB_SUBNET_CIDR_2
+    ports:
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 8082
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-alb-document-svc
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - document-svc
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: REPLACE_ME_ALB_SUBNET_CIDR_1
+    - ipBlock:
+        cidr: REPLACE_ME_ALB_SUBNET_CIDR_2
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8082
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-app-kafka
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - document-svc
+      - pipeline-api
+      - ingest-worker
+      - pipeline-agent-worker
+      - edit-event-consumer
+      - query-task-worker
+      - agent-task-worker
+      - maintenance-task-worker
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          strimzi.io/cluster: kafka
+          strimzi.io/name: kafka-kafka
+    ports:
+    - protocol: TCP
+      port: 9092

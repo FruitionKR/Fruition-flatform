@@ -1,0 +1,206 @@
+x-pipeline-image: &pipeline-image fruition-pipeline-dev:local
+
+x-ai-task-worker: &ai-task-worker
+  image: *pipeline-image
+  restart: unless-stopped
+  command: ["python", "-m", "app.workers.task_worker"]
+  environment: &ai-task-environment
+    AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+    DOCUMENT_INTERNAL_BASE_URL: http://host.docker.internal:8080
+    ACCESS_INTERNAL_BASE_URL: http://host.docker.internal:8081
+    KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    AI_TASK_EVENT_TOPIC: ${AI_TASK_EVENT_TOPIC:-ai.task.event}
+    REDIS_HOST: redis
+    REDIS_PORT: "6379"
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+    QUERY_EMBEDDING_MODE: ${QUERY_EMBEDDING_MODE:-bge-m3}
+    QUERY_EVIDENCE_LIMIT: ${QUERY_EVIDENCE_LIMIT:-8}
+    QUERY_EVALUATOR_MODE: ${QUERY_EVALUATOR_MODE:-web}
+    QUERY_EVALUATOR_MAX_ATTEMPTS: ${QUERY_EVALUATOR_MAX_ATTEMPTS:-2}
+    QUERY_WEB_SEARCH_MAX_RESULTS: ${QUERY_WEB_SEARCH_MAX_RESULTS:-5}
+    QUERY_WEB_SEARCH_TIMEOUT_SECONDS: ${QUERY_WEB_SEARCH_TIMEOUT_SECONDS:-10}
+    QUERY_MIN_INTERNAL_RELEVANCE_SCORE: ${QUERY_MIN_INTERNAL_RELEVANCE_SCORE:-0.5}
+    AGENT_SKILLS_ENABLED: ${AGENT_SKILLS_ENABLED:-true}
+    AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-local-agent-internal}
+    INTERNAL_CALLBACK_TOKEN: ${INTERNAL_CALLBACK_TOKEN:-local-internal-callback}
+    S3_ENDPOINT: http://minio:9000
+    S3_BUCKET: ${S3_BUCKET:-fruition-storage}
+    S3_ACCESS_KEY: ${S3_ACCESS_KEY:-fruition}
+    S3_SECRET_KEY: ${S3_SECRET_KEY:-fruition_dev_secret}
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    pipeline-api:
+      condition: service_healthy
+    postgresql:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  pipeline-api:
+    image: *pipeline-image
+    build:
+      context: ../../AI/pipeline
+    container_name: fruition-pipeline-api-dev
+    restart: unless-stopped
+    environment:
+      # AI runtime 저장소는 모두 ai_db가 소유한다.
+      AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      DOCUMENT_INTERNAL_BASE_URL: http://host.docker.internal:8080
+      ACCESS_INTERNAL_BASE_URL: http://host.docker.internal:8081
+      AGENT_BACKEND_URL: http://host.docker.internal:8080
+      # ai_db 스키마 적용(멱등)은 pipeline-api 기동 시에만 수행한다
+      AI_DB_MIGRATION_URL: postgresql://${AI_DB_MIGRATION_USER:-ai_migration}:${AI_DB_MIGRATION_PASSWORD:-ai_migration_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      WIKI_SEMANTIC_MAX_WORKERS: ${WIKI_SEMANTIC_MAX_WORKERS:-4}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-local-pilot-dev}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      QUERY_EMBEDDING_MODE: ${QUERY_EMBEDDING_MODE:-bge-m3}
+      QUERY_EVIDENCE_LIMIT: ${QUERY_EVIDENCE_LIMIT:-8}
+      QUERY_EVALUATOR_MODE: ${QUERY_EVALUATOR_MODE:-web}
+      QUERY_EVALUATOR_MAX_ATTEMPTS: ${QUERY_EVALUATOR_MAX_ATTEMPTS:-2}
+      QUERY_WEB_SEARCH_MAX_RESULTS: ${QUERY_WEB_SEARCH_MAX_RESULTS:-5}
+      QUERY_WEB_SEARCH_TIMEOUT_SECONDS: ${QUERY_WEB_SEARCH_TIMEOUT_SECONDS:-10}
+      QUERY_MIN_INTERNAL_RELEVANCE_SCORE: ${QUERY_MIN_INTERNAL_RELEVANCE_SCORE:-0.5}
+      AGENT_SKILLS_ENABLED: ${AGENT_SKILLS_ENABLED:-true}
+      SKILL_API_ENABLED: ${SKILL_API_ENABLED:-true}
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-local-agent-internal}
+      INTERNAL_CALLBACK_TOKEN: ${INTERNAL_CALLBACK_TOKEN:-local-internal-callback}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-fruition-storage}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-fruition}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-fruition_dev_secret}
+    ports:
+      - "127.0.0.1:${PIPELINE_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+  ingest-worker:
+    image: *pipeline-image
+    container_name: fruition-ingest-worker-dev
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.ingest_worker"]
+    environment:
+      # ingest는 ai_db와 document-svc 내부 API만 사용한다.
+      AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      DOCUMENT_INTERNAL_BASE_URL: http://host.docker.internal:8080
+      ACCESS_INTERNAL_BASE_URL: http://host.docker.internal:8081
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      INGEST_COMMAND_TOPIC: ${INGEST_COMMAND_TOPIC:-ai.ingest.command}
+      MAINTENANCE_COMMAND_TOPIC: ${MAINTENANCE_COMMAND_TOPIC:-ai.maintenance.command}
+      AI_TASK_EVENT_TOPIC: ${AI_TASK_EVENT_TOPIC:-ai.task.event}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      WIKI_SEMANTIC_MAX_WORKERS: ${WIKI_SEMANTIC_MAX_WORKERS:-4}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-local-pilot-dev}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      INTERNAL_CALLBACK_TOKEN: ${INTERNAL_CALLBACK_TOKEN:-local-internal-callback}
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-fruition-storage}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-fruition}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-fruition_dev_secret}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      pipeline-api:
+        condition: service_healthy
+      postgresql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  query-task-worker:
+    <<: *ai-task-worker
+    container_name: fruition-query-task-worker-dev
+    environment:
+      <<: *ai-task-environment
+      AI_COMMAND_TOPIC: ${QUERY_COMMAND_TOPIC:-ai.query.command}
+      AI_COMMAND_CONSUMER_GROUP: query-task-worker
+
+  agent-task-worker:
+    <<: *ai-task-worker
+    container_name: fruition-agent-task-worker-dev
+    environment:
+      <<: *ai-task-environment
+      AI_COMMAND_TOPIC: ${AGENT_COMMAND_TOPIC:-ai.agent.command}
+      AI_COMMAND_CONSUMER_GROUP: agent-task-worker
+
+  maintenance-task-worker:
+    <<: *ai-task-worker
+    container_name: fruition-maintenance-task-worker-dev
+    environment:
+      <<: *ai-task-environment
+      AI_COMMAND_TOPIC: ${MAINTENANCE_COMMAND_TOPIC:-ai.maintenance.command}
+      AI_COMMAND_CONSUMER_GROUP: maintenance-task-worker
+      QUERY_EVIDENCE_LIMIT: ${POST_INGEST_EVIDENCE_LIMIT:-3}
+
+  edit-event-consumer:
+    image: *pipeline-image
+    container_name: fruition-edit-event-consumer-dev
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.edit_event_consumer"]
+    environment:
+      # document.edit.event → ai_db document_derived_state 추적 (core_db 접속 없음)
+      AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      DOCUMENT_EDIT_EVENT_TOPIC: ${DOCUMENT_EDIT_EVENT_TOPIC:-document.edit.event}
+    depends_on:
+      pipeline-api:
+        condition: service_healthy
+      postgresql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  pipeline-agent-worker:
+    image: *pipeline-image
+    container_name: fruition-pipeline-agent-worker-dev
+    restart: unless-stopped
+    command: ["python", "agent_worker.py"]
+    environment:
+      AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AGENT_BACKEND_URL: http://host.docker.internal:8080
+      AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-local-agent-internal}
+      AGENT_SKILLS_ENABLED: ${AGENT_SKILLS_ENABLED:-true}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      pipeline-api:
+        condition: service_healthy
+      postgresql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,sys; sys.exit(b'agent_worker.py' not in pathlib.Path('/proc/1/cmdline').read_bytes())"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,49 @@
+name: Web Services
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/web-services.yml'
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - 'infra/**'
+      - '.github/workflows/web-services.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-compose:
+    name: Docker Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Compose config
+        run: docker compose --env-file infra/.env.example -f infra/compose.infra.yml config
+
+      - name: Start web service dependencies
+        # one-shot init 컨테이너(minio-init·kafka-init)는 exit(0)여도 --wait가 실패로 처리하므로
+        # 전체는 -d로 띄우고, --wait는 장기 실행 서비스에만 건다.
+        run: |
+          docker compose --env-file infra/.env.example -f infra/compose.infra.yml up -d
+          docker compose --env-file infra/.env.example -f infra/compose.infra.yml up -d --wait --wait-timeout 120 postgresql kafka redis minio
+
+      - name: Check init container results
+        run: |
+          for c in fruition-minio-init-dev fruition-kafka-init-dev; do
+            exit_code=$(docker wait "$c")
+            echo "$c exited with $exit_code"
+            test "$exit_code" = "0"
+          done
+
+      - name: Stop web service dependencies
+        if: always()
+        run: docker compose --env-file infra/.env.example -f infra/compose.infra.yml down -v

@@ -1,0 +1,92 @@
+# 로컬 지표 확인용 선택 스택. 백엔드 actuator(관리 포트)를 Prometheus가 긁고 Grafana가 그린다.
+# 업무 기능과 무관하므로 dev-up.sh는 이 스택을 띄우지 않는다 — 필요할 때만 올린다.
+#   docker compose -f infra/compose.monitoring.yml up -d
+name: fruition-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.6.0
+    container_name: fruition-prometheus
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # 로컬 개발용이라 보존 기간을 짧게 둔다. 디스크가 무한히 늘지 않는다.
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    # infra: pipeline-api는 127.0.0.1에만 publish돼 host.docker.internal로 닿지 않는다.
+    # 같은 네트워크에 붙어 컨테이너 이름으로 긁는다.
+    networks:
+      - default
+      - infra
+    # 스크레이프 대상이 호스트에서 도는 bootRun 프로세스다.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Kafka 브로커에 직접 물어 consumer group별 lag을 낸다.
+  # 워커(AI)는 Python이라 자체 지표가 없다 — 브로커 바깥에서 관측하면 코드 변경 없이
+  # ingest·query·agent·maintenance 워커의 적체를 전부 볼 수 있다.
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    container_name: fruition-kafka-exporter
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # EXTERNAL 리스너는 localhost:9092로 광고돼 컨테이너에서 쓸 수 없다. INTERNAL로 붙는다.
+    command: ["--kafka.server=kafka:19092"]
+    networks:
+      - default
+      - infra
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9308/metrics"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana-oss:12.0.0
+    container_name: fruition-grafana
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      # 로컬 전용. 포트를 127.0.0.1에만 바인딩하므로 외부에서 닿지 않는다.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    # 프론트엔드가 3000을 쓰므로 3001로 낸다.
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      # 저장소에 커밋한 대시보드. provisioning/dashboards/fruition.yml이 이 경로를 읽는다.
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+networks:
+  default:
+  # compose.infra.yml(project: fruition-mvp-dev)이 만드는 네트워크. 먼저 떠 있어야 한다.
+  infra:
+    external: true
+    name: fruition-mvp-dev_default
+
+volumes:
+  prometheus-data:
+  grafana-data:

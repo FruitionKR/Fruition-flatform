@@ -1,0 +1,15 @@
+# 저장소 밖의 feedback.tfvars로 복사해 배포 시 채운다.
+# SMTP 비밀값은 파일에 쓰지 않고 TF_VAR_smtp_username / TF_VAR_smtp_password로 주입한다.
+budget_email            = "REPLACE_ME_BUDGET_EMAIL"
+eks_public_access_cidrs = ["REPLACE_ME_FIXED_EGRESS_CIDR"]
+smtp_host               = "REPLACE_ME_SMTP_HOST"
+smtp_port               = 587
+mail_from               = "REPLACE_ME_MAIL_FROM"
+
+# 실제 배포 계정의 서울 EKS 1.35 호환 build를 조회해 입력한다.
+eks_addon_versions = {
+  vpc-cni            = "REPLACE_ME_VPC_CNI_BUILD"
+  coredns            = "REPLACE_ME_COREDNS_BUILD"
+  kube-proxy         = "REPLACE_ME_KUBE_PROXY_BUILD"
+  aws-ebs-csi-driver = "REPLACE_ME_EBS_CSI_BUILD"
+}

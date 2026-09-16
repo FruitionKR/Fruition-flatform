@@ -1,0 +1,91 @@
+# Kafka `document.edit.event` 컨슈머 (consumer group: derived-state-tracker).
+# ai_db document_derived_state에 문서별 최신 편집 상태를 upsert해 파생물 stale을 추적한다.
+# ingest-worker와 같은 이미지를 쓰고 command만 다르다. HTTP 서버가 없어 probe는
+# 프로세스 생존(컨테이너 종료 시 재시작) 수준으로 둔다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edit-event-consumer
+  namespace: fruition
+  labels:
+    app: edit-event-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edit-event-consumer
+  template:
+    metadata:
+      labels:
+        app: edit-event-consumer
+    spec:
+      containers:
+        - name: edit-event-consumer
+          image: fruition-mvp-dev-ingest-worker:latest
+          imagePullPolicy: Never
+          command: ["python", "-m", "app.workers.edit_event_consumer"]
+          env:
+            - name: AI_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DATABASE_URL
+            - name: AI_DB_MIGRATION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DB_MIGRATION_URL
+            - name: INTERNAL_CALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: INTERNAL_CALLBACK_TOKEN
+            - name: AGENT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AGENT_INTERNAL_TOKEN
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_SECRET_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: OPENAI_API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: GEMINI_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: ANTHROPIC_API_KEY
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: LANGSMITH_API_KEY
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: TAVILY_API_KEY
+          envFrom:
+            - configMapRef:
+                name: fruition-config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

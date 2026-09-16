@@ -1,0 +1,131 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: access-migration
+  namespace: fruition
+  labels:
+    app.kubernetes.io/component: migration
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: migration
+        app: access-migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: fruition-access-migration
+      automountServiceAccountToken: false
+      containers:
+      - name: migration
+        image: fruition-access-svc:dev
+        imagePullPolicy: IfNotPresent
+        args:
+        - --migrate-only
+        env:
+        - name: POSTGRES_HOST
+          value: REPLACE_ME_ACCESS_RDS_ENDPOINT
+        - name: POSTGRES_PORT
+          value: '5432'
+        - name: ACCESS_DB_NAME
+          value: access_db
+        - name: ACCESS_DB_MIGRATION_USER
+          value: access_migration
+        - name: PGSSLMODE
+          value: require
+        envFrom:
+        - secretRef:
+            name: fruition-access-migration
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: document-migration
+  namespace: fruition
+  labels:
+    app.kubernetes.io/component: migration
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: migration
+        app: document-migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: fruition-document-migration
+      automountServiceAccountToken: false
+      containers:
+      - name: migration
+        image: fruition-document-svc:dev
+        imagePullPolicy: IfNotPresent
+        args:
+        - --migrate-only
+        env:
+        - name: POSTGRES_HOST
+          value: REPLACE_ME_CORE_RDS_ENDPOINT
+        - name: POSTGRES_PORT
+          value: '5432'
+        - name: CORE_DB_NAME
+          value: core_db
+        - name: CORE_DB_MIGRATION_USER
+          value: core_migration
+        - name: PGSSLMODE
+          value: require
+        envFrom:
+        - secretRef:
+            name: fruition-document-migration
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-migration
+  namespace: fruition
+  labels:
+    app.kubernetes.io/component: migration
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: migration
+        app: ai-migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: fruition-ai-migration
+      automountServiceAccountToken: false
+      containers:
+      - name: migration
+        image: fruition-mvp-dev-pipeline-api:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - -m
+        - app.modules.wiki_ingestion.infrastructure.migrate_ai_schema
+        envFrom:
+        - secretRef:
+            name: fruition-ai-migration
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+        env:
+        - name: PGSSLMODE
+          value: require

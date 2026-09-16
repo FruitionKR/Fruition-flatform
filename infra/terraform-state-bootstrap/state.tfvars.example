@@ -1,0 +1,2 @@
+# 새 환경 최초 bootstrap에만 사용한다. 기존 state bucket이 있으면 먼저 state를 복구한다.
+state_bucket_name = "REPLACE_ME_GLOBALLY_UNIQUE_STATE_BUCKET"

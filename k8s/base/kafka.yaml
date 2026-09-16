@@ -1,0 +1,126 @@
+# Strimzi Kafka (KRaft, single node) + ai.ingest.command 토픽.
+# 사전 조건: Strimzi operator가 fruition namespace에 설치되어 있어야 한다 (README 참조).
+# bootstrap DNS: kafka-kafka-bootstrap.fruition.svc:9092
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: dual-role
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  replicas: 1
+  roles:
+    - controller
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        deleteClaim: true
+        kraftMetadata: shared
+  resources:
+    requests:
+      cpu: 250m
+      memory: 768Mi
+    limits:
+      memory: 1536Mi
+  jvmOptions:
+    -Xms: 512m
+    -Xmx: 512m
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: kafka
+  namespace: fruition
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      # single broker 구성
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+      auto.create.topics.enable: false
+  entityOperator:
+    topicOperator: {}
+---
+# partition 수 = ingest worker 병렬 상한. document_id key로 문서별 순서 보장.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: ai.ingest.command
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 12
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: ai.query.command
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 12
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: ai.agent.command
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 12
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: ai.maintenance.command
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 12
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: ai.task.event
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 12
+  replicas: 1
+---
+# 문서 편집 outbox 이벤트 (key=document_id)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: document.edit.event
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 12
+  replicas: 1

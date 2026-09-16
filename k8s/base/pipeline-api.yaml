@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-api
+  namespace: fruition
+  labels:
+    app: pipeline-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pipeline-api
+  template:
+    metadata:
+      labels:
+        app: pipeline-api
+    spec:
+      containers:
+        - name: pipeline-api
+          image: fruition-mvp-dev-pipeline-api:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: AI_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DATABASE_URL
+            - name: AI_DB_MIGRATION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_DB_MIGRATION_URL
+            - name: INTERNAL_CALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: INTERNAL_CALLBACK_TOKEN
+            - name: AGENT_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AGENT_INTERNAL_TOKEN
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_SECRET_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: OPENAI_API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: GEMINI_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: ANTHROPIC_API_KEY
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: LANGSMITH_API_KEY
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: TAVILY_API_KEY
+          envFrom:
+            - configMapRef:
+                name: fruition-config
+          volumeMounts:
+            - name: runs
+              mountPath: /app/runs
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: runs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pipeline-api
+  namespace: fruition
+spec:
+  type: ClusterIP
+  selector:
+    app: pipeline-api
+  ports:
+    - port: 8000
+      targetPort: 8000

@@ -1,0 +1,42 @@
+# ALB Ingress (AWS Load Balancer Controller 필요 — infra/terraform README의 addon 절차 참조).
+# Vercel next.config.mjs rewrite가 path 분기를 이미 수행하므로 ALB는 host 기반 라우팅만 한다:
+#   NEXT_PUBLIC_BACKEND_URL = https://api.<domain>    → document-svc
+#   NEXT_PUBLIC_ACCESS_URL  = https://access.<domain> → access-svc
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fruition-api
+  namespace: fruition
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: "REPLACE_ME_ACM_CERT_ARN"
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    # actuator는 관리 포트로 분리돼 있다. 트래픽 포트(8080/8081)에는 /actuator가 없다.
+    alb.ingress.kubernetes.io/healthcheck-port: "8082"
+    alb.ingress.kubernetes.io/group.name: fruition
+spec:
+  ingressClassName: alb
+  rules:
+    - host: api.REPLACE_ME_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: document-svc
+                port:
+                  number: 8080
+    - host: access.REPLACE_ME_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081

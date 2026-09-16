@@ -1,0 +1,16 @@
+{
+  "account_id": "REPLACE_ME_ACCOUNT_ID",
+  "access_rds_endpoint": "REPLACE_ME_ACCESS_RDS_ENDPOINT",
+  "core_rds_endpoint": "REPLACE_ME_CORE_RDS_ENDPOINT",
+  "redis_endpoint": "REPLACE_ME_REDIS_ENDPOINT",
+  "s3_bucket": "REPLACE_ME_S3_BUCKET",
+  "app_domain": "REPLACE_ME_APP_DOMAIN",
+  "domain": "REPLACE_ME_DOMAIN",
+  "acm_cert_arn": "REPLACE_ME_ACM_CERT_ARN",
+  "document_storage_role_arn": "REPLACE_ME_DOCUMENT_STORAGE_ROLE_ARN",
+  "pipeline_storage_role_arn": "REPLACE_ME_PIPELINE_STORAGE_ROLE_ARN",
+  "vpc_cidr": "REPLACE_ME_VPC_CIDR",
+  "alb_subnet_cidr_1": "REPLACE_ME_ALB_SUBNET_CIDR_1",
+  "alb_subnet_cidr_2": "REPLACE_ME_ALB_SUBNET_CIDR_2",
+  "smtp_port": "587"
+}

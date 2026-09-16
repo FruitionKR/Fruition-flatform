@@ -1,0 +1,22 @@
+# 내부 전용 서비스(pipeline-api, converter, ingest-worker)는
+# fruition namespace 내부 pod에서 오는 트래픽만 수신한다.
+# (kind v0.23+ 기본 CNI는 NetworkPolicy를 시행한다)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: internal-only-ingress
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - pipeline-api
+          - converter
+          - ingest-worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}

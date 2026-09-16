@@ -1,0 +1,243 @@
+# AWS(EKS) overlay — docs/backlog/Fruition_AWS_MSA_Architecture.md §8 소규모 profile.
+# 상태 계층은 RDS·ElastiCache·S3(Terraform: infra/terraform), Kafka는 base의 Strimzi 그대로.
+# scripts/aws_deploy.py가 임시 사본에서 입력 치환·검증한 뒤 순차 적용한다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - networkpolicy.yaml
+  - ../../base
+  - ingress.yaml
+  - external-secrets.yaml
+  - service-accounts.yaml
+  - migration-jobs.yaml
+
+# 배포 스크립트가 임시 사본의 태그를 커밋 SHA로 설정한다.
+images:
+  - name: fruition-document-svc
+    newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-document-svc
+    newTag: latest
+  - name: fruition-access-svc
+    newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-access-svc
+    newTag: latest
+  # pipeline-api·ingest-worker는 같은 이미지(fruition-pipeline)
+  - name: fruition-mvp-dev-pipeline-api
+    newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline
+    newTag: latest
+  - name: fruition-mvp-dev-ingest-worker
+    newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline
+    newTag: latest
+  - name: fruition-converter
+    newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-converter
+    newTag: latest
+
+patches:
+  - patch: |-
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: internal-only-ingress
+        namespace: fruition
+      $patch: delete
+  # 관리형 서비스 endpoint 주입
+  - path: configmap-aws.yaml
+  - path: workload-credentials.yaml
+
+  # NodePort(kind 전용) → ClusterIP. ALB Ingress가 대신 노출한다.
+  - target:
+      kind: Service
+      name: document-svc
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: ClusterIP
+      - op: remove
+        path: /spec/ports/0/nodePort
+  - target:
+      kind: Service
+      name: access-svc
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: ClusterIP
+      - op: remove
+        path: /spec/ports/0/nodePort
+
+  # imagePullPolicy Never(kind 전용) → IfNotPresent + §8.2 resource 상향
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: document-svc
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: document-svc
+                imagePullPolicy: IfNotPresent
+                env:
+                  - name: POSTGRES_HOST
+                    value: "REPLACE_ME_CORE_RDS_ENDPOINT"
+                resources:
+                  requests:
+                    cpu: 500m
+                    memory: 1Gi
+                  limits:
+                    memory: 2Gi
+  # POSTGRES_HOST: RDS가 access/core 2대로 나뉘어 deployment별 env로 주입 (envFrom보다 우선)
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: access-svc
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: access-svc
+                imagePullPolicy: IfNotPresent
+                env:
+                  - name: POSTGRES_HOST
+                    value: "REPLACE_ME_ACCESS_RDS_ENDPOINT"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: pipeline-api
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: pipeline-api
+                imagePullPolicy: IfNotPresent
+                resources:
+                  requests:
+                    cpu: 500m
+                    memory: 1Gi
+                  limits:
+                    memory: 2Gi
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: pipeline-agent-worker
+        namespace: fruition
+      spec:
+        replicas: 1
+        template:
+          spec:
+            containers:
+              - name: pipeline-agent-worker
+                imagePullPolicy: IfNotPresent
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ingest-worker
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: ingest-worker
+                imagePullPolicy: IfNotPresent
+                resources:
+                  requests:
+                    cpu: "1"
+                    memory: 2Gi
+                  limits:
+                    memory: 4Gi
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: converter
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: converter
+                imagePullPolicy: IfNotPresent
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: edit-event-consumer
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: edit-event-consumer
+                imagePullPolicy: IfNotPresent
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: query-task-worker
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: query-task-worker
+                imagePullPolicy: IfNotPresent
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agent-task-worker
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agent-task-worker
+                imagePullPolicy: IfNotPresent
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: maintenance-task-worker
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: maintenance-task-worker
+                imagePullPolicy: IfNotPresent
+  # AI 비동기 처리와 변환을 Spot node group에 배치한다.
+  - target:
+      kind: Deployment
+      name: (ingest-worker|pipeline-agent-worker|query-task-worker|agent-task-worker|maintenance-task-worker|edit-event-consumer|converter)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          fruition.io/node-role: ai-worker
+      - op: add
+        path: /spec/template/spec/tolerations
+        value:
+          - key: fruition.io/ai-worker
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+
+  - target:
+      kind: Kafka
+      name: kafka
+    patch: |-
+      - op: add
+        path: /spec/kafka/version
+        value: "4.3.0"
+  - target:
+      kind: KafkaNodePool
+      name: dual-role
+    patch: |-
+      - op: add
+        path: /spec/storage/volumes/0/class
+        value: gp3

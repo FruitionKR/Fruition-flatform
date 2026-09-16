@@ -1,0 +1,175 @@
+name: fruition-mvp-dev
+
+services:
+  postgresql:
+    image: postgres:16-alpine
+    container_name: fruition-postgresql-dev
+    restart: unless-stopped
+    # access/core/ai 3개 database·runtime/migration 계정 분리 (docs/backlog/Fruition_AWS_MSA_Architecture.md §3)
+    # 계정·권한 생성은 postgres/init-db-isolation.sh가 최초 기동 시 수행한다.
+    environment:
+      DB_ISOLATION_TARGET: all
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-fruition_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-fruition_admin_dev_password}
+      ACCESS_DB_NAME: ${ACCESS_DB_NAME:-access_db}
+      ACCESS_DB_RUNTIME_USER: ${ACCESS_DB_RUNTIME_USER:-access_runtime}
+      ACCESS_DB_RUNTIME_PASSWORD: ${ACCESS_DB_RUNTIME_PASSWORD:-access_runtime_dev_password}
+      ACCESS_DB_MIGRATION_USER: ${ACCESS_DB_MIGRATION_USER:-access_migration}
+      ACCESS_DB_MIGRATION_PASSWORD: ${ACCESS_DB_MIGRATION_PASSWORD:-access_migration_dev_password}
+      CORE_DB_NAME: ${CORE_DB_NAME:-core_db}
+      CORE_DB_RUNTIME_USER: ${CORE_DB_RUNTIME_USER:-core_runtime}
+      CORE_DB_RUNTIME_PASSWORD: ${CORE_DB_RUNTIME_PASSWORD:-core_runtime_dev_password}
+      CORE_DB_MIGRATION_USER: ${CORE_DB_MIGRATION_USER:-core_migration}
+      CORE_DB_MIGRATION_PASSWORD: ${CORE_DB_MIGRATION_PASSWORD:-core_migration_dev_password}
+      AI_DB_NAME: ${AI_DB_NAME:-ai_db}
+      AI_DB_RUNTIME_USER: ${AI_DB_RUNTIME_USER:-ai_runtime}
+      AI_DB_RUNTIME_PASSWORD: ${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}
+      AI_DB_MIGRATION_USER: ${AI_DB_MIGRATION_USER:-ai_migration}
+      AI_DB_MIGRATION_PASSWORD: ${AI_DB_MIGRATION_PASSWORD:-ai_migration_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+      - ./postgres/init-db-isolation.sh:/docker-entrypoint-initdb.d/10-db-isolation.sh:ro
+      - ./postgres/db-isolation-config.bash:/docker-entrypoint-initdb.d/db-isolation-config.bash:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # 계정 격리 검증 (docker compose --profile validation up db-isolation-validate)
+  db-isolation-validate:
+    image: postgres:16-alpine
+    container_name: fruition-db-isolation-validate
+    profiles: ["validation"]
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      DB_ISOLATION_TARGET: all
+      PGHOST: postgresql
+      PGPORT: 5432
+      POSTGRES_ADMIN_USER: ${POSTGRES_ADMIN_USER:-fruition_admin}
+      POSTGRES_ADMIN_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-fruition_admin_dev_password}
+      ACCESS_DB_NAME: ${ACCESS_DB_NAME:-access_db}
+      ACCESS_DB_RUNTIME_USER: ${ACCESS_DB_RUNTIME_USER:-access_runtime}
+      ACCESS_DB_RUNTIME_PASSWORD: ${ACCESS_DB_RUNTIME_PASSWORD:-access_runtime_dev_password}
+      ACCESS_DB_MIGRATION_USER: ${ACCESS_DB_MIGRATION_USER:-access_migration}
+      ACCESS_DB_MIGRATION_PASSWORD: ${ACCESS_DB_MIGRATION_PASSWORD:-access_migration_dev_password}
+      CORE_DB_NAME: ${CORE_DB_NAME:-core_db}
+      CORE_DB_RUNTIME_USER: ${CORE_DB_RUNTIME_USER:-core_runtime}
+      CORE_DB_RUNTIME_PASSWORD: ${CORE_DB_RUNTIME_PASSWORD:-core_runtime_dev_password}
+      CORE_DB_MIGRATION_USER: ${CORE_DB_MIGRATION_USER:-core_migration}
+      CORE_DB_MIGRATION_PASSWORD: ${CORE_DB_MIGRATION_PASSWORD:-core_migration_dev_password}
+      AI_DB_NAME: ${AI_DB_NAME:-ai_db}
+      AI_DB_RUNTIME_USER: ${AI_DB_RUNTIME_USER:-ai_runtime}
+      AI_DB_RUNTIME_PASSWORD: ${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}
+      AI_DB_MIGRATION_USER: ${AI_DB_MIGRATION_USER:-ai_migration}
+      AI_DB_MIGRATION_PASSWORD: ${AI_DB_MIGRATION_PASSWORD:-ai_migration_dev_password}
+    volumes:
+      - ./postgres/validate-db-isolation.sh:/usr/local/bin/validate-db-isolation:ro
+      - ./postgres/db-isolation-config.bash:/usr/local/bin/db-isolation-config.bash:ro
+    entrypoint: ["/bin/bash", "/usr/local/bin/validate-db-isolation"]
+
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: fruition-kafka-dev
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      # 컨테이너(worker)는 kafka:19092, 호스트(backend bootRun)는 localhost:9092로 접속
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:${KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  kafka-init:
+    image: apache/kafka:3.9.0
+    container_name: fruition-kafka-init-dev
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      # partition 수 = ingest worker 병렬 상한. document_id key로 문서별 순서를 보장한다.
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic ai.ingest.command --partitions 12 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic ai.query.command --partitions 12 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic ai.agent.command --partitions 12 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic ai.maintenance.command --partitions 12 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic ai.task.event --partitions 12 --replication-factor 1
+        # 문서 편집 outbox 이벤트 (key=document_id)
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic document.edit.event --partitions 12 --replication-factor 1
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    container_name: fruition-redis-dev
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: fruition-minio-dev
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-fruition}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-fruition_dev_secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: fruition-minio-init-dev
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-fruition}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-fruition_dev_secret}
+      S3_BUCKET: ${S3_BUCKET:-fruition-storage}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
+          sleep 1;
+        done &&
+        mc mb --ignore-existing "local/$${S3_BUCKET}" &&
+        mc anonymous set none "local/$${S3_BUCKET}"
+    restart: "no"
+
+volumes:
+  postgresql-data:
+  minio-data:
