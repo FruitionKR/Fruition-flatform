@@ -20,9 +20,10 @@ jobs:
     env:
       AWS_REGION: ap-northeast-2
       AWS_EC2_METADATA_DISABLED: 'true'
-      KUBECONFIG: ${{ runner.temp }}/fruition-check-kubeconfig
       DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
     steps:
+      - name: Set temporary kubeconfig path
+        run: echo "KUBECONFIG=$RUNNER_TEMP/fruition-check-kubeconfig" >> "$GITHUB_ENV"
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false

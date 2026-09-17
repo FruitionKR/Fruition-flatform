@@ -2,10 +2,10 @@ name: AWS IaC contracts
 
 on:
   pull_request:
-    paths: ['infra/**', 'k8s/**', 'scripts/**', '.github/workflows/**']
+    paths: ['infra/**', 'k8s/**', 'scripts/**', '.github/workflows/**', '.github/actionlint.yaml']
   push:
     branches: [dev, main, dev-msa]
-    paths: ['infra/**', 'k8s/**', 'scripts/**', '.github/workflows/**']
+    paths: ['infra/**', 'k8s/**', 'scripts/**', '.github/workflows/**', '.github/actionlint.yaml']
 
 permissions:
   contents: read
@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Validate GitHub Actions workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -shellcheck= -pyflakes=
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.15.8'

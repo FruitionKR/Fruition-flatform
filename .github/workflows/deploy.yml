@@ -36,13 +36,14 @@ jobs:
     env:
       AWS_REGION: ap-northeast-2
       AWS_EC2_METADATA_DISABLED: 'true'
-      KUBECONFIG: ${{ runner.temp }}/fruition-kubeconfig
       EKS_CLUSTER: fruition-eks
       DEPLOY_CONFIG: ${{ vars.AWS_DEPLOY_CONFIG_JSON }}
       ACTION: ${{ inputs.action }}
       RELEASE_SHA: ${{ inputs.release_sha }}
       ROLLBACK_SHA: ${{ inputs.rollback_sha }}
     steps:
+      - name: Set temporary kubeconfig path
+        run: echo "KUBECONFIG=$RUNNER_TEMP/fruition-kubeconfig" >> "$GITHUB_ENV"
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
