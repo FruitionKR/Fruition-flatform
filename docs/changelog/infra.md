@@ -2,6 +2,8 @@
 
 ## 2026-09-17
 
+- ElastiCache 생성 API가 거부한 한글 설명을 ASCII 설명으로 수정했습니다. Redis 권한·암호화·용량 설정은 유지합니다.
+
 - AWS 첫 적용에서 거부된 DB·Redis 보안 그룹 설명의 > 문자를 제거했습니다. RDS TLS 파라미터는 pending-reboot로 명시하고 CloudWatch JSON 끝 개행·Redis ACL/비활성 사용자 인증 표기를 AWS 응답과 맞춰 반복 변경을 제거했습니다. 실제 Redis 권한 검사 포함 전체 테스트 68개와 Terraform validate를 통과했습니다.
 
 - 실제 AWS 인증에서 확인한 GitHub immutable OIDC subject 형식을 지원합니다. API의 정확한 sub_claim_prefix를 필수 입력으로 받아 publisher/main과 deploy/feedback 신뢰 정책에 적용하고 저장소 이름 일치를 검증합니다. 기존 이름 전용 추정 때문에 발생하던 AssumeRoleWithWebIdentity 실패를 수정했습니다.
