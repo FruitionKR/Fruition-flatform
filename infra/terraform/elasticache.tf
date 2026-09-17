@@ -62,7 +62,7 @@ resource "aws_elasticache_user_group" "services" {
 
 resource "aws_elasticache_replication_group" "main" {
   replication_group_id       = "${var.project}-redis"
-  description                = "서비스별 ACL을 사용하는 feedback Redis"
+  description                = "Feedback Redis with per-service ACLs"
   engine                     = "redis"
   engine_version             = "7.1"
   node_type                  = "cache.t4g.micro"
