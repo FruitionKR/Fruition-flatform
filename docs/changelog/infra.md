@@ -2,6 +2,8 @@
 
 ## 2026-09-17
 
+- 실제 AWS 인증에서 확인한 GitHub immutable OIDC subject 형식을 지원합니다. API의 정확한 sub_claim_prefix를 필수 입력으로 받아 publisher/main과 deploy/feedback 신뢰 정책에 적용하고 저장소 이름 일치를 검증합니다. 기존 이름 전용 추정 때문에 발생하던 AssumeRoleWithWebIdentity 실패를 수정했습니다.
+
 - 서비스 main CI 성공 커밋을 확인해 이미지 4종을 immutable ECR 태그와 GitHub Release로 자동 게시하는 workflow를 추가했습니다. 운영자가 릴리스 ID를 선택하고 feedback 승인 후 배포하며 실제 digest를 대조합니다. main 전용 게시 IAM 권한은 배포 권한과 분리했습니다.
 - 게시 활성화는 Terraform 재적용과 Repository variables 설정 후 진행합니다. 로컬 신규 테스트 7개·기존 IaC/Runner 검사·actionlint·Terraform validate 및 실제 GitHub 읽기 검증을 통과했으며, 이미지 게시·AWS 배포 실검증은 아직 수행하지 않았습니다.
 

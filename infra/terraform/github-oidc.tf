@@ -1,4 +1,16 @@
 # §9.1: GitHub Actions는 장기 access key 대신 OIDC로 deploy role을 assume한다.
+variable "github_oidc_subject_prefix" {
+  description = "GitHub OIDC settings API의 sub_claim_prefix. Immutable subject는 owner/repository ID를 포함한다."
+  type        = string
+  validation {
+    condition = (
+      can(regex("^repo:[A-Za-z0-9_.-]+(@[0-9]+)?/[A-Za-z0-9_.-]+(@[0-9]+)?$", var.github_oidc_subject_prefix)) &&
+      replace(var.github_oidc_subject_prefix, "/@[0-9]+/", "") == "repo:${var.github_repo}"
+    )
+    error_message = "github_repo와 일치하는 실제 sub_claim_prefix를 GitHub API에서 확인해 입력하세요."
+  }
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
@@ -21,7 +33,7 @@ resource "aws_iam_role" "github_deploy" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:environment:${var.github_deploy_environment}"
+            "token.actions.githubusercontent.com:sub" = "${var.github_oidc_subject_prefix}:environment:${var.github_deploy_environment}"
           }
         }
       }
