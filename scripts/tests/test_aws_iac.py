@@ -87,7 +87,7 @@ class IaCContractTests(unittest.TestCase):
         self.assertEqual({"contents": "read"}, workflow["permissions"])
         trigger = workflow.get("on", workflow.get(True))
         for kind in ("pull_request", "push"):
-            self.assertEqual({"infra/**", "k8s/**", "scripts/**", ".github/workflows/**"}, set(trigger[kind]["paths"]))
+            self.assertEqual({"infra/**", "k8s/**", "scripts/**", ".github/workflows/**", ".github/actionlint.yaml"}, set(trigger[kind]["paths"]))
         steps = workflow["jobs"]["validate"]["steps"]
         self.assertFalse(any("configure-aws-credentials" in step.get("uses", "") for step in steps))
         script = (ROOT / "scripts/aws-iac-validate.sh").read_text()
