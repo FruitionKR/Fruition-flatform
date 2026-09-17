@@ -10,7 +10,7 @@ resource "aws_security_group" "redis" {
   vpc_id = module.vpc.vpc_id
 
   ingress {
-    description     = "EKS node -> Redis"
+    description     = "EKS nodes to Redis"
     from_port       = 6379
     to_port         = 6379
     protocol        = "tcp"
@@ -21,11 +21,12 @@ resource "aws_security_group" "redis" {
 }
 
 # Redis 7 selectors로 Access projection은 삭제만 허용한다.
+# AWS가 반환하는 정규화된 ACL 표기로 불필요한 반복 업데이트를 방지한다.
 locals {
   redis_acl = {
-    access   = "on -@all resetkeys resetchannels +ping +hello +client|setname (+eval +evalsha +incr +expire +ttl ~auth:mfa:attempts:* ~auth:email-availability:*) (+set +getdel ~oauth:exchange:*) (+scan +del ~authz:role:*)"
-    document = "on -@all resetkeys resetchannels +ping +hello +client|setname (+get +set ~authz:role:*) (+get +set +incr +expire +pexpire +del +exists +lrange +rpush +ltrim +eval +evalsha +publish +subscribe +unsubscribe ~query:* &query-events)"
-    pipeline = "on -@all resetkeys resetchannels +ping +hello +client|setname +get +setex +del ~wiki:concept-index:*"
+    access   = "on resetchannels -@all +ping +hello +client|setname (~auth:mfa:attempts:* ~auth:email-availability:* resetchannels -@all +eval +evalsha +incr +expire +ttl) (~oauth:exchange:* resetchannels -@all +set +getdel) (~authz:role:* resetchannels -@all +scan +del)"
+    document = "on resetchannels -@all +ping +hello +client|setname (~authz:role:* resetchannels -@all +get +set) (~query:* resetchannels &query-events -@all +get +set +incr +expire +pexpire +del +exists +lrange +rpush +ltrim +eval +evalsha +publish +subscribe +unsubscribe)"
+    pipeline = "on ~wiki:concept-index:* resetchannels -@all +ping +hello +client|setname +get +setex +del"
   }
 }
 
@@ -49,7 +50,8 @@ resource "aws_elasticache_user" "disabled_default" {
   user_name     = "default"
   engine        = "REDIS"
   access_string = "off -@all"
-  authentication_mode { type = "no-password-required" }
+  # AWS provider 5.x reads authentication_mode as no-password (different from input).
+  no_password_required = true
 }
 
 resource "aws_elasticache_user_group" "services" {

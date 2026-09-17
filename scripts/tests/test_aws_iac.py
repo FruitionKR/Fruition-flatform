@@ -63,7 +63,7 @@ class IaCContractTests(unittest.TestCase):
         self.assertIn('var.region == "ap-northeast-2"', variables)
         self.assertIn('var.eks_version == "1.35"', variables)
         self.assertIn('var.github_deploy_environment == "feedback"', variables)
-        self.assertIn('"no-password-required"', (ROOT / "infra/terraform/elasticache.tf").read_text())
+        self.assertRegex((ROOT / "infra/terraform/elasticache.tf").read_text(), r'no_password_required\s*=\s*true')
 
     def test_budget_delivery_keeps_webhook_out_of_state_and_scopes_permissions(self):
         budget = (ROOT / "infra/terraform/budgets.tf").read_text()

@@ -24,7 +24,7 @@ resource "aws_security_group" "rds" {
   vpc_id = module.vpc.vpc_id
 
   ingress {
-    description     = "EKS node -> PostgreSQL"
+    description     = "EKS nodes to PostgreSQL"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
@@ -40,8 +40,9 @@ resource "aws_db_parameter_group" "postgres16" {
   family = "postgres16"
 
   parameter {
-    name  = "rds.force_ssl"
-    value = "1"
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
 }
 
