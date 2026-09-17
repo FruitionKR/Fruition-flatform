@@ -83,6 +83,10 @@ AI/pipeline/.langgraph_api/
 !*.tfvars.example
 !*.tfbackend.example
 
+# 환경별 실제 배포 입력은 로컬 보관 후 GitHub Environment Variables로 이전
+/k8s/overlays/aws/deploy-config*.json
+!/k8s/overlays/aws/deploy-config.example.json
+
 # 로컬 통합 환경의 비밀 설정
 .env.*
 !.env.example

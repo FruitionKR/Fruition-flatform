@@ -65,6 +65,9 @@ class CredentialsTest(unittest.TestCase):
                 for env in container.get("env", []):
                     if "secretKeyRef" in env.get("valueFrom", {}):
                         ref = env["valueFrom"]["secretKeyRef"]
+                        if name == "document-svc" and ref["name"] in {"kafka-document", "kafka-cluster-ca-cert"}:
+                            self.assertEqual(ref["key"], "user.password" if ref["name"] == "kafka-document" else "ca.password")
+                            continue
                         self.assertEqual(ref["name"], "fruition-" + group)
                         self.assertIn(ref["key"], secrets[ref["name"]])
                         keys.add(ref["key"])

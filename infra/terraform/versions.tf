@@ -3,6 +3,10 @@ terraform {
   required_version = ">= 1.10, < 2.0"
 
   required_providers {
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.7"
+    }
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
@@ -13,7 +17,8 @@ terraform {
     }
   }
 
-  # bucket/key/region은 저장소 밖 backend 설정으로 전달한다.
+  # bucket/key/region/kms_key_id는 저장소 밖 backend 설정으로 전달한다.
+  # kms_key_id는 terraform-state-bootstrap output state_kms_key_arn 값을 사용한다.
   backend "s3" {
     use_lockfile = true
     encrypt      = true

@@ -11,6 +11,9 @@ resources:
   - external-secrets.yaml
   - service-accounts.yaml
   - migration-jobs.yaml
+  - api-disruption-budgets.yaml
+  - kafka-users.yaml
+  - kafka-trigger-auth.yaml
 
 # 배포 스크립트가 임시 사본의 태그를 커밋 SHA로 설정한다.
 images:
@@ -42,6 +45,20 @@ patches:
   # 관리형 서비스 endpoint 주입
   - path: configmap-aws.yaml
   - path: workload-credentials.yaml
+  - path: api-availability.yaml
+  - target:
+      kind: (Deployment|Job)
+    path: pod-seccomp.yaml
+  - target:
+      kind: Deployment
+      name: (access-svc|document-svc|pipeline-api|pipeline-agent-worker|ingest-worker|query-task-worker|agent-task-worker|maintenance-task-worker|edit-event-consumer)
+    path: container-security.yaml
+  - target:
+      kind: Job
+    path: container-security.yaml
+  - path: kafka-security.yaml
+  - path: kafka-client-tls.yaml
+  - path: kafka-scalers-tls.yaml
 
   # NodePort(kind 전용) → ClusterIP. ALB Ingress가 대신 노출한다.
   - target:

@@ -37,7 +37,7 @@ variable "eks_version" {
 variable "github_repo" {
   description = "GitHub Actions OIDC를 허용할 repo (owner/name)"
   type        = string
-  default     = "FruitionKR/local-pilot"
+  default     = "FruitionKR/Fruition-flatform"
 }
 
 variable "github_deploy_environment" {
@@ -50,21 +50,22 @@ variable "github_deploy_environment" {
   }
 }
 
-variable "budget_email" {
-  description = "AWS Budget 알림 수신 이메일 (필수)"
-  type        = string
+variable "eks_public_access_cidrs" {
+  description = "관리자 임시 public API IPv4 CIDR. 기본 []는 private-only; 로컬 초기 설치 때 현재 공인 IP /32만 잠시 허용"
+  type        = list(string)
+  default     = []
   validation {
-    condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.budget_email))
-    error_message = "유효한 Budget 수신 이메일이 필요합니다."
+    condition     = alltrue([for cidr in var.eks_public_access_cidrs : can(cidrnetmask(cidr)) && try(tonumber(split("/", cidr)[1]) == 32, false)])
+    error_message = "빈 목록(private-only) 또는 관리자 IPv4 /32만 허용합니다."
   }
 }
 
-variable "eks_public_access_cidrs" {
-  description = "고정 runner/VPN의 EKS public API 허용 IPv4 CIDR (필수, 전체 인터넷 금지)"
-  type        = list(string)
+variable "runner_ami_id" {
+  description = "서울 Canonical Ubuntu 24.04 amd64 AMI ID. 실제 조회한 이미지를 입력해 고정"
+  type        = string
   validation {
-    condition     = length(var.eks_public_access_cidrs) > 0 && alltrue([for cidr in var.eks_public_access_cidrs : can(cidrnetmask(cidr)) && try(tonumber(split("/", cidr)[1]) > 0, false)])
-    error_message = "명시적인 IPv4 runner/VPN CIDR이 필요하며 0.0.0.0/0은 허용하지 않습니다."
+    condition     = can(regex("^ami-[0-9a-f]{17}$", var.runner_ami_id))
+    error_message = "서울 리전에서 확인한 Ubuntu 24.04 amd64 AMI ID가 필요합니다."
   }
 }
 
@@ -76,6 +77,16 @@ variable "eks_addon_versions" {
       for version in values(var.eks_addon_versions) : can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+-eksbuild\\.[0-9]+$", version))
     ])
     error_message = "네 managed addon의 검증된 정확한 vX.Y.Z-eksbuild.N을 모두 제공해야 합니다."
+  }
+}
+
+variable "eks_admin_role_arn" {
+  description = "클러스터 관리자(break-glass) IAM role ARN. 지정하면 apply 실행 주체의 암묵적 cluster-admin(creator admin)을 끈다"
+  type        = string
+  default     = null
+  validation {
+    condition     = var.eks_admin_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/", var.eks_admin_role_arn))
+    error_message = "IAM role ARN 형식(arn:aws:iam::<account>:role/...)이어야 합니다."
   }
 }
 

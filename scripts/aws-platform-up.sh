@@ -38,7 +38,7 @@ vpc_id="$(jq -er '.cluster.resourcesVpcConfig.vpcId' <<< "$cluster")"
 [[ "$(kubectl get --raw /version | jq -r '.minor | sub("\\+.*$"; "")')" == "35" ]] || {
   echo "검토된 EKS 1.35 cluster가 아닙니다" >&2; exit 1;
 }
-kubectl apply -f "$repo_root/k8s/base/namespace.yaml"
+kubectl apply -f "$repo_root/k8s/platform/aws/namespace.yaml"
 helm repo add eks https://aws.github.io/eks-charts --force-update
 helm repo add external-secrets https://charts.external-secrets.io --force-update
 helm repo add autoscaler https://kubernetes.github.io/autoscaler --force-update
@@ -48,6 +48,7 @@ helm repo update
 helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller --version 3.5.0 \
   -n kube-system --wait --timeout 10m \
   --set clusterName=fruition-eks --set region=ap-northeast-2 --set-string "vpcId=$vpc_id" \
+  --set podMutatorWebhookConfig.failurePolicy=Fail \
   --set serviceAccount.name=aws-load-balancer-controller \
   --set-string "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$alb_role"
 helm upgrade --install external-secrets external-secrets/external-secrets --version 2.9.0 \

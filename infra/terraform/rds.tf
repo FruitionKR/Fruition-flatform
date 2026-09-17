@@ -4,12 +4,6 @@
 # - core-postgres:   core_db (문서·채팅) + 물리적으로 분리된 ai_db
 # 앱 계정(runtime/migration)은 provisioning 후 infra/postgres/init-db-isolation.sh를
 # 각 endpoint에 psql로 실행해 생성한다 (README 절차 참조).
-resource "random_password" "db_master" {
-  for_each = toset(["access", "core"])
-  length   = 32
-  special  = false
-}
-
 resource "random_password" "db_role" {
   for_each = toset([
     "access_runtime", "access_migration",
@@ -37,11 +31,17 @@ resource "aws_security_group" "rds" {
     security_groups = [module.eks.node_security_group_id]
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  # RDS는 outbound 연결을 시작하지 않는다 — egress 불필요 (탈취 경로 차단).
+}
+
+# TLS 강제: 평문 5432 접속과 VPC 내 credential 스니핑을 차단한다.
+resource "aws_db_parameter_group" "postgres16" {
+  name   = "${var.project}-postgres16"
+  family = "postgres16"
+
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"
   }
 }
 
@@ -53,11 +53,15 @@ resource "aws_db_instance" "access" {
 
   allocated_storage = 30
   storage_type      = "gp3"
+  storage_encrypted = true
 
   db_name  = "postgres"
   username = "fruition_admin"
-  password = random_password.db_master["access"].result
+  # 마스터 비밀번호는 RDS 관리 Secrets Manager secret으로 관리 — Terraform state에 남지 않는다.
+  manage_master_user_password = true
 
+  parameter_group_name   = aws_db_parameter_group.postgres16.name
+  ca_cert_identifier     = "rds-ca-rsa2048-g1"
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   multi_az               = false
@@ -68,7 +72,8 @@ resource "aws_db_instance" "access" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project}-access-postgres-final"
 
-  performance_insights_enabled = false
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+  performance_insights_enabled    = false
 }
 
 resource "aws_db_instance" "core" {
@@ -79,11 +84,15 @@ resource "aws_db_instance" "core" {
 
   allocated_storage = 30
   storage_type      = "gp3"
+  storage_encrypted = true
 
   db_name  = "postgres"
   username = "fruition_admin"
-  password = random_password.db_master["core"].result
+  # 마스터 비밀번호는 RDS 관리 Secrets Manager secret으로 관리 — Terraform state에 남지 않는다.
+  manage_master_user_password = true
 
+  parameter_group_name   = aws_db_parameter_group.postgres16.name
+  ca_cert_identifier     = "rds-ca-rsa2048-g1"
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   multi_az               = false
@@ -94,5 +103,6 @@ resource "aws_db_instance" "core" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project}-core-postgres-final"
 
-  performance_insights_enabled = false
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+  performance_insights_enabled    = false
 }

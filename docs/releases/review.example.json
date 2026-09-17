@@ -1,0 +1,6 @@
+{
+  "release_sha": "REPLACE_WITH_40_CHARACTER_RELEASE_SHA",
+  "migration_mode": "expand-only",
+  "compatibility_test_url": "REPLACE_WITH_ACTUAL_GITHUB_TEST_RECORD_URL",
+  "restore_test_url": "REPLACE_WITH_ACTUAL_GITHUB_RESTORE_DRILL_RECORD_URL"
+}

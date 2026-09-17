@@ -23,6 +23,13 @@ module "vpc" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
+  # 침해 시 네트워크 포렌식용 Flow Logs
+  enable_flow_log                                 = true
+  create_flow_log_cloudwatch_log_group            = true
+  create_flow_log_cloudwatch_iam_role             = true
+  flow_log_max_aggregation_interval               = 60
+  flow_log_cloudwatch_log_group_retention_in_days = 14
+
   # AWS Load Balancer Controller subnet 자동 탐색용 태그
   public_subnet_tags = {
     "kubernetes.io/role/elb" = 1
@@ -30,4 +37,13 @@ module "vpc" {
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = 1
   }
+}
+
+# S3 traffic bypasses charged NAT data processing. No endpoint hourly charge.
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = module.vpc.vpc_id
+  service_name      = "com.amazonaws.${var.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = module.vpc.private_route_table_ids
+  tags              = { Name = "${var.project}-s3" }
 }

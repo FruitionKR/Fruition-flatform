@@ -5,6 +5,12 @@ metadata:
   name: application-deployer
   namespace: fruition
 rules:
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [elbv2.k8s.aws]
+    resources: [targetgroupbindings]
+    verbs: [get, list, watch]
   - apiGroups: [""]
     resources: [configmaps, serviceaccounts, services]
     verbs: [get, list, watch, create, update, patch]
@@ -34,10 +40,10 @@ rules:
     resources: [externalsecrets]
     verbs: [get, list, watch, create, update, patch]
   - apiGroups: [kafka.strimzi.io]
-    resources: [kafkas, kafkanodepools, kafkatopics]
+    resources: [kafkas, kafkanodepools, kafkatopics, kafkausers]
     verbs: [get, list, watch, create, update, patch]
   - apiGroups: [keda.sh]
-    resources: [scaledobjects]
+    resources: [scaledobjects, triggerauthentications]
     verbs: [get, list, watch, create, update, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

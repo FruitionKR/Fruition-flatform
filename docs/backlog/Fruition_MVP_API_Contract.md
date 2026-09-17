@@ -379,8 +379,8 @@ Response (`200`):
 
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzM4NCJ9...",
-  "refresh_token": "3CMO2JGusOn8MAoK942ISt51y0YKhj56s4RypT7fmbs",
+  "access_token": "<ACCESS_TOKEN>",
+  "refresh_token": "<REFRESH_TOKEN>",
   "token_type": "Bearer",
   "expires_in": 900
 }
@@ -409,7 +409,7 @@ Request:
 
 ```json
 {
-  "refresh_token": "3CMO2JGusOn8MAoK942ISt51y0YKhj56s4RypT7fmbs"
+  "refresh_token": "<REFRESH_TOKEN>"
 }
 ```
 

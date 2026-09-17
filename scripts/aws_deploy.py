@@ -8,18 +8,24 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from aws_release_safety import validate_review, smoke_settings, authenticated_smoke
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMESPACE = "fruition"
 APP_KINDS = {"ServiceAccount", "ConfigMap", "Service", "Deployment", "Job", "NetworkPolicy", "Ingress",
-             "ExternalSecret", "KafkaNodePool", "Kafka", "KafkaTopic", "ScaledObject"}
+             "ExternalSecret", "KafkaNodePool", "Kafka", "KafkaTopic", "KafkaUser", "ScaledObject",
+             "TriggerAuthentication", "PodDisruptionBudget"}
 PLACEHOLDER = re.compile(r"REPLACE_ME|PLACEHOLDER|CHANGEME|<[^>]+>|\$\{[^}]+\}", re.I)
 DNS = r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}"
 KEYS = {"account_id", "access_rds_endpoint", "core_rds_endpoint", "redis_endpoint", "s3_bucket", "app_domain", "domain", "acm_cert_arn",
-        "document_storage_role_arn", "pipeline_storage_role_arn", "vpc_cidr", "alb_subnet_cidr_1", "alb_subnet_cidr_2", "smtp_port"}
+        "document_storage_role_arn", "pipeline_storage_role_arn", "vpc_cidr", "alb_subnet_cidr_1", "alb_subnet_cidr_2", "smtp_port", "waf_acl_arn"}
 
 
 def run(args, *, input=None):
@@ -50,6 +56,8 @@ def validate(config, sha):
     arn = rf"arn:aws:acm:ap-northeast-2:{config['account_id']}:certificate/[0-9a-f-]{{36}}"
     if not re.fullmatch(arn, config["acm_cert_arn"]):
         raise ValueError("ACM ARN의 region/account/certificate를 확인하세요")
+    if not re.fullmatch(rf"arn:aws:wafv2:ap-northeast-2:{config['account_id']}:regional/webacl/[A-Za-z0-9_-]+/[0-9a-f-]{{36}}", config["waf_acl_arn"]):
+        raise ValueError("WAF ARN의 region/account/regional webacl을 확인하세요")
     for key in ("document_storage_role_arn", "pipeline_storage_role_arn"):
         if not re.fullmatch(rf"arn:aws:iam::{config['account_id']}:role/[A-Za-z0-9+=,.@_/-]+", config[key]):
             raise ValueError("서비스 S3 role ARN의 account와 형식을 확인하세요")
@@ -144,7 +152,11 @@ for role in runtime migration; do
 """
     if service == "ai":
         # Terraform이 생성하는 단일 endpoint URI 계약만 허용한다. query의 host/sslmode 재정의를 거부한다.
-        script += '''  prefix="postgresql://$PGUSER:"
+        script += '''  # Terraform URI의 명시적 TLS 옵션만 허용한다. 실제 TLS는 PGSSLMODE=require로 유지.
+  case "$credential" in
+    *\\?sslmode=require) credential=${credential%\\?sslmode=require} ;;
+  esac
+  prefix="postgresql://$PGUSER:"
   suffix="@$PGHOST:$PGPORT/$PGDATABASE"
   case "$credential" in
     "$prefix"*"$suffix") ;;
@@ -187,7 +199,10 @@ sha256sum /tmp/schema-canonical.sql | cut -d ' ' -f 1
                 "metadata": {"labels": labels},
                 "spec": {"restartPolicy": "Never", "serviceAccountName": f"fruition-{service}-migration",
                          "automountServiceAccountToken": False,
+                         "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001,
+                                             "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}},
                          "containers": [{"name": "preflight", "image": "postgres:16-alpine",
+                                         "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
                                          "command": ["sh", "-c", script], "env": env}]}}}}
 
 
@@ -222,12 +237,47 @@ def verify_target(config):
         raise ValueError("현재 Kubernetes context가 배포 대상 EKS와 다릅니다")
 
 
-def deploy(config, sha, documents, *, rollback=False):
+def wait_alb_bindings():
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        bindings = json.loads(kubectl("get", "targetgroupbindings", "-o", "json"))
+        ready = {item.get("spec", {}).get("serviceRef", {}).get("name")
+                 for item in bindings.get("items", []) if item.get("spec", {}).get("targetType") == "ip"
+                 and item.get("spec", {}).get("targetGroupARN") and not item.get("metadata", {}).get("deletionTimestamp")}
+        if {"access-svc", "document-svc"} <= ready:
+            return
+        time.sleep(5)
+    raise ValueError("ALB TargetGroupBinding 준비 시간 초과: 앱 Pod 생성 전 중단합니다")
+
+
+def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False):
     validate(config, sha)
     check_manifest(documents, sha)
+    if not rollback:
+        validate_review(review, sha)
+    if bootstrap and rollback:
+        raise ValueError("bootstrap과 rollback을 동시에 실행할 수 없습니다")
+    settings = None if bootstrap else smoke_settings()
     verify_target(config)
+    if bootstrap:
+        records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
+        if any(d["metadata"]["name"].startswith("fruition-release-") for d in records):
+            raise ValueError("성공 release가 있는 환경은 bootstrap으로 되돌릴 수 없습니다")
+        app_names = {d["metadata"]["name"] for d in documents if d["kind"] == "Deployment"}
+        existing_apps = json.loads(kubectl("get", "deployments", "-o", "json")).get("items", [])
+        if any(d["metadata"]["name"] in app_names for d in existing_apps):
+            marker = next((d for d in records if d["metadata"]["name"] == "fruition-bootstrap"), {})
+            previous = marker.get("data", {})
+            if previous.get("sha") != sha or previous.get("config") != json.dumps(config, sort_keys=True):
+                raise ValueError("bootstrap은 최초 설치 또는 동일 SHA의 미완료 최초 설치 재시도만 가능합니다")
+            if any(not c["image"].endswith(":" + sha) for d in existing_apps if d["metadata"]["name"] in app_names
+                   for c in d["spec"]["template"]["spec"]["containers"]):
+                raise ValueError("bootstrap 재시도 대상 앱 이미지가 최초 설치 SHA와 다릅니다")
     # 플랫폼 리소스는 인프라 관리자가 별도로 준비한다. 앱 deployer는 읽기만 가능하다.
-    kubectl("get", "namespace", NAMESPACE, "-o", "name")
+    namespace = json.loads(kubectl("get", "namespace", NAMESPACE, "-o", "json"))
+    labels = namespace.get("metadata", {}).get("labels", {})
+    if labels.get("elbv2.k8s.aws/pod-readiness-gate-inject") != "enabled" or labels.get("pod-security.kubernetes.io/enforce") != "baseline":
+        raise ValueError("플랫폼 관리자가 먼저 Namespace 보안/ALB readiness 설정을 적용해야 합니다")
     kubectl("get", "storageclass", "gp3", "-o", "name")
     wait({"kind": "ClusterSecretStore", "metadata": {"name": "aws-secrets-manager"}})
     existing = kubectl("get", "configmap", release_name(sha), "--ignore-not-found", "-o", "json")
@@ -235,6 +285,8 @@ def deploy(config, sha, documents, *, rollback=False):
         raise ValueError("이전 성공 release 기록이 없습니다")
     if existing.strip():
         record = json.loads(existing)["data"]
+        if record.get("safety_contract_version") != "2":
+            raise ValueError("보안/배포 보호 적용 전 release는 재사용할 수 없습니다. 검토된 새 release가 필요합니다")
         expected = json.loads(record["fingerprints"])
         if json.loads(record["config"]) != config:
             raise ValueError("기존 release와 배포 환경이 다릅니다. 새 SHA가 필요합니다")
@@ -248,6 +300,9 @@ def deploy(config, sha, documents, *, rollback=False):
         if current != expected:
             raise ValueError("기존 성공 release와 실제 DB schema가 달라 SHA 재배포를 차단합니다")
     # 모든 입력·placeholder 검증은 최초 apply 전에 끝낸다.
+    if bootstrap:
+        apply([{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "fruition-bootstrap", "namespace": NAMESPACE},
+                "immutable": True, "data": {"sha": sha, "config": json.dumps(config, sort_keys=True)}}])
     foundation = {"ServiceAccount", "ConfigMap", "ExternalSecret", "NetworkPolicy"}
     apply([d for d in documents if d["kind"] in foundation])
     # apply는 렌더에서 제외한 기존 리소스를 지우지 않는다. 제한 정책을 먼저 준비한 뒤
@@ -258,19 +313,30 @@ def deploy(config, sha, documents, *, rollback=False):
             wait(document)
     if not existing.strip():
         current = fingerprints(config)
-        for document in documents:
-            if document["kind"] == "Job":
-                job(document)
+        if review["migration_mode"] == "expand-only":
+            for document in documents:
+                if document["kind"] == "Job":
+                    job(document)
         current = fingerprints(config)
     event_kinds = {"KafkaNodePool", "Kafka", "KafkaTopic"}
     apply([d for d in documents if d["kind"] in event_kinds])
     for document in documents:
         if document["kind"] in {"Kafka", "KafkaTopic"}:
             wait(document)
-    apply([d for d in documents if d["kind"] not in foundation | event_kinds | {"Namespace", "Job", "ScaledObject"}])
+    apply([d for d in documents if d["kind"] == "KafkaUser"])
+    for document in documents:
+        if document["kind"] == "KafkaUser":
+            wait(document)
+    # The ALB controller must create bindings before admission creates application Pods.
+    routing = {"Service", "Ingress"}
+    apply([d for d in documents if d["kind"] in routing])
+    wait_alb_bindings()
+    apply([d for d in documents if d["kind"] not in foundation | event_kinds | routing |
+           {"Namespace", "Job", "ScaledObject", "KafkaUser", "TriggerAuthentication"}])
     for document in documents:
         if document["kind"] == "Deployment":
             kubectl("rollout", "status", "deployment/" + document["metadata"]["name"], "--timeout=600s")
+    apply([d for d in documents if d["kind"] == "TriggerAuthentication"])
     apply([d for d in documents if d["kind"] == "ScaledObject"])
     for document in documents:
         if document["kind"] == "ScaledObject":
@@ -281,18 +347,24 @@ def deploy(config, sha, documents, *, rollback=False):
         body = json.loads(response)
         if not str(body.get("openapi", "")).startswith("3.") or not isinstance(body.get("paths"), dict) or not body["paths"]:
             raise ValueError(f"{host}: 유효한 OpenAPI 응답이 아닙니다")
+    if bootstrap:
+        print("초기 설치 완료: 검증 계정/workspace 준비 후 deploy로 업무 검증을 마치세요. 성공 release는 기록하지 않았습니다.")
+        return
+    authenticated_smoke(config, sha, settings=settings)
     if not existing.strip():
         record = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": release_name(sha), "namespace": NAMESPACE},
-                  "immutable": True, "data": {"fingerprints": json.dumps(current), "config": json.dumps(config),
-                                             "manifest": yaml.safe_dump_all(documents, sort_keys=False)}}
+                  "immutable": True, "data": {"safety_contract_version": "2", "fingerprints": json.dumps(current), "config": json.dumps(config),
+                                             "manifest": yaml.safe_dump_all(documents, sort_keys=False),
+                                             "review": json.dumps(review)}}
         apply([record])
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("render", "deploy", "rollback"))
+    parser.add_argument("action", choices=("render", "bootstrap", "deploy", "rollback"))
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--sha", required=True)
+    parser.add_argument("--review", type=Path, help="검토된 릴리스별 migration/복원 시험 기록 JSON")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     validate(config, args.sha)
@@ -300,7 +372,9 @@ def main():
     if args.action == "render":
         print(yaml.safe_dump_all(documents, sort_keys=False))
     else:
-        deploy(config, args.sha, documents, rollback=args.action == "rollback")
+        review = json.loads(args.review.read_text()) if args.review and args.action != "rollback" else None
+        deploy(config, args.sha, documents, rollback=args.action == "rollback", review=review,
+               bootstrap=args.action == "bootstrap")
 
 
 if __name__ == "__main__":

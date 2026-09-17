@@ -4,15 +4,30 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "20.37.2"
 
-  cluster_name    = "${var.project}-eks"
-  cluster_version = var.eks_version
+  cluster_name                           = "${var.project}-eks"
+  cluster_version                        = var.eks_version
+  cloudwatch_log_group_retention_in_days = 14
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
-  cluster_endpoint_public_access           = true
-  cluster_endpoint_public_access_cidrs     = var.eks_public_access_cidrs
-  enable_cluster_creator_admin_permissions = true
+  cluster_endpoint_private_access      = true
+  cluster_endpoint_public_access       = length(var.eks_public_access_cidrs) > 0
+  cluster_endpoint_public_access_cidrs = var.eks_public_access_cidrs
+  # eks_admin_role_arn 지정 시 apply 주체의 암묵적 cluster-admin을 제거하고
+  # 명시적 break-glass role로 대체한다.
+  enable_cluster_creator_admin_permissions = var.eks_admin_role_arn == null
+
+  cluster_security_group_additional_rules = {
+    deployment_runner = {
+      description              = "Private API from deployment runner only"
+      type                     = "ingress"
+      protocol                 = "tcp"
+      from_port                = 443
+      to_port                  = 443
+      source_security_group_id = aws_security_group.runner.id
+    }
+  }
 
   cluster_addons = {
     coredns    = { addon_version = var.eks_addon_versions["coredns"] }
@@ -31,11 +46,12 @@ module "eks" {
 
   eks_managed_node_groups = {
     general = {
-      instance_types = ["t3.large"] # 2 vCPU / 8GiB
-      capacity_type  = "ON_DEMAND"
-      min_size       = 2
-      desired_size   = 2
-      max_size       = 3
+      credit_specification = { cpu_credits = "standard" }
+      instance_types       = ["t3.large"] # 2 vCPU / 8GiB
+      capacity_type        = "ON_DEMAND"
+      min_size             = 2
+      desired_size         = 2
+      max_size             = 3
     }
     ai_worker = {
       instance_types = ["m5.xlarge", "m6i.xlarge"] # 4 vCPU / 16GiB
@@ -57,12 +73,25 @@ module "eks" {
   }
 
   # 실제 권한은 플랫폼 관리자가 설치하는 fruition namespace RoleBinding으로 제한한다.
-  access_entries = {
-    github_deploy = {
-      principal_arn     = aws_iam_role.github_deploy.arn
-      kubernetes_groups = ["fruition:deployers"]
+  access_entries = merge(
+    {
+      github_deploy = {
+        principal_arn     = aws_iam_role.github_deploy.arn
+        kubernetes_groups = ["fruition:deployers"]
+      }
+    },
+    var.eks_admin_role_arn == null ? {} : {
+      break_glass_admin = {
+        principal_arn = var.eks_admin_role_arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
     }
-  }
+  )
 }
 
 # --- IRSA roles (helm addon들이 사용하는 최소 권한) ---
@@ -104,6 +133,7 @@ module "external_secrets_irsa" {
   role_name                             = "${var.project}-external-secrets"
   attach_external_secrets_policy        = true
   external_secrets_secrets_manager_arns = [aws_secretsmanager_secret.app.arn]
+  external_secrets_kms_key_arns         = [aws_kms_key.secrets.arn]
 
   oidc_providers = {
     main = {

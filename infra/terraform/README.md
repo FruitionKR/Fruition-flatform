@@ -1,6 +1,6 @@
 # AWS feedback IaC
 
-현행 절차는 [docs/script.md의 IaC·플랫폼 운영](../../docs/script.md#aws-iac플랫폼-운영-절차)을 따른다. 이 root는 project=fruition, 서울 region, EKS 1.35/AL2023, feedback Environment를 검증한다. 실제 AWS 조회·plan/apply·설치·복구는 이번 로컬 작업에서 수행하지 않았다.
+현행 절차는 [docs/script.md의 IaC·플랫폼 운영](../../docs/script.md#aws-iac플랫폼-운영-절차)을 따른다. 이 root는 project=fruition, 서울 region, EKS 1.35/AL2023, feedback Environment를 검증한다. 실제 plan/apply·설치·복구는 아직 수행하지 않았다. runner 준비·등록 순서는 [runner 운영 절차](../runner/README.md)를 따른다.
 
 | 구성 | 책임 |
 |---|---|
@@ -10,8 +10,12 @@
 | S3 | versioning, Document/AI IRSA prefix 권한, 정적 앱 key 없음 |
 | ECR / GitHub | 네 repository immutable SHA, 제한된 ECR/DescribeCluster role, namespace RBAC 그룹 |
 | Secrets Manager | DB·Redis·내부 token·MFA/SMTP 원본, 서비스별 ExternalSecret 투영 |
-| Budget | 필수 수신 이메일로 $500/$700 알림 |
+| Budget | 계정 전체 월 실제 비용 $400/$550/$650 초과 → SNS → Lambda → Discord, 실패 이벤트 SQS 14일 보관 |
+| 비용 보호 | WAF IP/전체 요청 제한, 수동 긴급 차단, S3 gateway endpoint, EC2 Standard credit, 미완료 업로드 7일 정리 |
+| Runner | private EC2 t3.small, SSM 관리, GitHub OIDC, EKS private endpoint |
 | State | 별도 bootstrap bucket의 S3 encrypted backend/native lockfile |
+
+예산 알림 준비·실제 수신 검증·실패 복구는 [Discord 예산 알림 운영 절차](../lambda/budget_discord/README.md)를 따른다. Terraform은 웹훅용 빈 Secret만 만들며 실제 URL은 운영자가 별도로 입력한다. 코드 준비와 실제 수신 검증을 구분한다.
 
 로컬 검증:
 
@@ -28,3 +32,7 @@ DB bootstrap은 Access endpoint에 DB_ISOLATION_TARGET=access, Core endpoint에 
 Secrets Manager는 ignore_changes로 운영 값을 보존한다. 기존 환경에 MFA/SMTP/Redis 키를 추가할 때 Terraform 재실행만으로 채워졌다고 가정하지 않는다. MFA 키를 재생성하면 기존 TOTP secret을 복호화하지 못한다. Redis 사용자 password와 서비스 Secret 값을 같은 보안 입력 경로로 맞춘다. 정적 S3 IAM key 제거·Redis 리소스 교체는 실제 plan에서 별도 검토한다.
 
 S3의 Document/AI object 권한은 prefix로 제한하지만 신규 객체 404 판별에 필요한 bucket ListBucket metadata는 공유한다. RDS Single-AZ, Redis primary 1개, Kafka broker 1개는 사용자 피드백 profile의 단일 장애점이다. HA·관측성·provider 공정성·실측 부하와 복구는 별도 남은 범위다. ESO 2.9.0의 공식 테스트 표는 Kubernetes 1.36이며 EKS 1.35 실호환 검증을 아직 하지 않았다.
+
+비용 보호 임계값과 적용 후 WAF 연결 검증은 [비용 보호 운영](../../docs/aws-deployment-costs.md#추가한-비용-보호-설정과-적용-방법)을 따른다. Terraform apply만으로 ALB에 WAF가 연결되지는 않으며 앱 배포 JSON에 `waf_acl_arn`을 반영해야 한다.
+
+CloudWatch addon·로그 14일 보존·운영 대시보드·Discord 장애/복구 알림은 [CloudWatch 운영 절차](../../docs/aws-observability.md)를 따른다. 실제 웹훅 입력과 수신 시험은 별도이며 ALB 지표는 생성 후 suffix를 등록해야 한다.

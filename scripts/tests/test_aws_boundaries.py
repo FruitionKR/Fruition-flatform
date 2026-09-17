@@ -7,7 +7,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from test_aws_deploy import CONFIG, SHA, FakeCluster, deploy
+from test_aws_deploy import CONFIG, SHA, REVIEW, FakeCluster, deploy
 
 
 def selected(selector, app):
@@ -18,6 +18,12 @@ def selected(selector, app):
 
 
 class BoundaryTests(unittest.TestCase):
+    def setUp(self):
+        for name, value in (("smoke_settings", {"test": "fixture"}), ("authenticated_smoke", None)):
+            mock = patch.object(deploy, name, return_value=value)
+            mock.start()
+            self.addCleanup(mock.stop)
+
     @classmethod
     def setUpClass(cls):
         cls.docs=deploy.render(CONFIG,SHA)
@@ -54,7 +60,7 @@ class BoundaryTests(unittest.TestCase):
 
     def test_jobs_receive_dns_and_database_before_first_preflight(self):
         fake=FakeCluster()
-        with patch.object(deploy,"run",fake.run):deploy.deploy(CONFIG,SHA,self.docs)
+        with patch.object(deploy,"run",fake.run):deploy.deploy(CONFIG,SHA,self.docs,review=REVIEW)
         first_job=next(i for i,(_,ds) in enumerate(fake.events) if any(d["kind"]=="Job" for d in ds))
         self.assertTrue(any(any(d["kind"]=="NetworkPolicy" for d in ds) for _,ds in fake.events[:first_job]))
         for svc in ("access","document","ai"):
@@ -70,14 +76,14 @@ class BoundaryTests(unittest.TestCase):
     def test_upgrade_removes_existing_broad_policy_after_restrictive_apply(self):
         fake=FakeCluster()
         self.assertIn("internal-only-ingress",fake.policies)
-        with patch.object(deploy,"run",fake.run):deploy.deploy(CONFIG,SHA,self.docs)
+        with patch.object(deploy,"run",fake.run):deploy.deploy(CONFIG,SHA,self.docs,review=REVIEW)
         self.assertNotIn("internal-only-ingress",fake.policies)
         deletion=next(i for i,(args,_) in enumerate(fake.events) if args[3:6]==["delete","networkpolicy","internal-only-ingress"])
         self.assertTrue(any(any(d["kind"]=="NetworkPolicy" and d["metadata"]["name"]=="aws-app-default-deny" for d in ds) for _,ds in fake.events[:deletion]))
         self.assertFalse(any(any(d["kind"]=="Job" for d in ds) for _,ds in fake.events[:deletion]))
         failed=FakeCluster(fail="internal-only-ingress")
         with patch.object(deploy,"run",failed.run),self.assertRaises(subprocess.CalledProcessError):
-            deploy.deploy(CONFIG,SHA,self.docs)
+            deploy.deploy(CONFIG,SHA,self.docs,review=REVIEW)
         self.assertIn("internal-only-ingress",failed.policies)
         self.assertFalse(failed.applied("Job"));self.assertFalse(failed.applied("Deployment"))
 

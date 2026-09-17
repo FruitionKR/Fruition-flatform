@@ -537,4 +537,4 @@ spec:
           strimzi.io/name: kafka-kafka
     ports:
     - protocol: TCP
-      port: 9092
+      port: 9093

@@ -15,6 +15,42 @@ resource "aws_s3_bucket_versioning" "storage" {
   }
 }
 
+resource "aws_kms_key" "storage" {
+  description         = "${var.project} storage bucket CMK"
+  enable_key_rotation = true
+}
+
+resource "aws_kms_alias" "storage" {
+  name          = "alias/${var.project}-storage"
+  target_key_id = aws_kms_key.storage.key_id
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "storage" {
+  bucket = aws_s3_bucket.storage.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.storage.arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_policy" "storage_tls" {
+  bucket = aws_s3_bucket.storage.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource  = [aws_s3_bucket.storage.arn, "${aws_s3_bucket.storage.arn}/*"]
+      Condition = { Bool = { "aws:SecureTransport" = "false" } }
+    }]
+  })
+}
+
 resource "aws_s3_bucket_public_access_block" "storage" {
   bucket                  = aws_s3_bucket.storage.id
   block_public_acls       = true
@@ -26,6 +62,15 @@ resource "aws_s3_bucket_public_access_block" "storage" {
 # 임시 파일 lifecycle (tmp/ prefix 7일 후 삭제)
 resource "aws_s3_bucket_lifecycle_configuration" "storage" {
   bucket = aws_s3_bucket.storage.id
+
+  rule {
+    id     = "abort-incomplete-uploads"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
 
   rule {
     id     = "expire-tmp"
@@ -78,7 +123,9 @@ resource "aws_iam_policy" "storage" {
       { Effect = "Allow", Action = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"], Resource = [for p in each.value.write : "${aws_s3_bucket.storage.arn}/${p}"] },
       { Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in each.value.delete : "${aws_s3_bucket.storage.arn}/${p}"] },
       # 없는 객체의 GET을 403 대신 404로 판별해야 AI journal이 신규 생성을 기록한다.
-      { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [aws_s3_bucket.storage.arn] }
+      { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [aws_s3_bucket.storage.arn] },
+      # SSE-KMS 객체 읽기/쓰기용 — storage CMK에만 한정.
+      { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = [aws_kms_key.storage.arn] }
     ]
   })
 }
