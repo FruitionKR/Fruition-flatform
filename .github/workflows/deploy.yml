@@ -1,5 +1,6 @@
 # Environment의 required reviewers와 배포 branch 제한은 GitHub 관리자가 별도로 설정한다.
 name: Deploy (EKS)
+run-name: '${{ inputs.action }} images ${{ inputs.release_sha || inputs.rollback_sha }}'
 
 on:
   workflow_dispatch:
@@ -10,7 +11,7 @@ on:
         options: [deploy, rollback, bootstrap]
         default: deploy
       release_sha:
-        description: "deploy할 이미지 묶음의 기존 40자리 release 태그 (platform 커밋 SHA가 아님)"
+        description: "GitHub Releases의 Images 버전에서 40자리 ID 복사 (platform 커밋 SHA 아님)"
         type: string
         default: ""
       rollback_sha:
@@ -74,12 +75,11 @@ jobs:
           EXPECTED=$(python -c 'import json,os; print(json.loads(os.environ["DEPLOY_CONFIG"])["account_id"])')
           test "$ACTUAL" = "$EXPECTED"
       - name: Verify published immutable images
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for service in document-svc access-svc pipeline converter; do
-            TAGS=$(aws ecr list-images --repository-name "fruition-$service" --filter tagStatus=TAGGED --query 'imageIds[].imageTag' --output json)
-            IMAGE_TAGS="$TAGS" python -c 'import json,os,sys; sys.exit(0 if os.environ["IMAGE_SHA"] in json.loads(os.environ["IMAGE_TAGS"]) else 1)'
-          done
+          python scripts/aws_image_release.py verify --release "$IMAGE_SHA"
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
       - name: Deploy with DB, migration, rollout and smoke gates

@@ -2,6 +2,9 @@
 
 ## 2026-09-17
 
+- 서비스 main CI 성공 커밋을 확인해 이미지 4종을 immutable ECR 태그와 GitHub Release로 자동 게시하는 workflow를 추가했습니다. 운영자가 릴리스 ID를 선택하고 feedback 승인 후 배포하며 실제 digest를 대조합니다. main 전용 게시 IAM 권한은 배포 권한과 분리했습니다.
+- 게시 활성화는 Terraform 재적용과 Repository variables 설정 후 진행합니다. 로컬 신규 테스트 7개·기존 IaC/Runner 검사·actionlint·Terraform validate 및 실제 GitHub 읽기 검증을 통과했으며, 이미지 게시·AWS 배포 실검증은 아직 수행하지 않았습니다.
+
 - AWS 실제 입력을 `.local/aws/`에서 관리하도록 폴더 전체 Git 제외 규칙과 초기화·계획·백업 안내를 추가했습니다. 실제 설정과 기존 경로 링크는 커밋하지 않으며 bootstrap state는 별도 백업합니다. 로컬 설정 4개 제외 및 비밀정보 검사를 통과했습니다.
 
 - EKS 기본 애드온 4개를 직접 관리해 모듈 출력의 resolve_conflicts 폐기 경고를 제거했습니다. 기존 버전·설정·노드 생성 후 설치 순서를 유지하고 개별 moved 블록으로 기존 주소를 이전합니다. 로컬 plan은 경고 없이 198개 생성·변경/삭제 0개이며 validate와 관련 테스트 5개를 통과했습니다.
