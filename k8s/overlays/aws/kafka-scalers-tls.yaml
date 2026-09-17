@@ -1,0 +1,71 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ingest-worker
+  namespace: fruition
+spec:
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9093
+      consumerGroup: ingest-worker
+      topic: ai.ingest.command
+      lagThreshold: '5'
+      offsetResetPolicy: earliest
+      tls: enable
+    authenticationRef:
+      name: kafka-tls
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: query-task-worker
+  namespace: fruition
+spec:
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9093
+      consumerGroup: query-task-worker
+      topic: ai.query.command
+      lagThreshold: '5'
+      offsetResetPolicy: earliest
+      tls: enable
+    authenticationRef:
+      name: kafka-tls
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: agent-task-worker
+  namespace: fruition
+spec:
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9093
+      consumerGroup: agent-task-worker
+      topic: ai.agent.command
+      lagThreshold: '5'
+      offsetResetPolicy: earliest
+      tls: enable
+    authenticationRef:
+      name: kafka-tls
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: maintenance-task-worker
+  namespace: fruition
+spec:
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9093
+      consumerGroup: maintenance-task-worker
+      topic: ai.maintenance.command
+      lagThreshold: '2'
+      offsetResetPolicy: earliest
+      tls: enable
+    authenticationRef:
+      name: kafka-tls

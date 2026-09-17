@@ -1,0 +1,40 @@
+# AWS only: mutually authenticated TLS, topic/group ACLs and allowed client pods.
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: kafka
+  namespace: fruition
+spec:
+  kafka:
+    listeners:
+    - name: tls
+      port: 9093
+      type: internal
+      tls: true
+      authentication:
+        type: tls
+      networkPolicyPeers:
+      - podSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - document-svc
+            - ingest-worker
+            - query-task-worker
+            - agent-task-worker
+            - maintenance-task-worker
+            - edit-event-consumer
+      - podSelector:
+          matchLabels:
+            strimzi.io/cluster: kafka
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: keda
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: keda-operator
+    authorization:
+      type: simple
+  entityOperator:
+    userOperator: {}

@@ -1,0 +1,125 @@
+# EC2 수는 변경하지 않는다. 2개 노드에 1+1 배치하되 업데이트 시 2+1 surge를 허용한다.
+# sleep lifecycle은 Kubernetes 1.34+ 내장 동작이라 이미지 안에 shell/sleep이 필요 없다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: access-svc
+  namespace: fruition
+spec:
+  replicas: 2
+  minReadySeconds: 10
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    spec:
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+      - maxSkew: 1
+        nodeTaintsPolicy: Honor
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels: &id001
+            app: access-svc
+      - maxSkew: 1
+        nodeTaintsPolicy: Honor
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels: *id001
+      containers:
+      - name: access-svc
+        lifecycle:
+          preStop:
+            sleep:
+              seconds: 10
+        env:
+        - name: SERVER_SHUTDOWN
+          value: graceful
+        - name: SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE
+          value: 40s
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-svc
+  namespace: fruition
+spec:
+  replicas: 2
+  minReadySeconds: 10
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    spec:
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+      - maxSkew: 1
+        nodeTaintsPolicy: Honor
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels: &id001
+            app: document-svc
+      - maxSkew: 1
+        nodeTaintsPolicy: Honor
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels: *id001
+      containers:
+      - name: document-svc
+        lifecycle:
+          preStop:
+            sleep:
+              seconds: 10
+        env:
+        - name: SERVER_SHUTDOWN
+          value: graceful
+        - name: SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE
+          value: 40s
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-api
+  namespace: fruition
+spec:
+  replicas: 2
+  minReadySeconds: 10
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    spec:
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+      - maxSkew: 1
+        nodeTaintsPolicy: Honor
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels: &id001
+            app: pipeline-api
+      - maxSkew: 1
+        nodeTaintsPolicy: Honor
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels: *id001
+      containers:
+      - name: pipeline-api
+        lifecycle:
+          preStop:
+            sleep:
+              seconds: 10

@@ -1,7 +1,8 @@
 # 저장소 밖의 feedback.tfvars로 복사해 배포 시 채운다.
 # SMTP 비밀값은 파일에 쓰지 않고 TF_VAR_smtp_username / TF_VAR_smtp_password로 주입한다.
-budget_email            = "REPLACE_ME_BUDGET_EMAIL"
-eks_public_access_cidrs = ["REPLACE_ME_FIXED_EGRESS_CIDR"]
+# Discord webhook은 apply 후 Secrets Manager에 별도 입력한다 (tfvars에 넣지 않음).
+eks_public_access_cidrs = [] # private-only; 초기 로컬 설치 동안만 관리자 현재 공인 IP /32 허용
+runner_ami_id           = "REPLACE_ME_UBUNTU_2404_AMD64_AMI"
 smtp_host               = "REPLACE_ME_SMTP_HOST"
 smtp_port               = 587
 mail_from               = "REPLACE_ME_MAIL_FROM"
@@ -13,3 +14,12 @@ eks_addon_versions = {
   kube-proxy         = "REPLACE_ME_KUBE_PROXY_BUILD"
   aws-ebs-csi-driver = "REPLACE_ME_EBS_CSI_BUILD"
 }
+
+# 소규모 피드백 환경 WAF 초기값. 프록시 공유 IP/정상 부하 검증 후 조정.
+waf_requests_per_ip_5m = 600
+waf_requests_total_5m  = 3000
+waf_emergency_block    = false
+
+# 서울 EKS 1.35에서 조회한 관측 addon. ALB suffix는 앱 Ingress 생성 후 입력.
+cloudwatch_addon_version = "v6.6.0-eksbuild.1"
+observability_alb_arn_suffix = ""

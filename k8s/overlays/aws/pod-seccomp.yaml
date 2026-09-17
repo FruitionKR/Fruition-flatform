@@ -1,0 +1,11 @@
+# AWS 앱/마이그레이션에 런타임 기본 syscall 필터를 적용한다.
+- op: add
+  path: /spec/template/spec/securityContext
+  value:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault

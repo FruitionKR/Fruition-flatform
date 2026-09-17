@@ -599,13 +599,16 @@ bash scripts/tests/test-service-migrations.sh
 | domain | api. 및 access.를 붙일 공개 도메인 |
 | acm_cert_arn | 두 API 호스트를 포함하는 발급 완료 인증서 ARN |
 | document_storage_role_arn, pipeline_storage_role_arn | `storage_role_arns` output의 각 서비스 ARN |
+| waf_acl_arn | Terraform `waf_acl_arn` output. 같은 계정·서울 regional ACL 필수 |
 | vpc_cidr, alb_subnet_cidr_1, alb_subnet_cidr_2, smtp_port | `network_deploy_inputs` output의 문자열 값 |
 
 terraform output -json의 각 output은 value 필드로 제공된다. 스토리지 IAM·네트워크 output과 계정·앱/공개 도메인·ACM 값을 JSON에 모아 GitHub **feedback Environment**의 AWS_DEPLOY_CONFIG_JSON variable로 저장한다. AWS_DEPLOY_ROLE_ARN도 같은 Environment에 설정한다. DB/provider 비밀번호는 이 JSON과 GitHub variable에 넣지 않는다.
 
+설정이 완료되기 전에는 저장소 밖 파일 또는 Git에서 제외한 `k8s/overlays/aws/deploy-config.feedback.json`에 실제 값을 모은다. 예시 파일만 커밋하며 실제 계정·주소·ARN은 문서에 복제하지 않는다. [환경값 이전 절차](../k8s/overlays/aws/README.md#설정-완료-후-github-environment로-이전)에 따라 로컬 렌더 검증 후 Environment variables로 옮긴다. 현재 workflow는 이미 해당 Environment 변수를 읽으므로 실제 설정 파일을 GitHub에 게시할 필요가 없다.
+
     python scripts/aws_deploy.py render --config /secure/path/aws-deploy.json --sha <40자리-commit-SHA>
     # AWS 배포 승인을 받고 대상 kubeconfig를 확인한 뒤 실행
-    python scripts/aws_deploy.py deploy --config /secure/path/aws-deploy.json --sha <40자리-commit-SHA>
+    python scripts/aws_deploy.py deploy --config /secure/path/aws-deploy.json --sha <40자리-commit-SHA> --review docs/releases/<40자리-commit-SHA>.json
     python scripts/aws_deploy.py rollback --config /secure/path/aws-deploy.json --sha <이전-성공-SHA>
 
 배포 순서는 다음과 같다.
@@ -672,10 +675,10 @@ Redis 테스트는 매번 임시 Redis 7.0 컨테이너를 생성·정리하며 
 |---|---|
 | [state.tfvars.example](../infra/terraform-state-bootstrap/state.tfvars.example) | 최초 state bucket의 전역 고유 이름 |
 | [feedback.tfbackend.example](../infra/terraform/feedback.tfbackend.example) | 생성된 state bucket 이름 |
-| [feedback.tfvars.example](../infra/terraform/feedback.tfvars.example) | 예산 이메일·고정 접근 CIDR·SMTP host/port·발신 주소·검증한 addon build |
+| [feedback.tfvars.example](../infra/terraform/feedback.tfvars.example) | 고정 접근 CIDR·SMTP host/port·발신 주소·검증한 addon build |
 | [deploy-config.example.json](../k8s/overlays/aws/deploy-config.example.json) | Terraform output과 계정·도메인·발급된 ACM ARN 등 14개 입력 |
 
-`TF_VAR_smtp_username`·`TF_VAR_smtp_password`는 배포 시 보안 저장소에서 환경변수로 주입한다. LLM provider 등 앱 비밀값은 기존 Secrets Manager 계약을 따른다. 예시에 실제 비밀번호를 기록하지 않는다. 앱 JSON은 placeholder가 남으면 render 단계에서 거부된다.
+`TF_VAR_smtp_username`·`TF_VAR_smtp_password`는 배포 시 보안 저장소에서 환경변수로 주입한다. LLM provider 등 앱 비밀값은 기존 Secrets Manager 계약을 따른다. 최초 설치·검증 계정·DB 변경 검토는 [유지보수 절차](aws-maintenance.md)를 따른다. 예시에 실제 비밀번호를 기록하지 않는다. 앱 JSON은 placeholder가 남으면 render 단계에서 거부된다.
 
 로컬 준비 완료 기준은 아래 IaC 검증과 outbox 테스트 통과다. 이미지 빌드·push에는 변경사항이 포함된 실제 commit SHA를 사용한다. 실제 배포 시에는 Helm을 포함한 운영 도구, 고정 egress/VPC runner, DNS·ACM, DB bootstrap, 플랫폼 설치를 준비한 뒤 순차 배포 절차를 실행한다. 현재 로컬에 Helm이 없는 경우도 이 시점에 설치한다.
 
@@ -683,7 +686,7 @@ Redis 테스트는 매번 임시 Redis 7.0 컨테이너를 생성·정리하며 
 
 ### AWS 사전조회 상태
 
-이 절차는 저장소 코드의 실행 계약이다. 준비 작업 당시 인증 계정의 서울 리전을 실제 조회했으며 EKS·RDS·VPC·ACM 인증서·ECR repository가 없고, S3 bucket·Route 53 hosted zone 목록도 비어 있었다. EKS 1.35 managed addon build와 EC2 On-Demand vCPU quota는 조회했다. Terraform plan/apply·addon 설치·서비스 배포·AWS 장애 복구 검증은 아직 수행하지 않았다. 새 환경의 도메인·예산 알림 이메일·고정 접근 CIDR·SMTP 보안 입력을 준비해야 한다. 로컬 검증 스크립트는 AWS API를 호출하지 않는다.
+이 절차는 저장소 코드의 실행 계약이다. 준비 작업 당시 인증 계정의 서울 리전을 실제 조회했으며 EKS·RDS·VPC·ACM 인증서·ECR repository가 없고, S3 bucket·Route 53 hosted zone 목록도 비어 있었다. EKS 1.35 managed addon build와 EC2 On-Demand vCPU quota는 조회했다. Terraform plan/apply·addon 설치·서비스 배포·AWS 장애 복구 검증은 아직 수행하지 않았다. 새 환경의 도메인·Discord webhook 보안 입력·고정 접근 CIDR·SMTP 보안 입력을 준비해야 한다. 로컬 검증 스크립트는 AWS API를 호출하지 않는다.
 
 ### 로컬 및 PR 검증
 
@@ -718,9 +721,9 @@ state와 plan에는 sensitive 표시 여부와 관계없이 비밀번호가 포�
 
 ### 필수 환경과 managed addon 입력
 
-현재 구현은 project=fruition, region=ap-northeast-2, cluster=fruition-eks, namespace=fruition, GitHub Environment=feedback, EKS=1.35 profile만 허용한다. EKS node AMI는 AL2023_x86_64_STANDARD다. budget_email, eks_public_access_cidrs, SMTP 입력, eks_addon_versions는 필수다. Budget $500/$700은 항상 생성한다.
+현재 구현은 project=fruition, region=ap-northeast-2, cluster=fruition-eks, namespace=fruition, GitHub Environment=feedback, EKS=1.35 profile만 허용한다. EKS node AMI는 AL2023_x86_64_STANDARD다. runner_ami_id, SMTP 입력, eks_addon_versions는 필수다. eks_public_access_cidrs 기본값은 빈 목록(private-only)이다. 계정 전체 월 실제 비용 $400/$550/$650 초과 알림은 SNS→Lambda→Discord로 전송한다. Terraform은 웹훅용 빈 Secret만 생성하며 운영자가 값을 별도로 입력해야 한다. [예산 알림 운영 절차](../infra/lambda/budget_discord/README.md)를 따른다.
 
-eks_public_access_cidrs에는 고정 egress runner/VPN의 명시적 IPv4 CIDR만 넣는다. 0.0.0.0/0은 거부한다. 배포 workflow는 self-hosted/linux/x64/fruition-feedback label의 전용 runner를 사용하며 PR 코드 검증용 hosted runner와 분리한다. VPC runner는 private endpoint 경로를 사용할 수 있고 public CIDR은 관리자 VPN 범위로 제한한다. 동적 GitHub-hosted runner의 전체 IP 목록을 넓게 허용하는 기본값은 제공하지 않는다. runner 운영·접근 통제는 외부 준비 조건이다.
+Terraform이 private subnet의 전용 EC2 runner를 생성한다. 초기 관리자 설치 동안만 eks_public_access_cidrs에 현재 IPv4 /32를 허용하고 설치 후 빈 목록으로 닫는다. 배포 workflow는 self-hosted/linux/x64/fruition-feedback label을 사용한다. 준비·등록·완료 검증은 [runner 운영 절차](../infra/runner/README.md)를 따른다.
 
 eks_addon_versions에는 vpc-cni/coredns/kube-proxy/aws-ebs-csi-driver 네 key의 정확한 vX.Y.Z-eksbuild.N 값을 제공한다. 값을 추정하거나 기본 최신 버전에 맡기지 않는다. 승인된 계정에서 서울 EKS 1.35 조회 결과를 확인하여 private tfvars에 기록한다.
 
@@ -730,7 +733,7 @@ eks_addon_versions에는 vpc-cni/coredns/kube-proxy/aws-ebs-csi-driver 네 key�
 
 ### 승인된 IaC plan/apply와 복구
 
-인프라 관리자 role과 앱 GitHub deploy role은 분리한다. 앱 role은 네 ECR repository push/read와 대상 EKS DescribeCluster만 받고 IAM/VPC/RDS/state 수정 권한을 받지 않는다. GitHub feedback Environment의 required reviewers·branch 제한, 전용 runner의 사용 주체는 관리자가 별도로 설정한다.
+인프라 관리자 role과 앱 GitHub deploy role은 분리한다. 앱 role은 네 ECR repository의 이미지 태그 조회와 대상 EKS DescribeCluster만 받고 IAM/VPC/RDS/state 수정 권한을 받지 않는다. GitHub feedback Environment의 required reviewers·branch 제한, 전용 runner의 사용 주체는 관리자가 별도로 설정한다.
 
     umask 077
     terraform -chdir=infra/terraform plan -lock-timeout=5m -var-file=/secure/feedback.tfvars -out=/secure/feedback.tfplan > /secure/feedback-plan.txt

@@ -17,12 +17,7 @@ resource "aws_security_group" "redis" {
     security_groups = [module.eks.node_security_group_id]
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # ElastiCache는 outbound 연결을 시작하지 않는다 — egress 불필요 (탈취 경로 차단).
 }
 
 # Redis 7 selectors로 Access projection은 삭제만 허용한다.

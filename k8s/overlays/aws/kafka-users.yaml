@@ -1,0 +1,355 @@
+# Strimzi generates per-client certificates; no private key is stored in Git.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-document
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: ai.ingest.command
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.query.command
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.agent.command
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.maintenance.command
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: document.edit.event
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.task.event
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: document-svc-ai-task-result
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: cluster
+      operations:
+      - IdempotentWrite
+      host: '*'
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-ingest-worker
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: ai.ingest.command
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: ingest-worker
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.task.event
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: cluster
+      operations:
+      - IdempotentWrite
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.maintenance.command
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-query-task-worker
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: ai.query.command
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: query-task-worker
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.task.event
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: cluster
+      operations:
+      - IdempotentWrite
+      host: '*'
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-agent-task-worker
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: ai.agent.command
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: agent-task-worker
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.task.event
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: cluster
+      operations:
+      - IdempotentWrite
+      host: '*'
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-maintenance-task-worker
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: ai.maintenance.command
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: maintenance-task-worker
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.task.event
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: cluster
+      operations:
+      - IdempotentWrite
+      host: '*'
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-edit-event-consumer
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: document.edit.event
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: derived-state-tracker
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-keda
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: ai.ingest.command
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.query.command
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.agent.command
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.maintenance.command
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: ingest-worker
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: query-task-worker
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: agent-task-worker
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: maintenance-task-worker
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'

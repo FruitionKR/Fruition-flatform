@@ -57,7 +57,7 @@ class PreflightDatabaseTests(unittest.TestCase):
             if uri_replace:
                 runtime = runtime.replace(*uri_replace)
                 migration = migration.replace(*uri_replace)
-        return self.command(["docker", "exec", "-i", "-e", "PGSSLMODE=disable", "-e", "PGCONNECT_TIMEOUT=3",
+        return self.command(["docker", "exec", "--user", "10001:10001", "-i", "-e", "PGSSLMODE=disable", "-e", "PGCONNECT_TIMEOUT=3",
                          "-e", f"RUNTIME_CREDENTIAL={runtime}", "-e", f"MIGRATION_CREDENTIAL={migration}",
                          self.container, "sh", "-s"], input=script)
 
@@ -67,6 +67,8 @@ class PreflightDatabaseTests(unittest.TestCase):
                 first = self.preflight(service)
                 self.assertRegex(first, r"^[0-9a-f]{64}$")
                 self.assertEqual(first, self.preflight(service))
+                if service == "ai":
+                    self.assertEqual(first, self.preflight(service, uri_replace=("/ai_db", "/ai_db?sslmode=require")))
                 for role in ("runtime", "migration"):
                     with self.subTest(role=role), self.assertRaises(subprocess.CalledProcessError):
                         self.preflight(service, **{role: "wrong_password"})

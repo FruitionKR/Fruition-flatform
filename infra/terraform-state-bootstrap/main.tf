@@ -37,12 +37,26 @@ resource "aws_s3_bucket_versioning" "state" {
   }
 }
 
+# state에는 모든 앱 비밀번호가 평문으로 들어간다 — CMK로 키 수준 접근 경계와
+# CloudTrail kms:Decrypt 감사 추적을 확보한다. s3:GetObject만으로는 복호화 불가.
+resource "aws_kms_key" "state" {
+  description         = "Terraform state bucket CMK"
+  enable_key_rotation = true
+}
+
+resource "aws_kms_alias" "state" {
+  name          = "alias/terraform-state"
+  target_key_id = aws_kms_key.state.key_id
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
   bucket = aws_s3_bucket.state.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.state.arn
     }
+    bucket_key_enabled = true
   }
 }
 
@@ -71,4 +85,9 @@ resource "aws_s3_bucket_policy" "tls" {
 
 output "state_bucket_name" {
   value = aws_s3_bucket.state.id
+}
+
+output "state_kms_key_arn" {
+  description = "backend 설정의 kms_key_id로 전달"
+  value       = aws_kms_key.state.arn
 }

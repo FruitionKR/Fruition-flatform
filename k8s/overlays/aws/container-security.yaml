@@ -1,0 +1,9 @@
+# 현재 Java/pipeline 이미지는 root USER이므로 nonroot 강제는 이미지 개선 뒤 적용한다.
+# converter의 기존 readOnlyRootFilesystem 설정은 별도 보존한다.
+- op: add
+  path: /spec/template/spec/containers/0/securityContext
+  value:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL

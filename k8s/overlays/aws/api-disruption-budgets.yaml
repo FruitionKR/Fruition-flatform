@@ -1,0 +1,36 @@
+# PDB는 자발적 노드 drain만 보호하며 노드 장애/Spot 회수를 막지 않는다.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: access-svc
+  namespace: fruition
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: access-svc
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: document-svc
+  namespace: fruition
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: document-svc
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pipeline-api
+  namespace: fruition
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: pipeline-api

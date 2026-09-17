@@ -30,6 +30,19 @@ resource "aws_iam_role" "github_deploy" {
 }
 
 # 플랫폼은 게시된 ECR 이미지 태그만 조회한다. 이미지 게시 권한은 서비스 저장소가 소유한다.
+resource "aws_iam_role_policy" "github_deploy_alerts" {
+  name = "deployment-failure-alerts"
+  role = aws_iam_role.github_deploy.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["sns:Publish"]
+      Resource = aws_sns_topic.operations.arn
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "github_deploy_ecr" {
   name = "application-images"
   role = aws_iam_role.github_deploy.id

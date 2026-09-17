@@ -2,8 +2,20 @@
 # ExternalSecrets Operator가 서비스별 허용 키만 개별 Kubernetes Secret으로 투영한다.
 # 초기값만 Terraform이 넣고 이후 값 관리는 콘솔/CLI — ignore_changes로 덮어쓰지 않는다.
 # DB 계정 비밀번호는 init-db-isolation.sh 실행 시 여기 값과 동일하게 넣어야 한다 (README 절차).
+# 기본 aws/secretsmanager 키 대신 전용 CMK — 키 정책·CloudTrail decrypt 감사 경계 확보.
+resource "aws_kms_key" "secrets" {
+  description         = "${var.project} app secrets CMK"
+  enable_key_rotation = true
+}
+
+resource "aws_kms_alias" "secrets" {
+  name          = "alias/${var.project}-secrets"
+  target_key_id = aws_kms_key.secrets.key_id
+}
+
 resource "aws_secretsmanager_secret" "app" {
-  name = "${var.project}/app"
+  name       = "${var.project}/app"
+  kms_key_id = aws_kms_key.secrets.arn
 }
 
 resource "random_password" "jwt_secret" {
@@ -37,8 +49,8 @@ resource "aws_secretsmanager_secret_version" "app" {
     AI_DB_RUNTIME_PASSWORD       = random_password.db_role["ai_runtime"].result
     AI_DB_MIGRATION_PASSWORD     = random_password.db_role["ai_migration"].result
     # ai-svc runtime 저장소는 core RDS 인스턴스의 ai_db에 격리한다.
-    AI_DATABASE_URL     = "postgresql://ai_runtime:${random_password.db_role["ai_runtime"].result}@${aws_db_instance.core.address}:5432/ai_db"
-    AI_DB_MIGRATION_URL = "postgresql://ai_migration:${random_password.db_role["ai_migration"].result}@${aws_db_instance.core.address}:5432/ai_db"
+    AI_DATABASE_URL     = "postgresql://ai_runtime:${random_password.db_role["ai_runtime"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=require"
+    AI_DB_MIGRATION_URL = "postgresql://ai_migration:${random_password.db_role["ai_migration"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=require"
     # --- 스토리지·인증 ---
     ACCESS_REDIS_PASSWORD   = random_password.redis["access"].result
     DOCUMENT_REDIS_PASSWORD = random_password.redis["document"].result

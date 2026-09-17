@@ -1,0 +1,227 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-svc
+  namespace: fruition
+spec:
+  template:
+    spec:
+      containers:
+      - name: document-svc
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka-kafka-bootstrap.fruition.svc:9093
+        - name: SPRING_KAFKA_SECURITY_PROTOCOL
+          value: SSL
+        - name: SPRING_KAFKA_SSL_KEYSTORETYPE
+          value: PKCS12
+        - name: SPRING_KAFKA_SSL_KEYSTORELOCATION
+          value: file:/etc/kafka/client/user.p12
+        - name: SPRING_KAFKA_SSL_TRUSTSTORETYPE
+          value: PKCS12
+        - name: SPRING_KAFKA_SSL_TRUSTSTORELOCATION
+          value: file:/etc/kafka/ca/ca.p12
+        - name: SPRING_KAFKA_SSL_KEYSTOREPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-document
+              key: user.password
+        - name: SPRING_KAFKA_SSL_TRUSTSTOREPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-cluster-ca-cert
+              key: ca.password
+        volumeMounts:
+        - name: kafka-client
+          mountPath: /etc/kafka/client
+          readOnly: true
+        - name: kafka-ca
+          mountPath: /etc/kafka/ca
+          readOnly: true
+      volumes:
+      - name: kafka-client
+        secret:
+          secretName: kafka-document
+      - name: kafka-ca
+        secret:
+          secretName: kafka-cluster-ca-cert
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingest-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      containers:
+      - name: ingest-worker
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka-kafka-bootstrap.fruition.svc:9093
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: SSL
+        - name: KAFKA_SSL_CAFILE
+          value: /etc/kafka/ca/ca.crt
+        - name: KAFKA_SSL_CERTFILE
+          value: /etc/kafka/client/user.crt
+        - name: KAFKA_SSL_KEYFILE
+          value: /etc/kafka/client/user.key
+        volumeMounts:
+        - name: kafka-client
+          mountPath: /etc/kafka/client
+          readOnly: true
+        - name: kafka-ca
+          mountPath: /etc/kafka/ca
+          readOnly: true
+      volumes:
+      - name: kafka-client
+        secret:
+          secretName: kafka-ingest-worker
+      - name: kafka-ca
+        secret:
+          secretName: kafka-cluster-ca-cert
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-task-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      containers:
+      - name: query-task-worker
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka-kafka-bootstrap.fruition.svc:9093
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: SSL
+        - name: KAFKA_SSL_CAFILE
+          value: /etc/kafka/ca/ca.crt
+        - name: KAFKA_SSL_CERTFILE
+          value: /etc/kafka/client/user.crt
+        - name: KAFKA_SSL_KEYFILE
+          value: /etc/kafka/client/user.key
+        volumeMounts:
+        - name: kafka-client
+          mountPath: /etc/kafka/client
+          readOnly: true
+        - name: kafka-ca
+          mountPath: /etc/kafka/ca
+          readOnly: true
+      volumes:
+      - name: kafka-client
+        secret:
+          secretName: kafka-query-task-worker
+      - name: kafka-ca
+        secret:
+          secretName: kafka-cluster-ca-cert
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-task-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      containers:
+      - name: agent-task-worker
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka-kafka-bootstrap.fruition.svc:9093
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: SSL
+        - name: KAFKA_SSL_CAFILE
+          value: /etc/kafka/ca/ca.crt
+        - name: KAFKA_SSL_CERTFILE
+          value: /etc/kafka/client/user.crt
+        - name: KAFKA_SSL_KEYFILE
+          value: /etc/kafka/client/user.key
+        volumeMounts:
+        - name: kafka-client
+          mountPath: /etc/kafka/client
+          readOnly: true
+        - name: kafka-ca
+          mountPath: /etc/kafka/ca
+          readOnly: true
+      volumes:
+      - name: kafka-client
+        secret:
+          secretName: kafka-agent-task-worker
+      - name: kafka-ca
+        secret:
+          secretName: kafka-cluster-ca-cert
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maintenance-task-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      containers:
+      - name: maintenance-task-worker
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka-kafka-bootstrap.fruition.svc:9093
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: SSL
+        - name: KAFKA_SSL_CAFILE
+          value: /etc/kafka/ca/ca.crt
+        - name: KAFKA_SSL_CERTFILE
+          value: /etc/kafka/client/user.crt
+        - name: KAFKA_SSL_KEYFILE
+          value: /etc/kafka/client/user.key
+        volumeMounts:
+        - name: kafka-client
+          mountPath: /etc/kafka/client
+          readOnly: true
+        - name: kafka-ca
+          mountPath: /etc/kafka/ca
+          readOnly: true
+      volumes:
+      - name: kafka-client
+        secret:
+          secretName: kafka-maintenance-task-worker
+      - name: kafka-ca
+        secret:
+          secretName: kafka-cluster-ca-cert
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edit-event-consumer
+  namespace: fruition
+spec:
+  template:
+    spec:
+      containers:
+      - name: edit-event-consumer
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka-kafka-bootstrap.fruition.svc:9093
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: SSL
+        - name: KAFKA_SSL_CAFILE
+          value: /etc/kafka/ca/ca.crt
+        - name: KAFKA_SSL_CERTFILE
+          value: /etc/kafka/client/user.crt
+        - name: KAFKA_SSL_KEYFILE
+          value: /etc/kafka/client/user.key
+        volumeMounts:
+        - name: kafka-client
+          mountPath: /etc/kafka/client
+          readOnly: true
+        - name: kafka-ca
+          mountPath: /etc/kafka/ca
+          readOnly: true
+      volumes:
+      - name: kafka-client
+        secret:
+          secretName: kafka-edit-event-consumer
+      - name: kafka-ca
+        secret:
+          secretName: kafka-cluster-ca-cert

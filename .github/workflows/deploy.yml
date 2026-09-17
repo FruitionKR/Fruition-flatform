@@ -7,7 +7,7 @@ on:
       action:
         description: "deploy 또는 동일 schema의 성공 SHA 재배포"
         type: choice
-        options: [deploy, rollback]
+        options: [deploy, rollback, bootstrap]
         default: deploy
       release_sha:
         description: "deploy할 이미지 묶음의 기존 40자리 release 태그 (platform 커밋 SHA가 아님)"
@@ -28,24 +28,29 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     environment: feedback
     # 고정 egress 또는 VPC 안에서 운영하는 전용 runner. PR 검증 runner와 분리한다.
     runs-on: [self-hosted, linux, x64, fruition-feedback]
     timeout-minutes: 90
     env:
       AWS_REGION: ap-northeast-2
+      AWS_EC2_METADATA_DISABLED: 'true'
+      KUBECONFIG: ${{ runner.temp }}/fruition-kubeconfig
       EKS_CLUSTER: fruition-eks
       DEPLOY_CONFIG: ${{ vars.AWS_DEPLOY_CONFIG_JSON }}
       ACTION: ${{ inputs.action }}
       RELEASE_SHA: ${{ inputs.release_sha }}
       ROLLBACK_SHA: ${{ inputs.rollback_sha }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          python-version: '3.12'
+          persist-credentials: false
       - name: Install render dependency
-        run: pip install PyYAML==6.0.2
+        run: |
+          python3.12 -m venv "$RUNNER_TEMP/fruition-venv"
+          "$RUNNER_TEMP/fruition-venv/bin/pip" install PyYAML==6.0.2
+          echo "$RUNNER_TEMP/fruition-venv/bin" >> "$GITHUB_PATH"
       - name: Validate and render before AWS mutation
         run: |
           set -euo pipefail
@@ -55,10 +60,12 @@ jobs:
           python scripts/aws_deploy.py render --config "$RUNNER_TEMP/deploy-config.json" --sha "$SHA" > "$RUNNER_TEMP/rendered.yaml"
           echo "IMAGE_SHA=$SHA" >> "$GITHUB_ENV"
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        id: aws_credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          unset-current-credentials: true
       - name: Verify target account
         run: |
           set -euo pipefail
@@ -75,4 +82,18 @@ jobs:
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
       - name: Deploy with DB, migration, rollout and smoke gates
-        run: python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA"
+        env:
+          AWS_SMOKE_EMAIL: ${{ secrets.AWS_SMOKE_EMAIL }}
+          AWS_SMOKE_PASSWORD: ${{ secrets.AWS_SMOKE_PASSWORD }}
+          AWS_SMOKE_WORKSPACE_ID: ${{ vars.AWS_SMOKE_WORKSPACE_ID }}
+        run: python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --review "docs/releases/$IMAGE_SHA.json"
+      - name: Notify deployment failure through operations Discord
+        if: failure() && steps.aws_credentials.outcome == 'success'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python scripts/aws-deploy-notify.py
+      - name: Remove temporary deployment files
+        if: always()
+        run: |
+          rm -f "$KUBECONFIG" "$RUNNER_TEMP/deploy-config.json" "$RUNNER_TEMP/rendered.yaml"
+          rm -rf "$RUNNER_TEMP/fruition-venv"

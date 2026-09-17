@@ -38,6 +38,62 @@ class SchedulingTest(unittest.TestCase):
                 self.assertEqual(seen, WORKERS)
         self.assertNotIn("pipeline-runs:", (ROOT / "infra/compose.ai.yml").read_text())
 
+    def test_api_rollout_can_surge_on_two_nodes_and_preserves_one_ready_pod(self):
+        output = subprocess.check_output(["kubectl", "kustomize", str(ROOT / "k8s/overlays/aws")], text=True)
+        resources = list(yaml.safe_load_all(output))
+        apis = {"access-svc", "document-svc", "pipeline-api"}
+        budgets = {r["metadata"]["name"]: r["spec"] for r in resources if r["kind"] == "PodDisruptionBudget"}
+        self.assertEqual(set(budgets), apis)
+        for r in resources:
+            if r["kind"] != "Deployment" or r["metadata"]["name"] not in apis:
+                continue
+            name, spec = r["metadata"]["name"], r["spec"]
+            pod = spec["template"]["spec"]
+            self.assertEqual(spec["replicas"], 2)
+            self.assertEqual(spec["strategy"]["rollingUpdate"], {"maxUnavailable": 0, "maxSurge": 1})
+            self.assertEqual(budgets[name]["minAvailable"], 1)
+            self.assertEqual(budgets[name]["selector"], spec["selector"])
+            self.assertNotIn("requiredDuringSchedulingIgnoredDuringExecution", pod.get("affinity", {}).get("podAntiAffinity", {}))
+            host = next(c for c in pod["topologySpreadConstraints"] if c["topologyKey"] == "kubernetes.io/hostname")
+            self.assertEqual(host["labelSelector"], spec["selector"])
+            self.assertEqual(host["whenUnsatisfiable"], "DoNotSchedule")
+            self.assertEqual(host["nodeTaintsPolicy"], "Honor")
+            # One replacement can coexist with two existing replicas on the same two nodes.
+            self.assertLessEqual(max(2, 1) - min(2, 1), host["maxSkew"])
+            self.assertGreater(max(2, 0) - min(2, 0), host["maxSkew"])
+            zone = next(c for c in pod["topologySpreadConstraints"] if c["topologyKey"] == "topology.kubernetes.io/zone")
+            self.assertEqual(zone["whenUnsatisfiable"], "ScheduleAnyway")
+            container = pod["containers"][0]
+            drain = container["lifecycle"]["preStop"]["sleep"]["seconds"]
+            self.assertGreater(pod["terminationGracePeriodSeconds"], drain + 40)
+            if name != "pipeline-api":
+                env = {e["name"]: e.get("value") for e in container["env"]}
+                self.assertEqual(env["SERVER_SHUTDOWN"], "graceful")
+                self.assertEqual(env["SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE"], "40s")
+
+    def test_security_preserves_converter_and_enforces_namespace_before_addons(self):
+        output = subprocess.check_output(["kubectl", "kustomize", str(ROOT / "k8s/overlays/aws")], text=True)
+        resources = list(yaml.safe_load_all(output))
+        for r in resources:
+            if r["kind"] not in {"Deployment", "Job"}:
+                continue
+            pod = r["spec"]["template"]["spec"]
+            self.assertEqual(pod["securityContext"]["seccompProfile"]["type"], "RuntimeDefault")
+            context = pod["containers"][0]["securityContext"]
+            self.assertFalse(context["allowPrivilegeEscalation"])
+            self.assertIn("ALL", context["capabilities"]["drop"])
+            if r["metadata"]["name"] == "converter":
+                self.assertTrue(context["readOnlyRootFilesystem"])
+            self.assertTrue(pod["securityContext"]["runAsNonRoot"])
+            self.assertEqual(pod["securityContext"]["runAsUser"], 10001)
+            self.assertEqual(pod["securityContext"]["fsGroup"], 10001)
+        labels = yaml.safe_load((ROOT / "k8s/platform/aws/namespace.yaml").read_text())["metadata"]["labels"]
+        self.assertEqual(labels["pod-security.kubernetes.io/enforce"], "baseline")
+        self.assertEqual(labels["pod-security.kubernetes.io/warn"], "restricted")
+        self.assertEqual(labels["elbv2.k8s.aws/pod-readiness-gate-inject"], "enabled")
+        script = (ROOT / "scripts/aws-platform-up.sh").read_text()
+        self.assertLess(script.index('kubectl apply -f "$repo_root/k8s/platform/aws/namespace.yaml"'), script.index("helm upgrade --install"))
+
 
 if __name__ == "__main__":
     unittest.main()

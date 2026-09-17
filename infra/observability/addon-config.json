@@ -1,0 +1,40 @@
+{
+  "applicationSignals": {
+    "enabled": false
+  },
+  "manager": {
+    "applicationSignals": {
+      "autoMonitor": {
+        "monitorAllServices": false
+      }
+    }
+  },
+  "otelContainerInsights": {
+    "enabled": false
+  },
+  "containerLogs": {
+    "enabled": true
+  },
+  "tolerations": [
+    {
+      "operator": "Exists"
+    }
+  ],
+  "agent": {
+    "config": {
+      "agent": {
+        "metrics_collection_interval": 60
+      },
+      "logs": {
+        "metrics_collected": {
+          "kubernetes": {
+            "cluster_name": "fruition-eks",
+            "enhanced_container_insights": true,
+            "accelerated_compute_metrics": false,
+            "metrics_collection_interval": 60
+          }
+        }
+      }
+    }
+  }
+}

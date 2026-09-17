@@ -12,5 +12,6 @@
   "vpc_cidr": "REPLACE_ME_VPC_CIDR",
   "alb_subnet_cidr_1": "REPLACE_ME_ALB_SUBNET_CIDR_1",
   "alb_subnet_cidr_2": "REPLACE_ME_ALB_SUBNET_CIDR_2",
-  "smtp_port": "587"
+  "smtp_port": "587",
+  "waf_acl_arn": "REPLACE_ME_WAF_ACL_ARN"
 }

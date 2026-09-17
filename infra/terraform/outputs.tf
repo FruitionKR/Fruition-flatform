@@ -2,6 +2,27 @@ output "cluster_name" {
   value = module.eks.cluster_name
 }
 
+output "deployment_runner" {
+  description = "SSM 관리 및 GitHub self-hosted runner 등록용 식별자"
+  value = {
+    instance_id = aws_instance.runner.id
+    private_ip  = aws_instance.runner.private_ip
+    labels      = ["self-hosted", "linux", "x64", "fruition-feedback"]
+    ssm_command = "aws ssm start-session --region ${var.region} --target ${aws_instance.runner.id}"
+  }
+}
+
+output "budget_notifications" {
+  description = "Discord webhook 입력 및 예산 알림 검증/복구용 식별자 (비밀값 없음)"
+  value = {
+    webhook_secret_arn = aws_secretsmanager_secret.budget_discord.arn
+    sns_topic_arn      = aws_sns_topic.budget.arn
+    lambda_name        = aws_lambda_function.budget_discord.function_name
+    log_group          = aws_cloudwatch_log_group.budget_discord.name
+    failure_queue_url  = aws_sqs_queue.budget_failures.url
+  }
+}
+
 output "cluster_arn" {
   value = module.eks.cluster_arn
 }
