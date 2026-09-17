@@ -91,3 +91,6 @@ AI/pipeline/.langgraph_api/
 .env.*
 !.env.example
 !.env.*.example
+
+# 실제 AWS 로컬 설정: 비밀번호·backend·배포 입력
+/.local/
