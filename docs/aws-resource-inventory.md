@@ -91,10 +91,10 @@
 | 22 | 처음 가게를 만든 관리자가 누구인지 등록해요. | `module.eks.aws_eks_access_entry.this["cluster_creator"]` | 클러스터 생성 관리자 identity 연결 |
 | 23 | GitHub의 설치 담당자가 들어올 수 있게 등록해요. | `module.eks.aws_eks_access_entry.this["github_deploy"]` | GitHub 배포 역할을 fruition:deployers 그룹에 연결 |
 | 24 | 처음 만든 관리자에게 관리할 권한을 줘요. | `module.eks.aws_eks_access_policy_association.this["cluster_creator_admin"]` | 클러스터 생성 관리자에게 EKS 관리 권한 연결 |
-| 25 | 일꾼에게 필요한 저장 공간을 붙여 주는 도구예요. | `module.eks.aws_eks_addon.this["aws-ebs-csi-driver"]` | EBS PVC provisioner |
-| 26 | 이름을 보고 컴퓨터를 찾는 주소록이에요. | `module.eks.aws_eks_addon.this["coredns"]` | 클러스터 DNS |
-| 27 | 요청이 알맞은 프로그램으로 가게 도와줘요. | `module.eks.aws_eks_addon.this["kube-proxy"]` | 서비스 네트워크 프록시 |
-| 28 | 작은 일꾼들이 통신하는 길과 규칙을 다뤄요. | `module.eks.aws_eks_addon.this["vpc-cni"]` | Pod VPC 네트워크와 NetworkPolicy |
+| 25 | 일꾼에게 필요한 저장 공간을 붙여 주는 도구예요. | `aws_eks_addon.core["aws-ebs-csi-driver"]` | EBS PVC provisioner |
+| 26 | 이름을 보고 컴퓨터를 찾는 주소록이에요. | `aws_eks_addon.core["coredns"]` | 클러스터 DNS |
+| 27 | 요청이 알맞은 프로그램으로 가게 도와줘요. | `aws_eks_addon.core["kube-proxy"]` | 서비스 네트워크 프록시 |
+| 28 | 작은 일꾼들이 통신하는 길과 규칙을 다뤄요. | `aws_eks_addon.core["vpc-cni"]` | Pod VPC 네트워크와 NetworkPolicy |
 | 29 | 컴퓨터와 일꾼을 관리할 EKS를 만들어요. | `module.eks.aws_eks_cluster.this[0]` | fruition-eks 1.35 제어 영역, private API 및 초기 관리자 /32 접근 |
 | 30 | 일꾼의 신분을 확인해서 필요한 출입증을 받게 해요. | `module.eks.aws_iam_openid_connect_provider.oidc_provider[0]` | Pod IRSA 인증용 EKS OIDC provider |
 | 31 | EKS가 자료를 잠글 열쇠를 쓰도록 허락해요. | `module.eks.aws_iam_policy.cluster_encryption[0]` | EKS KMS 암호화 키 사용 정책 |

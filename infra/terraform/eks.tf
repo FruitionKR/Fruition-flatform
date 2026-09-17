@@ -29,16 +29,7 @@ module "eks" {
     }
   }
 
-  cluster_addons = {
-    coredns    = { addon_version = var.eks_addon_versions["coredns"] }
-    kube-proxy = { addon_version = var.eks_addon_versions["kube-proxy"] }
-    vpc-cni    = { addon_version = var.eks_addon_versions["vpc-cni"], configuration_values = jsonencode({ enableNetworkPolicy = "true" }) }
-    # Strimzi Kafka PVC용 EBS gp3
-    aws-ebs-csi-driver = {
-      addon_version            = var.eks_addon_versions["aws-ebs-csi-driver"]
-      service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
-    }
-  }
+  # 애드온은 아래에서 직접 관리: 모듈의 전체 resource 출력에서 deprecated 속성 참조 방지.
 
   eks_managed_node_group_defaults = {
     ami_type = "AL2023_x86_64_STANDARD"
@@ -92,6 +83,58 @@ module "eks" {
       }
     }
   )
+}
+
+# 기존 모듈과 같은 버전·설정·충돌 처리·노드 생성 후 설치 순서를 유지한다.
+locals {
+  eks_addons = {
+    coredns    = { addon_version = var.eks_addon_versions["coredns"] }
+    kube-proxy = { addon_version = var.eks_addon_versions["kube-proxy"] }
+    vpc-cni    = { addon_version = var.eks_addon_versions["vpc-cni"], configuration_values = jsonencode({ enableNetworkPolicy = "true" }) }
+    # Strimzi Kafka PVC용 EBS gp3
+    aws-ebs-csi-driver = {
+      addon_version            = var.eks_addon_versions["aws-ebs-csi-driver"]
+      service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
+    }
+  }
+}
+
+resource "aws_eks_addon" "core" {
+  for_each = local.eks_addons
+
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = each.key
+  addon_version               = each.value.addon_version
+  configuration_values        = try(each.value.configuration_values, null)
+  service_account_role_arn    = try(each.value.service_account_role_arn, null)
+  preserve                    = true
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  timeouts {}
+
+  depends_on = [module.eks.eks_managed_node_groups]
+}
+
+# 기존 환경도 destroy/create 없이 동일 애드온의 Terraform 주소만 이동한다.
+moved {
+  from = module.eks.aws_eks_addon.this["coredns"]
+  to   = aws_eks_addon.core["coredns"]
+}
+
+moved {
+  from = module.eks.aws_eks_addon.this["kube-proxy"]
+  to   = aws_eks_addon.core["kube-proxy"]
+}
+
+moved {
+  from = module.eks.aws_eks_addon.this["vpc-cni"]
+  to   = aws_eks_addon.core["vpc-cni"]
+}
+
+moved {
+  from = module.eks.aws_eks_addon.this["aws-ebs-csi-driver"]
+  to   = aws_eks_addon.core["aws-ebs-csi-driver"]
 }
 
 # --- IRSA roles (helm addon들이 사용하는 최소 권한) ---

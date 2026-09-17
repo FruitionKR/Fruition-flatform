@@ -2,6 +2,8 @@
 
 ## 2026-09-17
 
+- EKS 기본 애드온 4개를 직접 관리해 모듈 출력의 resolve_conflicts 폐기 경고를 제거했습니다. 기존 버전·설정·노드 생성 후 설치 순서를 유지하고 개별 moved 블록으로 기존 주소를 이전합니다. 로컬 plan은 경고 없이 198개 생성·변경/삭제 0개이며 validate와 관련 테스트 5개를 통과했습니다.
+
 - 배포·Runner 점검의 job env에서 사용할 수 없는 runner 컨텍스트를 제거하고 실행 단계에서 임시 kubeconfig 경로를 설정합니다. actionlint 검증을 CI에 추가해 실행 전 워크플로 문법 오류를 확인합니다. 검사 설정 파일의 경로도 CI 트리거와 계약 테스트에 포함했습니다.
 
 - Ubuntu Actions에서 archive provider 검증이 실패하던 문제를 Linux amd64 공식 체크섬 추가로 수정했습니다. Mac arm64 체크섬과 provider 버전은 유지하며 Terraform validate를 통과했습니다.
