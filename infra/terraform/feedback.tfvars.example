@@ -23,3 +23,6 @@ waf_emergency_block    = false
 # 서울 EKS 1.35에서 조회한 관측 addon. ALB suffix는 앱 Ingress 생성 후 입력.
 cloudwatch_addon_version = "v6.6.0-eksbuild.1"
 observability_alb_arn_suffix = ""
+
+# gh api repos/FruitionKR/Fruition-flatform/actions/oidc/customization/sub --jq .sub_claim_prefix
+github_oidc_subject_prefix = "repo:FruitionKR@OWNER_ID/Fruition-flatform@REPO_ID"

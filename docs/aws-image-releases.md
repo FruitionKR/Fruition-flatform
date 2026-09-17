@@ -5,7 +5,7 @@
 ## 처음 한 번 준비
 
 1. 이 변경을 플랫폼 main에 병합합니다. 서비스 저장소 Access·Document·AI의 배포용 수정도 각각 main에 병합되어 있어야 합니다.
-2. Terraform을 새로 plan하고 검토·apply합니다. 이미지 게시용 IAM role/policy 2개와 배포 role의 `ecr:DescribeImages` 권한이 추가됩니다. 이전 저장 plan에는 이 변경이 없습니다.
+2. `gh api repos/FruitionKR/Fruition-flatform/actions/oidc/customization/sub --jq .sub_claim_prefix`로 실제 OIDC prefix를 확인해 로컬 `feedback.tfvars`의 `github_oidc_subject_prefix`에 넣습니다. 새 저장소는 owner/repository 고유 ID를 포함할 수 있으므로 이름만 보고 추정하지 않습니다. Terraform을 새로 plan하고 검토·apply합니다. 이미지 게시용 IAM role/policy 2개와 배포 role의 `ecr:DescribeImages` 권한이 추가됩니다. 이전 저장 plan에는 이 변경이 없습니다.
 3. 플랫폼 저장소 **Settings → Secrets and variables → Actions → Variables**에 아래 값을 등록합니다. 게시 workflow는 feedback Environment 밖에서 실행되므로 **Repository variables**에 설정해야 합니다.
 
 | Repository variable | 값 |
