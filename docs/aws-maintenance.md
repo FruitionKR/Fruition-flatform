@@ -17,6 +17,8 @@
 
 ## 처음 적용할 순서
 
+이미지 자동 게시 설정과 버전 선택·승인 절차는 [이미지 릴리스 안내](aws-image-releases.md)를 따릅니다. 서비스 main CI 성공 후 정기 게시하며, 운영자가 게시된 릴리스 ID를 선택해 기존 배포 workflow를 실행합니다.
+
 1. Terraform 변경을 새로 plan하고 내용을 확인해 apply합니다. 이전 저장 plan에는 이번 변경이 없습니다.
 2. Access·Document·AI pipeline·converter의 비관리자 실행 변경과 AI Kafka TLS 지원 변경을 포함한 네 이미지를 새 release SHA로 게시합니다. 변경 위치는 각 서비스 Dockerfile과 별도 `Fruition-ai` 저장소의 `pipeline/app/core/kafka_security.py`, worker 연결 코드입니다. 이전 AI 이미지를 그대로 사용하면 TLS Kafka에 접속하지 못합니다.
 3. 플랫폼 관리자로 `scripts/aws-platform-up.sh install <terraform-outputs.json>`을 실행합니다. Namespace 보안·ALB readiness 라벨, Kafka/KEDA CRD 및 배포 RBAC를 앱보다 먼저 적용합니다.

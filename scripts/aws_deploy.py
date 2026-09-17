@@ -40,7 +40,7 @@ def validate(config, sha):
     if set(config) != KEYS:
         raise ValueError("배포 JSON에는 문서의 비밀 아닌 입력 키만 모두 필요합니다")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise ValueError("image SHA는 소문자 40자리 commit SHA여야 합니다")
+        raise ValueError("image SHA는 게시된 릴리스의 소문자 40자리 ID여야 합니다")
     for key, value in config.items():
         if not isinstance(value, str) or not value or PLACEHOLDER.search(value):
             raise ValueError(f"유효하지 않은 입력: {key}")
