@@ -36,3 +36,7 @@ S3의 Document/AI object 권한은 prefix로 제한하지만 신규 객체 404 �
 비용 보호 임계값과 적용 후 WAF 연결 검증은 [비용 보호 운영](../../docs/aws-deployment-costs.md#추가한-비용-보호-설정과-적용-방법)을 따른다. Terraform apply만으로 ALB에 WAF가 연결되지는 않으며 앱 배포 JSON에 `waf_acl_arn`을 반영해야 한다.
 
 CloudWatch addon·로그 14일 보존·운영 대시보드·Discord 장애/복구 알림은 [CloudWatch 운영 절차](../../docs/aws-observability.md)를 따른다. 실제 웹훅 입력과 수신 시험은 별도이며 ALB 지표는 생성 후 suffix를 등록해야 한다.
+
+### EKS 애드온 관리
+
+기본 애드온 4개는 `aws_eks_addon.core`에서 관리합니다. EKS 20.37.2 모듈의 전체 애드온 출력이 AWS provider 5.x의 deprecated `resolve_conflicts` 속성까지 읽는 경고를 피하기 위한 구성입니다. 버전, VPC CNI NetworkPolicy, EBS IRSA, preserve 및 충돌 처리 설정은 기존과 같습니다. 노드 그룹 생성 후 설치하며 기존 모듈 주소에서의 개별 `moved` 블록을 유지합니다. 이 변경 뒤에는 이전 저장 plan을 사용하지 말고 새 plan을 검토하세요.
