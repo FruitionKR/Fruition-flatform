@@ -38,7 +38,7 @@ resource "aws_eks_addon" "observability" {
   addon_name                  = "amazon-cloudwatch-observability"
   addon_version               = var.cloudwatch_addon_version
   service_account_role_arn    = module.cloudwatch_irsa.iam_role_arn
-  configuration_values        = file("${path.module}/../observability/addon-config.json")
+  configuration_values        = chomp(file("${path.module}/../observability/addon-config.json"))
   resolve_conflicts_on_create = "NONE"
   resolve_conflicts_on_update = "PRESERVE"
   depends_on                  = [module.eks, aws_cloudwatch_log_group.containers]

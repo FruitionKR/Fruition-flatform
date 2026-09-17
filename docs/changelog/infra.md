@@ -2,6 +2,8 @@
 
 ## 2026-09-17
 
+- AWS 첫 적용에서 거부된 DB·Redis 보안 그룹 설명의 > 문자를 제거했습니다. RDS TLS 파라미터는 pending-reboot로 명시하고 CloudWatch JSON 끝 개행·Redis ACL/비활성 사용자 인증 표기를 AWS 응답과 맞춰 반복 변경을 제거했습니다. 실제 Redis 권한 검사 포함 전체 테스트 68개와 Terraform validate를 통과했습니다.
+
 - 실제 AWS 인증에서 확인한 GitHub immutable OIDC subject 형식을 지원합니다. API의 정확한 sub_claim_prefix를 필수 입력으로 받아 publisher/main과 deploy/feedback 신뢰 정책에 적용하고 저장소 이름 일치를 검증합니다. 기존 이름 전용 추정 때문에 발생하던 AssumeRoleWithWebIdentity 실패를 수정했습니다.
 
 - 서비스 main CI 성공 커밋을 확인해 이미지 4종을 immutable ECR 태그와 GitHub Release로 자동 게시하는 workflow를 추가했습니다. 운영자가 릴리스 ID를 선택하고 feedback 승인 후 배포하며 실제 digest를 대조합니다. main 전용 게시 IAM 권한은 배포 권한과 분리했습니다.
