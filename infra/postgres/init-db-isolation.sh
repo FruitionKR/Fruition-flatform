@@ -26,6 +26,10 @@ create_database() {
 
   admin_psql --dbname postgres --set=ON_ERROR_STOP=1 \
     --set=database="$database" --set=migration_role="$migration_role" --set=runtime_role="$runtime_role" <<'SQL'
+-- RDS의 role 생성 경로는 createrole_self_grant를 적용하지 않을 수 있다.
+-- 관리자만 migration role을 상속하도록 명시한다. 서비스 role에 관리자 권한을 주지 않는다.
+SELECT format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', :'migration_role', current_user)
+\gexec
 SELECT format('CREATE DATABASE %I OWNER %I', :'database', :'migration_role')
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'database')
 \gexec
