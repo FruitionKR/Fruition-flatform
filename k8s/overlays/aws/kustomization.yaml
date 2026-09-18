@@ -273,3 +273,23 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/livenessProbe/timeoutSeconds
         value: 5
+
+  # Pod/ALB의 주기적 상태 검사가 SMTP 인증을 반복해 메일 계정을 잠그지 않도록 한다.
+  # 실제 메일 발송 설정은 유지하며, 발송 검증은 별도로 수행한다.
+  - target:
+      kind: Deployment
+      name: access-svc
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: access-svc
+        namespace: fruition
+      spec:
+        template:
+          spec:
+            containers:
+              - name: access-svc
+                env:
+                  - name: MANAGEMENT_HEALTH_MAIL_ENABLED
+                    value: "false"

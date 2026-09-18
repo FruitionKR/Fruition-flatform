@@ -57,6 +57,10 @@
 
 Access 상태 확인이 정상 HTTP 200이어도 SMTP 등의 응답을 포함해 기본 1초를 초과할 수 있어 AWS probe timeout을 5초로 지정합니다. 이미 이전 manifest로 시작한 미완료 최초 설치는 검토 후 workflow의 `bootstrap_probe_recovery`를 명시적으로 선택해야 합니다. 이 복구는 Access의 startup/readiness/liveness `timeoutSeconds`가 1(또는 생략)에서 5로 바뀌는 것만 허용합니다. 이미지·경로·자원·설정·다른 workload 변경은 거부합니다. 원본 `fruition-bootstrap`을 수정·삭제하지 않고 immutable `fruition-bootstrap-probe-recovery`에 원본과 복구 manifest를 기록합니다. 이후 같은 복구 manifest 재시도와 `deploy` 승격은 이 기록을 대조합니다. 준비 완료·성공 release가 있는 환경에서는 복구 옵션을 사용할 수 없습니다.
 
+Access의 AWS health에서는 `MANAGEMENT_HEALTH_MAIL_ENABLED=false`로 SMTP 인증을 제외합니다. Pod와 ALB가 상태 확인마다 SMTP 로그인을 반복해 계정 제한과 서비스 재시작을 일으키지 않도록 하기 위함입니다. DB·Redis health와 실제 SMTP 발송 설정은 유지합니다. API 준비/업무 smoke 통과가 메일 발송 성공을 보장하지 않으므로, SMTP 제한 해제 후 사용자 주도로 실제 인증 메일 발송을 별도 확인해야 합니다.
+
+이 변경 전 manifest로 시작한 미완료 최초 설치는 `bootstrap_mail_health_recovery`만 선택합니다(`bootstrap_probe_recovery`는 선택하지 않음). 이미지·SMTP 자격 증명·다른 health 설정은 바꿀 수 없으며 Access env에 위 한 항목을 추가하는 변경만 허용합니다. 기존 probe 복구 기록이 있으면 그 결과를 원본으로 이어서 immutable `fruition-bootstrap-mail-health-recovery`에 저장합니다. 최초 기록과 이전 복구 기록을 삭제하거나 수정하지 않습니다. 원본 연결·SHA·설정·허용 변경을 모두 대조한 후 동일 manifest 재시도와 업무 검증 승격을 허용합니다.
+
 URL은 `FruitionKR`의 GitHub Actions 실행·이슈·PR 기록을 사용합니다. 스크립트는 형식과 SHA를 검사하지만, 링크 안의 주장이 사실인지나 SQL 호환성을 자동 증명하지는 않습니다. Environment 승인자가 실제 결과를 확인해야 합니다.
 
 온라인 DB 변경은 **새 컬럼 추가 → 호환 코드 배포 → 데이터 이전 → 이후 릴리스에서 옛 컬럼 제거**로 나눕니다. 실행 중 앱이 계속 DB를 사용하므로 호환 변경도 긴 테이블 잠금을 만들면 안 됩니다.

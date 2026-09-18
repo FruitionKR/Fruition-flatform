@@ -291,7 +291,32 @@ def access_probe_timeout_recovery(before, after):
     return original == updated
 
 
-def initial_install_state(config, sha, documents, bootstrap, probe_recovery=False):
+def access_mail_health_recovery(before, after):
+    """Only disable repetitive SMTP health authentication; keep mail delivery configured."""
+    try:
+        original = list(yaml.safe_load_all(before))
+    except yaml.YAMLError:
+        return False
+    if not original or any(not isinstance(d, dict) for d in original):
+        return False
+    updated = copy.deepcopy(after)
+    old = next((d for d in original if d.get("kind") == "Deployment" and d["metadata"]["name"] == "access-svc"), None)
+    new = next((d for d in updated if d.get("kind") == "Deployment" and d["metadata"]["name"] == "access-svc"), None)
+    if old is None or new is None:
+        return False
+    old_env = old["spec"]["template"]["spec"]["containers"][0].get("env", [])
+    new_container = new["spec"]["template"]["spec"]["containers"][0]
+    new_env = new_container.get("env", [])
+    key = "MANAGEMENT_HEALTH_MAIL_ENABLED"
+    if any(e.get("name") == key for e in old_env):
+        return False
+    if [e for e in new_env if e.get("name") == key] != [{"name": key, "value": "false"}]:
+        return False
+    new_container["env"] = [e for e in new_env if e.get("name") != key]
+    return original == updated
+
+
+def initial_install_state(config, sha, documents, bootstrap, probe_recovery=False, mail_health_recovery=False):
     """Bind an empty-DB installation and its promotion to the exact reviewed inputs."""
     records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
     expected = {"initial_install_contract": "1", "sha": sha,
@@ -302,23 +327,38 @@ def initial_install_state(config, sha, documents, bootstrap, probe_recovery=Fals
     successes = [r for r in records if r["metadata"]["name"].startswith("fruition-release-")]
     if successes and (bootstrap or any(r["metadata"]["name"] != release_name(sha) for r in successes)):
         raise ValueError("다른 성공 release가 있는 환경에 initial-install을 사용할 수 없습니다")
-    recovery = next((r for r in records if r["metadata"]["name"] == "fruition-bootstrap-probe-recovery"), None)
+    recovery_requested = probe_recovery or mail_health_recovery
+    if recovery_requested and (marker is None or ready is not None or successes):
+        raise ValueError("health 복구는 기존 미완료 최초 설치에만 허용합니다")
+    chain = [("fruition-bootstrap-probe-recovery", access_probe_timeout_recovery, probe_recovery),
+             ("fruition-bootstrap-mail-health-recovery", access_mail_health_recovery, mail_health_recovery)]
     pending_recovery = None
-    if probe_recovery and (marker is None or ready is not None or successes):
-        raise ValueError("probe 복구는 기존 미완료 최초 설치에만 허용합니다")
-    for record in (marker, ready, recovery):
+    for record in (marker, ready):
         if record is not None and (record.get("immutable") is not True or
                                   any(record.get("data", {}).get(k) != v for k, v in expected.items() if k != "manifest")):
-            raise ValueError("최초 설치 기록의 SHA·설정·manifest·검증 계약이 다릅니다")
-    if recovery is not None and (marker is None or recovery["data"].get("manifest") != expected["manifest"] or
-                                 recovery["data"].get("original_manifest") != marker["data"].get("manifest") or
-                                 not access_probe_timeout_recovery(marker["data"]["manifest"], documents)):
-        raise ValueError("최초 설치 probe 복구 기록이 일치하지 않습니다")
-    if marker is not None and marker["data"].get("manifest") != expected["manifest"] and recovery is None:
-        if not (probe_recovery and access_probe_timeout_recovery(marker["data"].get("manifest", ""), documents)):
-            raise ValueError("최초 설치 manifest가 다릅니다. 검토된 Access probe 복구만 명시적으로 허용할 수 있습니다")
-        pending_recovery = install_record("fruition-bootstrap-probe-recovery",
-                                          {**expected, "original_manifest": marker["data"]["manifest"]})
+            raise ValueError("최초 설치 기록의 SHA·설정·검증 계약이 다릅니다")
+    previous_manifest = marker["data"].get("manifest") if marker else None
+    for name, allowed, requested in chain:
+        record = next((r for r in records if r["metadata"]["name"] == name), None)
+        if record is None:
+            if requested and previous_manifest != expected["manifest"]:
+                if not previous_manifest or not allowed(previous_manifest, documents):
+                    raise ValueError("검토된 health 변경 외의 manifest 변경은 허용하지 않습니다")
+                pending_recovery = install_record(name, {**expected, "original_manifest": previous_manifest})
+                previous_manifest = expected["manifest"]
+            continue
+        data = record.get("data", {})
+        if (record.get("immutable") is not True or not previous_manifest or
+                any(data.get(k) != v for k, v in expected.items() if k != "manifest") or
+                data.get("original_manifest") != previous_manifest or
+                not isinstance(data.get("manifest"), str)):
+            raise ValueError("최초 설치 health 복구 기록이 일치하지 않습니다")
+        recovered = list(yaml.safe_load_all(data["manifest"]))
+        if not allowed(previous_manifest, recovered):
+            raise ValueError("최초 설치 health 복구 기록에 허용되지 않은 변경이 있습니다")
+        previous_manifest = data["manifest"]
+    if marker is not None and previous_manifest != expected["manifest"]:
+        raise ValueError("최초 설치 manifest가 다릅니다. 검토된 health 복구를 명시적으로 선택하세요")
     if ready is not None and ready["data"].get("manifest") != expected["manifest"]:
         raise ValueError("최초 설치 완료 manifest가 다릅니다")
     apps = json.loads(kubectl("get", "deployments", "-o", "json")).get("items", [])
@@ -346,20 +386,22 @@ def install_record(name, data):
             "immutable": True, "data": data}
 
 
-def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False):
+def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False):
     validate(config, sha)
     check_manifest(documents, sha)
     if not rollback:
         validate_review(review, sha)
     if bootstrap and rollback:
         raise ValueError("bootstrap과 rollback을 동시에 실행할 수 없습니다")
-    if probe_recovery and (not bootstrap or rollback or review["migration_mode"] != "initial-install"):
+    if probe_recovery and mail_health_recovery:
+        raise ValueError("health 복구는 한 번에 하나의 검토된 변경만 선택하세요")
+    if (probe_recovery or mail_health_recovery) and (not bootstrap or rollback or review["migration_mode"] != "initial-install"):
         raise ValueError("probe 복구는 initial-install bootstrap 전용입니다")
     settings = None if bootstrap else smoke_settings()
     verify_target(config)
     initial = not rollback and review["migration_mode"] == "initial-install"
     if initial:
-        initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery)
+        initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery, mail_health_recovery)
     if bootstrap:
         records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
         if any(d["metadata"]["name"].startswith("fruition-release-") for d in records):
@@ -474,6 +516,7 @@ def main():
     parser.add_argument("--sha", required=True)
     parser.add_argument("--review", type=Path, help="검토된 릴리스별 migration/복원 시험 기록 JSON")
     parser.add_argument("--bootstrap-probe-recovery", action="store_true", help="검토된 Access probe timeout 1→5초 복구만 허용")
+    parser.add_argument("--bootstrap-mail-health-recovery", action="store_true", help="SMTP 반복 health 인증 제외 복구만 허용")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     validate(config, args.sha)
@@ -483,7 +526,7 @@ def main():
     else:
         review = json.loads(args.review.read_text()) if args.review and args.action != "rollback" else None
         deploy(config, args.sha, documents, rollback=args.action == "rollback", review=review,
-               bootstrap=args.action == "bootstrap", probe_recovery=args.bootstrap_probe_recovery)
+               bootstrap=args.action == "bootstrap", probe_recovery=args.bootstrap_probe_recovery, mail_health_recovery=args.bootstrap_mail_health_recovery)
 
 
 if __name__ == "__main__":

@@ -348,7 +348,7 @@ class InitialInstallTests(unittest.TestCase):
             records.append(deploy.install_record("fruition-bootstrap-ready", {**data, "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64))}))
         return records
 
-    def execute(self, records=(), apps=(), *, bootstrap=True, fail=None, fingerprint="b" * 64, smoke_error=False, probe_recovery=False):
+    def execute(self, records=(), apps=(), *, bootstrap=True, fail=None, fingerprint="b" * 64, smoke_error=False, probe_recovery=False, mail_health_recovery=False):
         fake = FakeCluster(fail=fail, fingerprint=fingerprint)
         def run(args, *, input=None):
             if "get" in args and "configmaps" in args:
@@ -358,7 +358,7 @@ class InitialInstallTests(unittest.TestCase):
             return fake.run(args, input=input)
         with patch.object(deploy, "run", run), patch.object(deploy, "smoke_settings", return_value={}), patch.object(deploy, "authenticated_smoke", side_effect=ValueError("smoke failed") if smoke_error else None) as smoke:
             try:
-                deploy.deploy(CONFIG, SHA, self.documents, review=self.review, bootstrap=bootstrap, probe_recovery=probe_recovery)
+                deploy.deploy(CONFIG, SHA, self.documents, review=self.review, bootstrap=bootstrap, probe_recovery=probe_recovery, mail_health_recovery=mail_health_recovery)
             except (ValueError, subprocess.CalledProcessError) as error:
                 return fake, smoke.call_count, error
         return fake, smoke.call_count, None
@@ -465,6 +465,55 @@ class InitialInstallTests(unittest.TestCase):
         self.assertIsNotNone(self.execute(probe_recovery=True)[2])
         self.assertIsNotNone(self.execute(self.state(True), bootstrap=False, probe_recovery=True)[2])
         self.assertFalse(deploy.access_probe_timeout_recovery("invalid", self.documents))
+
+    def pre_mail_state(self, include_probe_receipt=False):
+        records = self.state()
+        before = copy.deepcopy(self.documents)
+        container = next(d for d in before if d["kind"] == "Deployment" and d["metadata"]["name"] == "access-svc")["spec"]["template"]["spec"]["containers"][0]
+        container["env"] = [e for e in container["env"] if e["name"] != "MANAGEMENT_HEALTH_MAIL_ENABLED"]
+        before_text = yaml.safe_dump_all(before, sort_keys=False)
+        records[0]["data"]["manifest"] = before_text
+        if include_probe_receipt:
+            for probe in ("startupProbe", "readinessProbe", "livenessProbe"):
+                container[probe].pop("timeoutSeconds")
+            original = yaml.safe_dump_all(before, sort_keys=False)
+            records[0]["data"]["manifest"] = original
+            records.append(deploy.install_record("fruition-bootstrap-probe-recovery", {**records[0]["data"], "manifest": before_text, "original_manifest": original}))
+        return records
+
+    def test_smtp_health_recovery_keeps_probe_chain_and_requires_explicit_approval(self):
+        for prior_probe in (False, True):
+            records = self.pre_mail_state(prior_probe)
+            self.assertIsNotNone(self.execute(records)[2])
+            fake, _, error = self.execute(records, mail_health_recovery=True)
+            self.assertIsNone(error)
+            receipts = {d["metadata"]["name"]:d for d in fake.applied("ConfigMap")}
+            self.assertNotIn("fruition-bootstrap", receipts)
+            self.assertNotIn("fruition-bootstrap-probe-recovery", receipts)
+            recovery = receipts["fruition-bootstrap-mail-health-recovery"]
+            self.assertEqual(recovery["data"]["original_manifest"], records[-1]["data"]["manifest"])
+            resumed = records + [recovery]
+            self.assertIsNone(self.execute(resumed)[2])
+            self.assertIsNone(self.execute(resumed + [receipts["fruition-bootstrap-ready"]], bootstrap=False)[2])
+        self.assertIsNotNone(self.execute(mail_health_recovery=True)[2])
+        self.assertIsNotNone(self.execute(self.state(True), bootstrap=False, mail_health_recovery=True)[2])
+        self.assertIsNotNone(self.execute(self.pre_mail_state(), probe_recovery=True, mail_health_recovery=True)[2])
+
+    def test_smtp_health_recovery_rejects_mail_credentials_and_arbitrary_config_changes(self):
+        for field in ("smtp", "image", "redis", "path"):
+            records = self.pre_mail_state()
+            old = list(yaml.safe_load_all(records[0]["data"]["manifest"]))
+            c = next(d for d in old if d["kind"] == "Deployment" and d["metadata"]["name"] == "access-svc")["spec"]["template"]["spec"]["containers"][0]
+            if field == "image": c["image"] = "different:" + SHA
+            elif field == "path": c["readinessProbe"]["httpGet"]["path"] = "/different"
+            else: c["env"].append({"name":"SPRING_MAIL_PASSWORD" if field == "smtp" else "MANAGEMENT_HEALTH_REDIS_ENABLED", "value":"fixture"})
+            records[0]["data"]["manifest"] = yaml.safe_dump_all(old, sort_keys=False)
+            fake, _, error = self.execute(records, mail_health_recovery=True)
+            self.assertIsNotNone(error, field)
+            self.assertFalse(fake.applied("Deployment"))
+        records = self.pre_mail_state(True)
+        records[1]["data"]["original_manifest"] = "tampered"
+        self.assertIsNotNone(self.execute(records, mail_health_recovery=True)[2])
 
     def test_failed_rollout_does_not_create_ready_receipt(self):
         fake, _, error=self.execute(fail="deployment/access-svc")
