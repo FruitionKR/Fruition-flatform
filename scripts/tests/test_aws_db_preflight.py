@@ -29,6 +29,11 @@ class PreflightDatabaseTests(unittest.TestCase):
         else:
             raise RuntimeError("격리 PostgreSQL 준비 실패")
         cls.sql("CREATE ROLE bootstrap LOGIN CREATEDB CREATEROLE PASSWORD 'isolated_test_admin'")
+        # RDS처럼 자동 INHERIT/SET 소속을 기대할 수 없는 기존 migration role을 재현한다.
+        # ADMIN만 있어도 role 속성 변경은 가능하지만 소유권/기본 권한 설정은 실패한다.
+        for service in ("access", "core", "ai"):
+            cls.sql(f"CREATE ROLE {service}_migration LOGIN; "
+                    f"GRANT {service}_migration TO bootstrap WITH ADMIN TRUE, INHERIT FALSE, SET FALSE")
         args = ["docker", "exec", "-e", "DB_ISOLATION_TARGET=all", "-e", "PGHOST=127.0.0.1",
                 "-e", "POSTGRES_ADMIN_USER=bootstrap", "-e", "POSTGRES_ADMIN_PASSWORD=isolated_test_admin"]
         for prefix in ("ACCESS", "CORE", "AI"):
@@ -38,6 +43,9 @@ class PreflightDatabaseTests(unittest.TestCase):
                      "-e", f"{prefix}_DB_RUNTIME_USER={prefix.lower()}_runtime",
                      "-e", f"{prefix}_DB_MIGRATION_USER={prefix.lower()}_migration"]
         cls.command(args + [cls.container, "bash", "/work/init-db-isolation.sh"])
+        # 중간 실패 후 같은 계정/DB에 재실행해도 권한 구성이 유지되어야 한다.
+        cls.command(args + [cls.container, "bash", "/work/init-db-isolation.sh"])
+        cls.command(args + [cls.container, "bash", "/work/validate-db-isolation.sh"])
 
     @staticmethod
     def command(args, input=None):
