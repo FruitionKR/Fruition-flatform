@@ -1,0 +1,6 @@
+{
+  "release_sha": "a2b46a13a49f5850a6a9febb367546d97e47da73",
+  "migration_mode": "initial-install",
+  "installation_test_url": "https://github.com/FruitionKR/Fruition-flatform/pull/10",
+  "restore_test_url": "https://github.com/FruitionKR/Fruition-flatform/pull/10"
+}
