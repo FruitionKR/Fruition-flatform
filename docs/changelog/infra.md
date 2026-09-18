@@ -1,5 +1,9 @@
 # 인프라 변경 기록
 
+## 2026-09-18
+
+- Ubuntu Runner 초기화에서 `awscli` 패키지를 찾지 못해 중단되던 문제를 AWS 공식 CLI v2 설치 파일 사용으로 수정했습니다. 재시도 시 기존 설치를 갱신하며 Runner 스크립트 문법 검사와 교체 후 재등록 안내를 추가했습니다. 전체 테스트 68개와 Terraform validate를 통과했으며, Terraform 적용 시 Runner 교체가 필요합니다.
+
 ## 2026-09-17
 
 - ElastiCache 생성 API가 거부한 한글 설명을 ASCII 설명으로 수정했습니다. Redis 권한·암호화·용량 설정은 유지합니다.
