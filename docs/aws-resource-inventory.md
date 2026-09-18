@@ -138,7 +138,7 @@
 | 64 | 컴퓨터가 EKS에서 일할 기본 권한을 줘요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role_policy_attachment.this["AmazonEKSWorkerNodePolicy"]` | EKS worker 기본 API 권한 |
 | 65 | 일꾼의 통신 길을 만들 권한을 줘요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role_policy_attachment.this["AmazonEKS_CNI_Policy"]` | VPC CNI 네트워크 권한 |
 | 66 | 컴퓨터를 어떻게 켤지 적은 설명서예요. 안전한 신분 확인(IMDSv2)을 써요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_launch_template.this[0]` | AI 노드 EC2 실행 설정(IMDSv2) |
-| 67 | 일반 컴퓨터 묶음이에요. 보통 2대, 많아도 3대예요. | `module.eks.module.eks_managed_node_group["general"].aws_eks_node_group.this[0]` | t3.large On-Demand, 최소/초기 2·최대 3대 |
+| 67 | 일반 컴퓨터 묶음이에요. 최소 2대, 필요하면 4대까지 늘어나요. | `module.eks.module.eks_managed_node_group["general"].aws_eks_node_group.this[0]` | t3.large On-Demand, 최소/초기 2·최대 4대 |
 | 68 | 일반 컴퓨터가 사용할 출입증이에요. | `module.eks.module.eks_managed_node_group["general"].aws_iam_role.this[0]` | 일반 노드의 AWS 실행 역할 |
 | 69 | 설치할 프로그램 상자를 가져올 수 있게 해요. | `module.eks.module.eks_managed_node_group["general"].aws_iam_role_policy_attachment.this["AmazonEC2ContainerRegistryReadOnly"]` | ECR 이미지 읽기 |
 | 70 | 컴퓨터가 EKS에서 일할 기본 권한을 줘요. | `module.eks.module.eks_managed_node_group["general"].aws_iam_role_policy_attachment.this["AmazonEKSWorkerNodePolicy"]` | EKS worker 기본 API 권한 |
