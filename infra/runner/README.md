@@ -78,6 +78,10 @@ READY가 없으면 `/var/log/cloud-init-output.log`에서 설치 실패를 확�
 sudo /usr/local/sbin/fruition-runner-register
 ```
 
+AWS CLI v2는 AWS 공식 Linux x86_64 ZIP 설치 파일로 설치한다. Ubuntu 패키지 저장소의 `awscli` 제공 여부에 의존하지 않으며, 초기화 재시도 시 `--update`로 기존 설치를 갱신한다. 등록된 Runner의 재초기화는 기존 보호 검사에서 거부된다.
+
+초기화 스크립트 변경을 main에 병합하는 것만으로 EC2에 적용되지는 않는다. Terraform 전체 plan에서 `aws_instance.runner`의 `user_data` 변경에 따른 교체를 확인한 뒤 적용해야 한다. 교체하면 기존 GitHub 등록 정보가 새 서버에 전달되지 않으므로 새 인스턴스의 `READY` 확인, SSM을 통한 재등록, 기존 오프라인 Runner 정리 및 `Check deployment runner` 점검을 다시 수행한다.
+
 입력 요청에 등록 토큰을 붙여 넣는다. 화면에는 표시되지 않는다. 토큰을 파일·채팅에 저장하지 않는다. 등록 토큰은 발급 후 1시간 유효하다([GitHub 문서](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners)). GitHub runner 목록에서 `Idle`과 `fruition-feedback` label을 확인한다.
 
 ## 5. EKS 외부 접속 종료

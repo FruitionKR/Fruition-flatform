@@ -10,7 +10,9 @@ for root in infra/terraform infra/terraform-state-bootstrap; do
   terraform -chdir="$root" init -backend=false -input=false -lockfile=readonly -no-color
   terraform -chdir="$root" validate -no-color
 done
-bash -n scripts/aws-platform-up.sh infra/postgres/init-db-isolation.sh infra/postgres/validate-db-isolation.sh
+for script in scripts/aws-platform-up.sh infra/postgres/init-db-isolation.sh infra/postgres/validate-db-isolation.sh infra/runner/bootstrap.sh infra/runner/register.sh; do
+  bash -n "$script"
+done
 kubectl kustomize k8s/platform/aws >/dev/null
 # 실제 kustomize 렌더·app RBAC·fake CLI·임시 PostgreSQL/Redis만 사용한다.
 "$python_bin" -m unittest discover -s scripts/tests -p 'test_aws_*.py' -v

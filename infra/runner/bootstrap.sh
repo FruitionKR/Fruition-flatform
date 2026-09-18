@@ -4,9 +4,17 @@ umask 022
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y ca-certificates curl git jq unzip awscli python3.12 python3.12-venv libicu74 libssl3t64 zlib1g
+apt-get install -y ca-certificates curl git jq unzip python3.12 python3.12-venv libicu74 libssl3t64 zlib1g
 
-# Ubuntu's signed package repositories supply AWS CLI v2 and Python 3.12.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+# The selected Ubuntu repositories do not provide an awscli install candidate.
+# Use AWS's official Linux x86_64 CLI v2 installer; --update permits retries.
+curl --fail --silent --show-error --location --retry 3 \
+  "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+unzip -q awscliv2.zip
+./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
 aws --version
 python3.12 --version
 if ! snap list amazon-ssm-agent >/dev/null 2>&1; then
@@ -14,9 +22,6 @@ if ! snap list amazon-ssm-agent >/dev/null 2>&1; then
 fi
 snap start --enable amazon-ssm-agent
 
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
-cd "$work"
 kubectl_version=v1.35.0
 curl --fail --silent --show-error --location --retry 3 \
   "https://dl.k8s.io/release/$kubectl_version/bin/linux/amd64/kubectl" -o kubectl
