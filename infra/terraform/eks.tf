@@ -42,7 +42,7 @@ module "eks" {
       capacity_type        = "ON_DEMAND"
       min_size             = 2
       desired_size         = 2
-      max_size             = 3
+      max_size             = 4 # 플랫폼 DaemonSet·Kafka·API 2 replicas와 rollout 여유
     }
     ai_worker = {
       instance_types = ["m5.xlarge", "m6i.xlarge"] # 4 vCPU / 16GiB

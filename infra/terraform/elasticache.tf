@@ -24,8 +24,8 @@ resource "aws_security_group" "redis" {
 # AWS가 반환하는 정규화된 ACL 표기로 불필요한 반복 업데이트를 방지한다.
 locals {
   redis_acl = {
-    access   = "on resetchannels -@all +ping +hello +client|setname (~auth:mfa:attempts:* ~auth:email-availability:* resetchannels -@all +eval +evalsha +incr +expire +ttl) (~oauth:exchange:* resetchannels -@all +set +getdel) (~authz:role:* resetchannels -@all +scan +del)"
-    document = "on resetchannels -@all +ping +hello +client|setname (~authz:role:* resetchannels -@all +get +set) (~query:* resetchannels &query-events -@all +get +set +incr +expire +pexpire +del +exists +lrange +rpush +ltrim +eval +evalsha +publish +subscribe +unsubscribe)"
+    access   = "on resetchannels -@all +ping +info +hello +client|setname (~auth:mfa:attempts:* ~auth:email-availability:* resetchannels -@all +eval +evalsha +incr +expire +ttl) (~oauth:exchange:* resetchannels -@all +set +getdel) (~authz:role:* resetchannels -@all +scan +del)"
+    document = "on resetchannels -@all +ping +info +hello +client|setname (~authz:role:* resetchannels -@all +get +set) (~query:* resetchannels &query-events -@all +get +set +incr +expire +pexpire +del +exists +lrange +rpush +ltrim +eval +evalsha +publish +subscribe +unsubscribe)"
     pipeline = "on ~wiki:concept-index:* resetchannels -@all +ping +hello +client|setname +get +setex +del"
   }
 }

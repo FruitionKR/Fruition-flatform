@@ -69,6 +69,17 @@ class RedisAclTest(unittest.TestCase):
         relay.unsubscribe(); relay.close()
 
 
+    def test_spring_health_info_without_administrative_permissions(self):
+        # Spring Boot RedisReactiveHealthIndicator uses INFO after connecting.
+        for service in ("access", "document"):
+            client = self.clients[service]
+            self.assertIn("redis_version", client.info())
+            for command in (("CONFIG", "GET", "*"), ("ACL", "LIST"), ("FLUSHALL",)):
+                with self.assertRaises(redis.ResponseError):
+                    client.execute_command(*command)
+        with self.assertRaises(redis.ResponseError):
+            self.clients["pipeline"].info()
+
     def test_denials_and_scan_metadata_exception(self):
         access, doc, ai = (self.clients[x] for x in ("access","document","pipeline"))
         for client,key in [(access,"query:run:private"),(doc,"oauth:exchange:private"),(ai,"authz:role:private")]:
