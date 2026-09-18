@@ -13,7 +13,7 @@ module "eks" {
 
   cluster_endpoint_private_access      = true
   cluster_endpoint_public_access       = length(var.eks_public_access_cidrs) > 0
-  cluster_endpoint_public_access_cidrs = var.eks_public_access_cidrs
+  cluster_endpoint_public_access_cidrs = length(var.eks_public_access_cidrs) > 0 ? var.eks_public_access_cidrs : null
   # eks_admin_role_arn 지정 시 apply 주체의 암묵적 cluster-admin을 제거하고
   # 명시적 break-glass role로 대체한다.
   enable_cluster_creator_admin_permissions = var.eks_admin_role_arn == null

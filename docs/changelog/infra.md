@@ -2,6 +2,9 @@
 
 ## 2026-09-18
 
+- Redis ACL 수정 후에도 Access health의 정상 응답이 기본 probe 제한 1초를 초과해 재시작되는 문제를 AWS timeout 5초로 보완했습니다. 이미 시작된 최초 설치에는 workflow의 명시적 probe 복구 옵션을 추가했으며, 원본 기록을 보존하고 Access 세 probe의 1→5초 변경만 허용합니다. 이미지·자원·경로 변경 거부와 기록 검증을 포함해 테스트 76개를 통과했습니다.
+- private EKS에 비활성 public CIDR 빈 목록 변경을 보내 AWS가 `already at the desired configuration`으로 거부하던 요청을 null로 생략합니다. 실제 복구 후 private 전용 상태와 해당 Terraform 계획의 변경 없음 결과를 확인했습니다. CIDR 목록을 채우는 것은 public endpoint 활성화를 의미하므로 private 모드 유지 목적으로 값을 채우지 않습니다.
+
 - 첫 AWS 배포에서 Spring Redis health의 INFO 명령이 ACL에 없어 Access·Document가 준비되지 않던 문제를 해당 두 계정에 `+info`만 추가해 수정했습니다. 일반 노드 3대 상한에서도 Pipeline API가 CPU 부족으로 대기해 상한을 4대로 올렸습니다. 추가 노드가 실행되면 비용이 증가합니다. 실제 Redis INFO 허용·관리 명령 거부를 포함한 AWS 테스트 74개와 Terraform validate를 통과했습니다. 운영 반영·배포 재시도는 병합 후 수행합니다.
 
 - 빈 DB의 최초 설치에 운영 버전 호환성 증명을 요구하던 순환 조건을 `initial-install` 검토로 분리했습니다. DB 3개 빈 상태 검사 후 SHA·설정·manifest를 고정하고, 설치 완료 schema가 일치하며 로그인·문서·AI smoke까지 통과한 경우에만 성공 release를 기록합니다. 게시 이미지 3종의 DB 마이그레이션·재실행·논리 복원 시험과 AWS 테스트 73개를 통과했습니다. 실제 시험 기록 PR #10을 참조하는 대상 이미지 릴리스 검토 JSON도 추가했습니다. 실제 EKS 최초 앱 배포와 업무 smoke는 아직 수행하지 않았습니다.

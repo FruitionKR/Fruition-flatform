@@ -55,6 +55,8 @@
 - 검증 계정·workspace 설정 후 실행하는 `deploy`는 완료 기록과 현재 DB schema를 대조하며 migration을 다시 실행하지 않습니다. 실제 로그인·문서·AI smoke를 통과해야 성공 release를 기록합니다. smoke 실패는 같은 SHA로 재시도할 수 있습니다.
 - 다른 성공 release, 다른 이미지·설정·manifest 또는 DB schema 변경이 있으면 이 최초 설치 경로로 넘어갈 수 없습니다. 기존 방식으로 생성한 bootstrap 기록은 빈 DB 검증 증거로 인정하지 않습니다. 기록을 삭제해 우회하지 말고 별도 점검해야 합니다.
 
+Access 상태 확인이 정상 HTTP 200이어도 SMTP 등의 응답을 포함해 기본 1초를 초과할 수 있어 AWS probe timeout을 5초로 지정합니다. 이미 이전 manifest로 시작한 미완료 최초 설치는 검토 후 workflow의 `bootstrap_probe_recovery`를 명시적으로 선택해야 합니다. 이 복구는 Access의 startup/readiness/liveness `timeoutSeconds`가 1(또는 생략)에서 5로 바뀌는 것만 허용합니다. 이미지·경로·자원·설정·다른 workload 변경은 거부합니다. 원본 `fruition-bootstrap`을 수정·삭제하지 않고 immutable `fruition-bootstrap-probe-recovery`에 원본과 복구 manifest를 기록합니다. 이후 같은 복구 manifest 재시도와 `deploy` 승격은 이 기록을 대조합니다. 준비 완료·성공 release가 있는 환경에서는 복구 옵션을 사용할 수 없습니다.
+
 URL은 `FruitionKR`의 GitHub Actions 실행·이슈·PR 기록을 사용합니다. 스크립트는 형식과 SHA를 검사하지만, 링크 안의 주장이 사실인지나 SQL 호환성을 자동 증명하지는 않습니다. Environment 승인자가 실제 결과를 확인해야 합니다.
 
 온라인 DB 변경은 **새 컬럼 추가 → 호환 코드 배포 → 데이터 이전 → 이후 릴리스에서 옛 컬럼 제거**로 나눕니다. 실행 중 앱이 계속 DB를 사용하므로 호환 변경도 긴 테이블 잠금을 만들면 안 됩니다.
