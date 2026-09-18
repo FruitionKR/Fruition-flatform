@@ -2,6 +2,8 @@
 
 ## 2026-09-18
 
+- Access Pod·ALB health가 SMTP 인증을 반복해 메일 서버 로그인 제한과 HTTP 503을 일으키던 문제를 AWS health의 mail 항목만 제외해 수정했습니다. 실제 메일 발송·DB·Redis health는 유지합니다. 미완료 최초 설치에 명시적 SMTP health 복구 옵션과 원본 보존 기록 연결을 추가했습니다. 테스트 78개 및 같은 이미지의 임시 EKS Pod에서 SMTP egress 차단 상태로 health 10/10 HTTP 200(최대 0.09초)을 확인했습니다. 실제 메일 발송은 제한 해제 후 별도 검증이 필요합니다.
+
 - Redis ACL 수정 후에도 Access health의 정상 응답이 기본 probe 제한 1초를 초과해 재시작되는 문제를 AWS timeout 5초로 보완했습니다. 이미 시작된 최초 설치에는 workflow의 명시적 probe 복구 옵션을 추가했으며, 원본 기록을 보존하고 Access 세 probe의 1→5초 변경만 허용합니다. 이미지·자원·경로 변경 거부와 기록 검증을 포함해 테스트 76개를 통과했습니다.
 - private EKS에 비활성 public CIDR 빈 목록 변경을 보내 AWS가 `already at the desired configuration`으로 거부하던 요청을 null로 생략합니다. 실제 복구 후 private 전용 상태와 해당 Terraform 계획의 변경 없음 결과를 확인했습니다. CIDR 목록을 채우는 것은 public endpoint 활성화를 의미하므로 private 모드 유지 목적으로 값을 채우지 않습니다.
 

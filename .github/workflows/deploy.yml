@@ -14,6 +14,10 @@ on:
         description: "미완료 최초 설치의 Access probe timeout 1→5초 복구 승인"
         type: boolean
         default: false
+      bootstrap_mail_health_recovery:
+        description: "미완료 최초 설치의 SMTP 반복 health 인증 제외 복구 승인"
+        type: boolean
+        default: false
       release_sha:
         description: "GitHub Releases의 Images 버전에서 40자리 ID 복사 (platform 커밋 SHA 아님)"
         type: string
@@ -45,6 +49,7 @@ jobs:
       DEPLOY_CONFIG: ${{ vars.AWS_DEPLOY_CONFIG_JSON }}
       ACTION: ${{ inputs.action }}
       BOOTSTRAP_PROBE_RECOVERY: ${{ inputs.bootstrap_probe_recovery }}
+      BOOTSTRAP_MAIL_HEALTH_RECOVERY: ${{ inputs.bootstrap_mail_health_recovery }}
       RELEASE_SHA: ${{ inputs.release_sha }}
       ROLLBACK_SHA: ${{ inputs.rollback_sha }}
     steps:
@@ -96,6 +101,7 @@ jobs:
           set -euo pipefail
           EXTRA=()
           if [ "$BOOTSTRAP_PROBE_RECOVERY" = true ]; then EXTRA+=(--bootstrap-probe-recovery); fi
+          if [ "$BOOTSTRAP_MAIL_HEALTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-mail-health-recovery); fi
           python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --review "docs/releases/$IMAGE_SHA.json" "${EXTRA[@]}"
       - name: Notify deployment failure through operations Discord
         if: failure() && steps.aws_credentials.outcome == 'success'
