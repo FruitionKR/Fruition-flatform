@@ -132,7 +132,7 @@ def job(document):
     wait(document, "Complete")
 
 
-def preflight_job(service, config):
+def preflight_job(service, config, *, require_empty=False):
     prefix = {"access": "ACCESS", "document": "CORE", "ai": "AI"}[service]
     db = {"access": "access", "document": "core", "ai": "ai"}[service]
     runtime_secret = "fruition-" + ("pipeline" if service == "ai" else service)
@@ -192,6 +192,19 @@ pg_dump --dbname="$PGDATABASE" --schema-only --no-owner --no-privileges --schema
 sed -E '/^\\\\(un)?restrict /d' /tmp/schema.sql > /tmp/schema-canonical.sql
 sha256sum /tmp/schema-canonical.sql | cut -d ' ' -f 1
 """
+    if require_empty:
+        # migration credentials are still active. Reject every user object, not just rows/tables.
+        empty_check = """empty=$(psql --dbname="$PGDATABASE" -X -A -t -v ON_ERROR_STOP=1 2>/dev/null <<'SQL'
+SELECT NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname NOT IN ('public','information_schema') AND nspname !~ '^pg_')
+ AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public')
+ AND NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public')
+ AND NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public')
+ AND NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname <> 'plpgsql');
+SQL
+)
+[ "$empty" = t ] || { echo 'Initial install requires an empty database'; exit 1; }
+"""
+        script = script.replace('# 같은 PostgreSQL client', empty_check + '# 같은 PostgreSQL client')
     labels = {"app.kubernetes.io/component": "db-preflight", "app": f"{service}-db-preflight"}
     return {"apiVersion": "batch/v1", "kind": "Job",
             "metadata": {"name": f"{service}-db-preflight", "namespace": NAMESPACE, "labels": labels},
@@ -206,10 +219,10 @@ sha256sum /tmp/schema-canonical.sql | cut -d ' ' -f 1
                                          "command": ["sh", "-c", script], "env": env}]}}}}
 
 
-def fingerprints(config):
+def fingerprints(config, *, require_empty=False):
     results = {}
     for service in ("access", "document", "ai"):
-        document = preflight_job(service, config)
+        document = preflight_job(service, config, require_empty=require_empty)
         job(document)
         digest = kubectl("logs", "job/" + document["metadata"]["name"]).strip()
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
@@ -250,6 +263,46 @@ def wait_alb_bindings():
     raise ValueError("ALB TargetGroupBinding 준비 시간 초과: 앱 Pod 생성 전 중단합니다")
 
 
+def initial_install_state(config, sha, documents, bootstrap):
+    """Bind an empty-DB installation and its promotion to the exact reviewed inputs."""
+    records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
+    expected = {"initial_install_contract": "1", "sha": sha,
+                "config": json.dumps(config, sort_keys=True),
+                "manifest": yaml.safe_dump_all(documents, sort_keys=False)}
+    marker = next((r for r in records if r["metadata"]["name"] == "fruition-bootstrap"), None)
+    ready = next((r for r in records if r["metadata"]["name"] == "fruition-bootstrap-ready"), None)
+    successes = [r for r in records if r["metadata"]["name"].startswith("fruition-release-")]
+    if successes and (bootstrap or any(r["metadata"]["name"] != release_name(sha) for r in successes)):
+        raise ValueError("다른 성공 release가 있는 환경에 initial-install을 사용할 수 없습니다")
+    for record in (marker, ready):
+        if record is not None and (record.get("immutable") is not True or
+                                  any(record.get("data", {}).get(k) != v for k, v in expected.items())):
+            raise ValueError("최초 설치 기록의 SHA·설정·manifest·검증 계약이 다릅니다")
+    apps = json.loads(kubectl("get", "deployments", "-o", "json")).get("items", [])
+    names = {d["metadata"]["name"] for d in documents if d["kind"] == "Deployment"}
+    apps = [a for a in apps if a["metadata"]["name"] in names]
+    if apps and marker is None:
+        raise ValueError("기존 앱이 있는 환경에서 최초 설치를 시작할 수 없습니다")
+    if any(not c["image"].endswith(":" + sha) for a in apps for c in a["spec"]["template"]["spec"]["containers"]):
+        raise ValueError("최초 설치 대상 앱 이미지 SHA가 다릅니다")
+    if bootstrap and ready is not None:
+        raise ValueError("최초 설치가 준비됐습니다. 같은 SHA의 deploy로 업무 검증을 완료하세요")
+    if not bootstrap and (marker is None or ready is None):
+        raise ValueError("initial-install deploy는 동일 SHA의 bootstrap 준비 완료 기록이 필요합니다")
+    if ready is not None:
+        saved = json.loads(ready["data"].get("fingerprints", "{}"))
+        if set(saved) != {"access", "document", "ai"} or any(not re.fullmatch(r"[0-9a-f]{64}", v) for v in saved.values()):
+            raise ValueError("최초 설치 완료 DB fingerprint 기록이 잘못됐습니다")
+        if fingerprints(config) != saved:
+            raise ValueError("최초 설치 완료 후 DB schema가 변경됐습니다")
+    return expected, marker is None
+
+
+def install_record(name, data):
+    return {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": name, "namespace": NAMESPACE},
+            "immutable": True, "data": data}
+
+
 def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False):
     validate(config, sha)
     check_manifest(documents, sha)
@@ -259,6 +312,9 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         raise ValueError("bootstrap과 rollback을 동시에 실행할 수 없습니다")
     settings = None if bootstrap else smoke_settings()
     verify_target(config)
+    initial = not rollback and review["migration_mode"] == "initial-install"
+    if initial:
+        initial_data, needs_empty_check = initial_install_state(config, sha, documents, bootstrap)
     if bootstrap:
         records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
         if any(d["metadata"]["name"].startswith("fruition-release-") for d in records):
@@ -300,7 +356,7 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         if current != expected:
             raise ValueError("기존 성공 release와 실제 DB schema가 달라 SHA 재배포를 차단합니다")
     # 모든 입력·placeholder 검증은 최초 apply 전에 끝낸다.
-    if bootstrap:
+    if bootstrap and not initial:
         apply([{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "fruition-bootstrap", "namespace": NAMESPACE},
                 "immutable": True, "data": {"sha": sha, "config": json.dumps(config, sort_keys=True)}}])
     foundation = {"ServiceAccount", "ConfigMap", "ExternalSecret", "NetworkPolicy"}
@@ -312,8 +368,11 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         if document["kind"] == "ExternalSecret":
             wait(document)
     if not existing.strip():
-        current = fingerprints(config)
-        if review["migration_mode"] == "expand-only":
+        current = fingerprints(config, require_empty=initial and needs_empty_check)
+        if initial and needs_empty_check:
+            # Persist proof only AFTER all three databases passed the empty/ownership gate.
+            apply([install_record("fruition-bootstrap", initial_data)])
+        if review["migration_mode"] == "expand-only" or (initial and bootstrap):
             for document in documents:
                 if document["kind"] == "Job":
                     job(document)
@@ -348,6 +407,8 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         if not str(body.get("openapi", "")).startswith("3.") or not isinstance(body.get("paths"), dict) or not body["paths"]:
             raise ValueError(f"{host}: 유효한 OpenAPI 응답이 아닙니다")
     if bootstrap:
+        if initial:
+            apply([install_record("fruition-bootstrap-ready", {**initial_data, "fingerprints": json.dumps(current)})])
         print("초기 설치 완료: 검증 계정/workspace 준비 후 deploy로 업무 검증을 마치세요. 성공 release는 기록하지 않았습니다.")
         return
     authenticated_smoke(config, sha, settings=settings)

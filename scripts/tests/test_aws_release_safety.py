@@ -41,6 +41,15 @@ class SmokeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             safety.validate_review(None, SHA)
 
+    def test_initial_review_uses_installation_evidence_not_compatibility_claim(self):
+        review = {"release_sha": SHA, "migration_mode": "initial-install",
+                  "installation_test_url": REVIEW["compatibility_test_url"], "restore_test_url": REVIEW["restore_test_url"]}
+        safety.validate_review(review, SHA)
+        for bad in ({**REVIEW, "migration_mode": "initial-install"}, {**review, "installation_test_url": "TODO"},
+                    {**review, "migration_mode": "expand-only"}):
+            with self.assertRaises(ValueError):
+                safety.validate_review(bad, SHA)
+
     def test_credentials_missing_or_invalid_workspace_fail_before_http(self):
         for env in ({}, {**SETTINGS, "AWS_SMOKE_WORKSPACE_ID": "../../production"}):
             with patch.dict(safety.os.environ, env, clear=True), self.assertRaises(ValueError):

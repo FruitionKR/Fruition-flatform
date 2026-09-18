@@ -333,5 +333,92 @@ class DeploymentTests(unittest.TestCase):
                     self.assertFalse(fake.applied("Deployment"))
 
 
+class InitialInstallTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.documents = deploy.render(CONFIG, SHA)
+        cls.review = {"release_sha": SHA, "migration_mode": "initial-install",
+                      "installation_test_url": REVIEW["compatibility_test_url"], "restore_test_url": REVIEW["restore_test_url"]}
+
+    def state(self, ready=False):
+        data = {"initial_install_contract": "1", "sha": SHA, "config": json.dumps(CONFIG, sort_keys=True),
+                "manifest": yaml.safe_dump_all(self.documents, sort_keys=False)}
+        records = [deploy.install_record("fruition-bootstrap", data)]
+        if ready:
+            records.append(deploy.install_record("fruition-bootstrap-ready", {**data, "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64))}))
+        return records
+
+    def execute(self, records=(), apps=(), *, bootstrap=True, fail=None, fingerprint="b" * 64, smoke_error=False):
+        fake = FakeCluster(fail=fail, fingerprint=fingerprint)
+        def run(args, *, input=None):
+            if "get" in args and "configmaps" in args:
+                return json.dumps({"items": records})
+            if "get" in args and "deployments" in args:
+                return json.dumps({"items": apps})
+            return fake.run(args, input=input)
+        with patch.object(deploy, "run", run), patch.object(deploy, "smoke_settings", return_value={}), patch.object(deploy, "authenticated_smoke", side_effect=ValueError("smoke failed") if smoke_error else None) as smoke:
+            try:
+                deploy.deploy(CONFIG, SHA, self.documents, review=self.review, bootstrap=bootstrap)
+            except (ValueError, subprocess.CalledProcessError) as error:
+                return fake, smoke.call_count, error
+        return fake, smoke.call_count, None
+
+    def test_empty_gate_precedes_marker_and_migrations_ready_is_not_success(self):
+        fake, smoke, error = self.execute()
+        self.assertIsNone(error)
+        self.assertEqual(smoke, 0)
+        applied = [d for _, docs in fake.events for d in docs]
+        marker = next(i for i,d in enumerate(applied) if d["metadata"]["name"] == "fruition-bootstrap")
+        preflight = [i for i,d in enumerate(applied) if d["kind"] == "Job" and d["metadata"]["name"].endswith("db-preflight")]
+        self.assertEqual(len([i for i in preflight if i < marker]), 3)
+        for i in preflight[:3]:
+            self.assertIn("Initial install requires an empty database", applied[i]["spec"]["template"]["spec"]["containers"][0]["command"][2])
+        self.assertTrue(any(d["metadata"]["name"] == "fruition-bootstrap-ready" for d in applied))
+        self.assertFalse(any(d["metadata"]["name"].startswith("fruition-release-") for d in applied))
+        fake, _, error = self.execute(fail="job/ai-db-preflight")
+        self.assertIsNotNone(error)
+        self.assertFalse(any(d["metadata"]["name"].startswith("fruition-bootstrap") for d in fake.applied("ConfigMap")))
+        self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in fake.applied("Job")))
+
+    def test_resume_rejects_changed_inputs_even_before_any_app_exists(self):
+        for key,value in (("sha", "c"*40), ("config", "{}"), ("manifest", "changed"), ("initial_install_contract", "0")):
+            records = self.state(); records[0]["data"][key] = value
+            fake, _, error = self.execute(records)
+            self.assertIsNotNone(error, key)
+            self.assertFalse(fake.applied("Job"))
+        records=self.state(); records[0]["immutable"]=False
+        self.assertIsNotNone(self.execute(records)[2])
+        app=copy.deepcopy(next(d for d in self.documents if d["kind"]=="Deployment"))
+        self.assertIsNotNone(self.execute(apps=[app])[2])
+        app["spec"]["template"]["spec"]["containers"][0]["image"]="other:"+"c"*40
+        self.assertIsNotNone(self.execute(self.state(),[app])[2])
+        records=self.state()+[{"metadata":{"name":deploy.release_name(SHA)}}]
+        self.assertIsNotNone(self.execute(records)[2])
+        fake, _, error=self.execute(self.state())
+        self.assertIsNone(error)
+        self.assertFalse(any("Initial install requires an empty database" in d["spec"]["template"]["spec"]["containers"][0]["command"][2] for d in fake.applied("Job") if d["metadata"]["name"].endswith("db-preflight")))
+
+    def test_promotion_requires_ready_record_matching_schema_and_successful_smoke(self):
+        for records in ([], self.state()):
+            fake, _, error=self.execute(records,bootstrap=False)
+            self.assertIsNotNone(error)
+            self.assertFalse(fake.applied("Deployment"))
+        fake, _, error=self.execute(self.state(True),bootstrap=False,fingerprint="c"*64)
+        self.assertIsNotNone(error)
+        self.assertFalse(fake.applied("Deployment"))
+        for fail in (False,True):
+            fake, smoke, error=self.execute(self.state(True),bootstrap=False,smoke_error=fail)
+            self.assertEqual(smoke,1)
+            self.assertEqual(error is not None,fail)
+            self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in fake.applied("Job")))
+            self.assertEqual(any(d["metadata"]["name"]==deploy.release_name(SHA) for d in fake.applied("ConfigMap")),not fail)
+        self.assertIsNotNone(self.execute(self.state(True))[2])
+
+    def test_failed_rollout_does_not_create_ready_receipt(self):
+        fake, _, error=self.execute(fail="deployment/access-svc")
+        self.assertIsNotNone(error)
+        self.assertFalse(any(d["metadata"]["name"]=="fruition-bootstrap-ready" for d in fake.applied("ConfigMap")))
+
+
 if __name__ == "__main__":
     unittest.main()

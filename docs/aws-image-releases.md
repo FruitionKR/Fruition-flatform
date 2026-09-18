@@ -33,7 +33,7 @@
 ## 운영자가 버전을 선택하고 승인
 
 1. 플랫폼 저장소 **Releases**에서 배포할 `Images …`를 선택하고 설명의 40자리 ID를 복사합니다. 아직 draft이거나 실패한 빌드는 배포 대상이 아닙니다.
-2. `docs/releases/<ID>.json`에 DB 변경 호환성과 복원 시험의 실제 검토 기록을 작성해 main에 반영합니다. 기존 `review.example.json` 형식을 사용하며 시험 결과를 자동으로 만들어 넣지 않습니다.
+2. `docs/releases/<ID>.json`에 DB 변경 호환성과 복원 시험의 실제 검토 기록을 작성해 main에 반영합니다. 운영 변경은 `review.example.json`, 최초 설치는 `review.initial.example.json` 형식을 사용합니다. 최초 설치에는 게시 이미지의 마이그레이션·재실행 및 복원 시험 기록이 필요하며, 업무 호환성을 통과한 것으로 대신 표시하지 않습니다.
 3. **Actions → Deploy (EKS) → Run workflow**에서 branch는 `main`, action은 `deploy`, `release_sha`는 선택한 ID로 지정합니다. 최초 설치는 `bootstrap`, 이전 성공 버전 복구는 `rollback`과 `rollback_sha`를 사용합니다.
 4. `feedback`의 **Review deployments**에서 버전과 검토 내용을 확인하고 승인합니다. GitHub 입력의 선택 목록은 릴리스 목록과 자동 동기화되지 않으므로 현재 UI는 Releases에서 선택한 ID를 입력하는 방식입니다.
 5. 배포 role이 게시된 릴리스인지, 네 이미지의 실제 ECR digest가 기록과 같은지 확인합니다. 통과한 경우 기존 DB 검사·migration·순차 교체·업무 smoke를 수행합니다. 운영자 승인 없이 push가 배포를 시작하지 않습니다.
