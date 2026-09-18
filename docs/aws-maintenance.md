@@ -43,9 +43,17 @@
 검토 파일은 [예제](releases/review.example.json)를 복사합니다. 예제의 자리표시는 그대로 배포할 수 없습니다.
 
 - `release_sha`: 실제 네 이미지에 붙인 같은 SHA입니다.
-- `migration_mode`: `none`이면 migration Job을 생략하고, `expand-only`이면 기존 앱과 호환되는 추가 변경만 실행합니다. 컬럼 삭제·이름 변경·즉시 NOT NULL 강제 등 파괴적 변경은 별도 점검 릴리스로 분리합니다.
+- `migration_mode`: 운영 변경은 `expand-only` 또는 `none`을 사용합니다. `none`이면 migration Job을 생략하고, `expand-only`이면 기존 앱과 호환되는 추가 변경만 실행합니다. 컬럼 삭제·이름 변경·즉시 NOT NULL 강제 등 파괴적 변경은 별도 점검 릴리스로 분리합니다.
 - `compatibility_test_url`: 변경 후 DB에서 이전 버전과 새 버전의 로그인·문서·AI 흐름이 동작한 실제 시험 기록입니다. 새 빈 DB에서 migration 성공만 확인해서는 부족합니다. 데이터가 많은 복제 DB에서 잠금·실행시간도 확인하세요.
 - `restore_test_url`: 최근 별도 DB 복원 시험 기록입니다. 최초 배포는 시험용 DB 백업·복원으로 절차를 먼저 검증할 수 있습니다.
+
+최초 설치는 `docs/releases/review.initial.example.json`의 `initial-install` 형식을 사용합니다. `compatibility_test_url` 대신 `installation_test_url`에 실제 게시 이미지의 빈 DB 마이그레이션·재실행 시험 기록을 적고, `restore_test_url`에는 별도 DB 복원 시험 기록을 적습니다. 과거 SQL 이력을 실행하는 첫 설치를 운영 DB의 expand-only 변경으로 표시하지 않습니다.
+
+- `bootstrap`은 성공 release와 기존 앱이 없는 환경에서 DB 3개의 소유권·권한과 빈 상태를 검사합니다. 빈 상태는 public 테이블뿐 아니라 함수·타입, 별도 사용자 schema, plpgsql 외 extension 부재까지 확인합니다. 초기화된 DB·계정·권한은 먼저 준비해야 합니다.
+- 세 DB가 모두 통과한 뒤 immutable `fruition-bootstrap` 기록에 SHA·설정·렌더된 manifest를 고정합니다. 중간 실패는 이 값들이 모두 같을 때만 재시도할 수 있습니다. 빈 DB 검사 실패 시 migration이나 최초 설치 기록을 만들지 않습니다. 사전검사를 위한 Secret·ServiceAccount·NetworkPolicy는 적용될 수 있습니다.
+- API 준비까지 통과하면 immutable `fruition-bootstrap-ready`에 schema fingerprint를 남깁니다. 아직 성공 release는 아닙니다. 이 시점부터 `bootstrap` 대신 같은 SHA로 `deploy`합니다.
+- 검증 계정·workspace 설정 후 실행하는 `deploy`는 완료 기록과 현재 DB schema를 대조하며 migration을 다시 실행하지 않습니다. 실제 로그인·문서·AI smoke를 통과해야 성공 release를 기록합니다. smoke 실패는 같은 SHA로 재시도할 수 있습니다.
+- 다른 성공 release, 다른 이미지·설정·manifest 또는 DB schema 변경이 있으면 이 최초 설치 경로로 넘어갈 수 없습니다. 기존 방식으로 생성한 bootstrap 기록은 빈 DB 검증 증거로 인정하지 않습니다. 기록을 삭제해 우회하지 말고 별도 점검해야 합니다.
 
 URL은 `FruitionKR`의 GitHub Actions 실행·이슈·PR 기록을 사용합니다. 스크립트는 형식과 SHA를 검사하지만, 링크 안의 주장이 사실인지나 SQL 호환성을 자동 증명하지는 않습니다. Environment 승인자가 실제 결과를 확인해야 합니다.
 

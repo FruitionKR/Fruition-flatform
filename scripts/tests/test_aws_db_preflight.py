@@ -55,9 +55,9 @@ class PreflightDatabaseTests(unittest.TestCase):
     def sql(cls, sql, database="postgres"):
         return cls.command(["docker", "exec", cls.container, "psql", "-U", "postgres", "-d", database, "-v", "ON_ERROR_STOP=1", "-Atc", sql])
 
-    def preflight(self, service="access", runtime="runtime_test_password", migration="migration_test_password", *, uri_replace=None, expected_host="127.0.0.1"):
+    def preflight(self, service="access", runtime="runtime_test_password", migration="migration_test_password", *, uri_replace=None, expected_host="127.0.0.1", require_empty=False):
         # 운영 SQL과 shell을 그대로 실행하되 TLS 없는 임시 DB 연결만 치환한다.
-        document = deploy.preflight_job(service, {"access_rds_endpoint": "127.0.0.1", "core_rds_endpoint": expected_host})
+        document = deploy.preflight_job(service, {"access_rds_endpoint": "127.0.0.1", "core_rds_endpoint": expected_host}, require_empty=require_empty)
         script = document["spec"]["template"]["spec"]["containers"][0]["command"][2]
         if service == "ai":
             runtime = f"postgresql://ai_runtime:{runtime}@127.0.0.1:5432/ai_db"
@@ -70,6 +70,22 @@ class PreflightDatabaseTests(unittest.TestCase):
                          self.container, "sh", "-s"], input=script)
 
     def test_actual_bootstrap_roles_passwords_owners_and_fingerprints(self):
+        for service in ("access", "document", "ai"):
+            self.assertRegex(self.preflight(service, require_empty=True), r"^[0-9a-f]{64}$")
+        fixtures = [
+            ("CREATE TABLE empty_probe(id integer)", "DROP TABLE empty_probe"),
+            ("CREATE SCHEMA other_schema", "DROP SCHEMA other_schema"),
+            ("CREATE TYPE empty_probe AS ENUM ('fixture')", "DROP TYPE empty_probe"),
+            ("CREATE FUNCTION empty_probe() RETURNS integer LANGUAGE sql AS 'SELECT 1'", "DROP FUNCTION empty_probe()"),
+        ]
+        for create, cleanup in fixtures:
+            self.sql("SET ROLE access_migration; " + create, "access_db")
+            try:
+                with self.assertRaises(subprocess.CalledProcessError) as failure:
+                    self.preflight(require_empty=True)
+                self.assertIn("Initial install requires an empty database", failure.exception.stdout)
+            finally:
+                self.sql("SET ROLE access_migration; " + cleanup, "access_db")
         for service in ("access", "document", "ai"):
             with self.subTest(service=service):
                 first = self.preflight(service)

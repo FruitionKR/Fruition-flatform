@@ -10,14 +10,15 @@ from urllib import request, error
 
 
 def validate_review(review, sha):
-    required = {"release_sha", "migration_mode", "compatibility_test_url", "restore_test_url"}
+    evidence = "installation_test_url" if isinstance(review, dict) and review.get("migration_mode") == "initial-install" else "compatibility_test_url"
+    required = {"release_sha", "migration_mode", evidence, "restore_test_url"}
     if not isinstance(review, dict) or set(review) != required:
         raise ValueError("릴리스 검토 파일의 필수 항목을 확인하세요")
     if review["release_sha"] != sha:
         raise ValueError("검토한 release SHA와 배포 SHA가 다릅니다")
-    if review["migration_mode"] not in {"expand-only", "none"}:
-        raise ValueError("온라인 배포는 expand-only 또는 none migration만 허용합니다")
-    for key in ("compatibility_test_url", "restore_test_url"):
+    if review["migration_mode"] not in {"expand-only", "none", "initial-install"}:
+        raise ValueError("migration은 expand-only, none 또는 검증된 initial-install만 허용합니다")
+    for key in (evidence, "restore_test_url"):
         if not isinstance(review[key], str) or not re.fullmatch(
                 r"https://github\.com/FruitionKR/[A-Za-z0-9_.-]+/(actions/runs/[0-9]+|issues/[0-9]+|pull/[0-9]+)(?:#[A-Za-z0-9_-]+)?", review[key]):
             raise ValueError(f"실제로 수행한 시험의 GitHub 기록 URL이 필요합니다: {key}")
