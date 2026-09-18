@@ -2,6 +2,7 @@
 """AWS manifest 렌더와 순차 배포 gate. 실제 실행은 명시적 deploy/rollback만 허용한다."""
 
 import argparse
+import copy
 import json
 import ipaddress
 import re
@@ -263,7 +264,34 @@ def wait_alb_bindings():
     raise ValueError("ALB TargetGroupBinding 준비 시간 초과: 앱 Pod 생성 전 중단합니다")
 
 
-def initial_install_state(config, sha, documents, bootstrap):
+def access_probe_timeout_recovery(before, after):
+    """Only the reviewed Access timeout 1 -> 5 change; never alter image/SQL/config."""
+    try:
+        original = list(yaml.safe_load_all(before))
+    except yaml.YAMLError:
+        return False
+    if not original or any(not isinstance(d, dict) for d in original):
+        return False
+    updated = copy.deepcopy(after)
+    old = next((d for d in original if d.get("kind") == "Deployment" and d["metadata"]["name"] == "access-svc"), None)
+    new = next((d for d in updated if d.get("kind") == "Deployment" and d["metadata"]["name"] == "access-svc"), None)
+    if old is None or new is None:
+        return False
+    old_container = old["spec"]["template"]["spec"]["containers"][0]
+    new_container = new["spec"]["template"]["spec"]["containers"][0]
+    for probe in ("startupProbe", "readinessProbe", "livenessProbe"):
+        previous = old_container.get(probe, {})
+        current = new_container.get(probe, {})
+        if previous.get("timeoutSeconds", 1) != 1 or current.get("timeoutSeconds") != 5:
+            return False
+        if "timeoutSeconds" in previous:
+            current["timeoutSeconds"] = previous["timeoutSeconds"]
+        else:
+            current.pop("timeoutSeconds")
+    return original == updated
+
+
+def initial_install_state(config, sha, documents, bootstrap, probe_recovery=False):
     """Bind an empty-DB installation and its promotion to the exact reviewed inputs."""
     records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
     expected = {"initial_install_contract": "1", "sha": sha,
@@ -274,10 +302,25 @@ def initial_install_state(config, sha, documents, bootstrap):
     successes = [r for r in records if r["metadata"]["name"].startswith("fruition-release-")]
     if successes and (bootstrap or any(r["metadata"]["name"] != release_name(sha) for r in successes)):
         raise ValueError("다른 성공 release가 있는 환경에 initial-install을 사용할 수 없습니다")
-    for record in (marker, ready):
+    recovery = next((r for r in records if r["metadata"]["name"] == "fruition-bootstrap-probe-recovery"), None)
+    pending_recovery = None
+    if probe_recovery and (marker is None or ready is not None or successes):
+        raise ValueError("probe 복구는 기존 미완료 최초 설치에만 허용합니다")
+    for record in (marker, ready, recovery):
         if record is not None and (record.get("immutable") is not True or
-                                  any(record.get("data", {}).get(k) != v for k, v in expected.items())):
+                                  any(record.get("data", {}).get(k) != v for k, v in expected.items() if k != "manifest")):
             raise ValueError("최초 설치 기록의 SHA·설정·manifest·검증 계약이 다릅니다")
+    if recovery is not None and (marker is None or recovery["data"].get("manifest") != expected["manifest"] or
+                                 recovery["data"].get("original_manifest") != marker["data"].get("manifest") or
+                                 not access_probe_timeout_recovery(marker["data"]["manifest"], documents)):
+        raise ValueError("최초 설치 probe 복구 기록이 일치하지 않습니다")
+    if marker is not None and marker["data"].get("manifest") != expected["manifest"] and recovery is None:
+        if not (probe_recovery and access_probe_timeout_recovery(marker["data"].get("manifest", ""), documents)):
+            raise ValueError("최초 설치 manifest가 다릅니다. 검토된 Access probe 복구만 명시적으로 허용할 수 있습니다")
+        pending_recovery = install_record("fruition-bootstrap-probe-recovery",
+                                          {**expected, "original_manifest": marker["data"]["manifest"]})
+    if ready is not None and ready["data"].get("manifest") != expected["manifest"]:
+        raise ValueError("최초 설치 완료 manifest가 다릅니다")
     apps = json.loads(kubectl("get", "deployments", "-o", "json")).get("items", [])
     names = {d["metadata"]["name"] for d in documents if d["kind"] == "Deployment"}
     apps = [a for a in apps if a["metadata"]["name"] in names]
@@ -295,7 +338,7 @@ def initial_install_state(config, sha, documents, bootstrap):
             raise ValueError("최초 설치 완료 DB fingerprint 기록이 잘못됐습니다")
         if fingerprints(config) != saved:
             raise ValueError("최초 설치 완료 후 DB schema가 변경됐습니다")
-    return expected, marker is None
+    return expected, marker is None, pending_recovery
 
 
 def install_record(name, data):
@@ -303,18 +346,20 @@ def install_record(name, data):
             "immutable": True, "data": data}
 
 
-def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False):
+def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False):
     validate(config, sha)
     check_manifest(documents, sha)
     if not rollback:
         validate_review(review, sha)
     if bootstrap and rollback:
         raise ValueError("bootstrap과 rollback을 동시에 실행할 수 없습니다")
+    if probe_recovery and (not bootstrap or rollback or review["migration_mode"] != "initial-install"):
+        raise ValueError("probe 복구는 initial-install bootstrap 전용입니다")
     settings = None if bootstrap else smoke_settings()
     verify_target(config)
     initial = not rollback and review["migration_mode"] == "initial-install"
     if initial:
-        initial_data, needs_empty_check = initial_install_state(config, sha, documents, bootstrap)
+        initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery)
     if bootstrap:
         records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
         if any(d["metadata"]["name"].startswith("fruition-release-") for d in records):
@@ -359,6 +404,8 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     if bootstrap and not initial:
         apply([{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "fruition-bootstrap", "namespace": NAMESPACE},
                 "immutable": True, "data": {"sha": sha, "config": json.dumps(config, sort_keys=True)}}])
+    if initial and recovery_record is not None:
+        apply([recovery_record])
     foundation = {"ServiceAccount", "ConfigMap", "ExternalSecret", "NetworkPolicy"}
     apply([d for d in documents if d["kind"] in foundation])
     # apply는 렌더에서 제외한 기존 리소스를 지우지 않는다. 제한 정책을 먼저 준비한 뒤
@@ -426,6 +473,7 @@ def main():
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--sha", required=True)
     parser.add_argument("--review", type=Path, help="검토된 릴리스별 migration/복원 시험 기록 JSON")
+    parser.add_argument("--bootstrap-probe-recovery", action="store_true", help="검토된 Access probe timeout 1→5초 복구만 허용")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     validate(config, args.sha)
@@ -435,7 +483,7 @@ def main():
     else:
         review = json.loads(args.review.read_text()) if args.review and args.action != "rollback" else None
         deploy(config, args.sha, documents, rollback=args.action == "rollback", review=review,
-               bootstrap=args.action == "bootstrap")
+               bootstrap=args.action == "bootstrap", probe_recovery=args.bootstrap_probe_recovery)
 
 
 if __name__ == "__main__":

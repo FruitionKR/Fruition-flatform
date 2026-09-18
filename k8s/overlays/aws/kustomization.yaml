@@ -258,3 +258,18 @@ patches:
       - op: add
         path: /spec/storage/volumes/0/class
         value: gp3
+
+  # 외부 SMTP를 포함한 Access health는 정상 응답에도 1초를 넘을 수 있다.
+  - target:
+      kind: Deployment
+      name: access-svc
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe/timeoutSeconds
+        value: 5
+      - op: add
+        path: /spec/template/spec/containers/0/readinessProbe/timeoutSeconds
+        value: 5
+      - op: add
+        path: /spec/template/spec/containers/0/livenessProbe/timeoutSeconds
+        value: 5

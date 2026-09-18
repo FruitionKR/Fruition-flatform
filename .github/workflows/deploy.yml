@@ -10,6 +10,10 @@ on:
         type: choice
         options: [deploy, rollback, bootstrap]
         default: deploy
+      bootstrap_probe_recovery:
+        description: "미완료 최초 설치의 Access probe timeout 1→5초 복구 승인"
+        type: boolean
+        default: false
       release_sha:
         description: "GitHub Releases의 Images 버전에서 40자리 ID 복사 (platform 커밋 SHA 아님)"
         type: string
@@ -40,6 +44,7 @@ jobs:
       EKS_CLUSTER: fruition-eks
       DEPLOY_CONFIG: ${{ vars.AWS_DEPLOY_CONFIG_JSON }}
       ACTION: ${{ inputs.action }}
+      BOOTSTRAP_PROBE_RECOVERY: ${{ inputs.bootstrap_probe_recovery }}
       RELEASE_SHA: ${{ inputs.release_sha }}
       ROLLBACK_SHA: ${{ inputs.rollback_sha }}
     steps:
@@ -87,7 +92,11 @@ jobs:
           AWS_SMOKE_EMAIL: ${{ secrets.AWS_SMOKE_EMAIL }}
           AWS_SMOKE_PASSWORD: ${{ secrets.AWS_SMOKE_PASSWORD }}
           AWS_SMOKE_WORKSPACE_ID: ${{ vars.AWS_SMOKE_WORKSPACE_ID }}
-        run: python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --review "docs/releases/$IMAGE_SHA.json"
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [ "$BOOTSTRAP_PROBE_RECOVERY" = true ]; then EXTRA+=(--bootstrap-probe-recovery); fi
+          python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --review "docs/releases/$IMAGE_SHA.json" "${EXTRA[@]}"
       - name: Notify deployment failure through operations Discord
         if: failure() && steps.aws_credentials.outcome == 'success'
         env:

@@ -348,7 +348,7 @@ class InitialInstallTests(unittest.TestCase):
             records.append(deploy.install_record("fruition-bootstrap-ready", {**data, "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64))}))
         return records
 
-    def execute(self, records=(), apps=(), *, bootstrap=True, fail=None, fingerprint="b" * 64, smoke_error=False):
+    def execute(self, records=(), apps=(), *, bootstrap=True, fail=None, fingerprint="b" * 64, smoke_error=False, probe_recovery=False):
         fake = FakeCluster(fail=fail, fingerprint=fingerprint)
         def run(args, *, input=None):
             if "get" in args and "configmaps" in args:
@@ -358,7 +358,7 @@ class InitialInstallTests(unittest.TestCase):
             return fake.run(args, input=input)
         with patch.object(deploy, "run", run), patch.object(deploy, "smoke_settings", return_value={}), patch.object(deploy, "authenticated_smoke", side_effect=ValueError("smoke failed") if smoke_error else None) as smoke:
             try:
-                deploy.deploy(CONFIG, SHA, self.documents, review=self.review, bootstrap=bootstrap)
+                deploy.deploy(CONFIG, SHA, self.documents, review=self.review, bootstrap=bootstrap, probe_recovery=probe_recovery)
             except (ValueError, subprocess.CalledProcessError) as error:
                 return fake, smoke.call_count, error
         return fake, smoke.call_count, None
@@ -413,6 +413,58 @@ class InitialInstallTests(unittest.TestCase):
             self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in fake.applied("Job")))
             self.assertEqual(any(d["metadata"]["name"]==deploy.release_name(SHA) for d in fake.applied("ConfigMap")),not fail)
         self.assertIsNotNone(self.execute(self.state(True))[2])
+
+    def legacy_probe_state(self):
+        records = self.state()
+        old = copy.deepcopy(self.documents)
+        access = next(d for d in old if d["kind"] == "Deployment" and d["metadata"]["name"] == "access-svc")
+        for probe in ("startupProbe", "readinessProbe", "livenessProbe"):
+            access["spec"]["template"]["spec"]["containers"][0][probe].pop("timeoutSeconds")
+        records[0]["data"]["manifest"] = yaml.safe_dump_all(old, sort_keys=False)
+        return records
+
+    def test_probe_recovery_requires_explicit_flag_and_preserves_original_record(self):
+        records = self.legacy_probe_state()
+        fake, _, error = self.execute(records)
+        self.assertIsNotNone(error)
+        self.assertFalse(fake.applied("Job"))
+        fake, _, error = self.execute(records, probe_recovery=True)
+        self.assertIsNone(error)
+        receipts = {d["metadata"]["name"]: d for d in fake.applied("ConfigMap")}
+        self.assertNotIn("fruition-bootstrap", receipts)
+        recovery = receipts["fruition-bootstrap-probe-recovery"]
+        self.assertTrue(recovery["immutable"])
+        self.assertEqual(recovery["data"]["original_manifest"], records[0]["data"]["manifest"])
+        resumed = records + [recovery]
+        self.assertIsNone(self.execute(resumed)[2])
+        completed = resumed + [receipts["fruition-bootstrap-ready"]]
+        fake, smoke, error = self.execute(completed, bootstrap=False)
+        self.assertIsNone(error)
+        self.assertEqual(smoke, 1)
+        recovery["data"]["original_manifest"] = "tampered"
+        self.assertIsNotNone(self.execute(resumed)[2])
+
+    def test_probe_recovery_cannot_change_images_paths_resources_or_other_deployments(self):
+        for field in ("image", "resources", "path", "timeout", "other"):
+            records = self.legacy_probe_state()
+            old = list(yaml.safe_load_all(records[0]["data"]["manifest"]))
+            name = "document-svc" if field == "other" else "access-svc"
+            c = next(d for d in old if d["kind"] == "Deployment" and d["metadata"]["name"] == name)["spec"]["template"]["spec"]["containers"][0]
+            if field in ("image", "other"):
+                c["image"] = "unexpected:" + SHA
+            elif field == "resources":
+                c["resources"]["requests"]["cpu"] = "999m"
+            elif field == "path":
+                c["startupProbe"]["httpGet"]["path"] = "/wrong"
+            else:
+                c["startupProbe"]["timeoutSeconds"] = 2
+            records[0]["data"]["manifest"] = yaml.safe_dump_all(old, sort_keys=False)
+            fake, _, error = self.execute(records, probe_recovery=True)
+            self.assertIsNotNone(error, field)
+            self.assertFalse(fake.applied("Job"))
+        self.assertIsNotNone(self.execute(probe_recovery=True)[2])
+        self.assertIsNotNone(self.execute(self.state(True), bootstrap=False, probe_recovery=True)[2])
+        self.assertFalse(deploy.access_probe_timeout_recovery("invalid", self.documents))
 
     def test_failed_rollout_does_not_create_ready_receipt(self):
         fake, _, error=self.execute(fail="deployment/access-svc")
