@@ -348,7 +348,7 @@ class InitialInstallTests(unittest.TestCase):
             records.append(deploy.install_record("fruition-bootstrap-ready", {**data, "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64))}))
         return records
 
-    def execute(self, records=(), apps=(), *, bootstrap=True, fail=None, fingerprint="b" * 64, smoke_error=False, probe_recovery=False, mail_health_recovery=False):
+    def execute(self, records=(), apps=(), *, bootstrap=True, fail=None, fingerprint="b" * 64, smoke_error=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False):
         fake = FakeCluster(fail=fail, fingerprint=fingerprint)
         def run(args, *, input=None):
             if "get" in args and "configmaps" in args:
@@ -358,7 +358,7 @@ class InitialInstallTests(unittest.TestCase):
             return fake.run(args, input=input)
         with patch.object(deploy, "run", run), patch.object(deploy, "smoke_settings", return_value={}), patch.object(deploy, "authenticated_smoke", side_effect=ValueError("smoke failed") if smoke_error else None) as smoke:
             try:
-                deploy.deploy(CONFIG, SHA, self.documents, review=self.review, bootstrap=bootstrap, probe_recovery=probe_recovery, mail_health_recovery=mail_health_recovery)
+                deploy.deploy(CONFIG, SHA, self.documents, review=self.review, bootstrap=bootstrap, probe_recovery=probe_recovery, mail_health_recovery=mail_health_recovery, oauth_recovery=oauth_recovery)
             except (ValueError, subprocess.CalledProcessError) as error:
                 return fake, smoke.call_count, error
         return fake, smoke.call_count, None
@@ -519,6 +519,122 @@ class InitialInstallTests(unittest.TestCase):
         fake, _, error=self.execute(fail="deployment/access-svc")
         self.assertIsNotNone(error)
         self.assertFalse(any(d["metadata"]["name"]=="fruition-bootstrap-ready" for d in fake.applied("ConfigMap")))
+
+    def pre_oauth_state(self, health_chain=False):
+        old = copy.deepcopy(self.documents)
+        access = next(d for d in old if d["kind"] == "ExternalSecret" and d["metadata"]["name"] == "fruition-access")
+        access["spec"]["data"] = [e for e in access["spec"]["data"]
+                                  if not e["secretKey"].startswith(("GOOGLE_", "NAVER_", "KAKAO_"))]
+        ready_text = yaml.safe_dump_all(old, sort_keys=False)
+        records = self.state(True)
+        for record in records:
+            record["data"]["manifest"] = ready_text
+        if health_chain:
+            container = next(d for d in old if d["kind"] == "Deployment" and d["metadata"]["name"] == "access-svc")["spec"]["template"]["spec"]["containers"][0]
+            container["env"] = [e for e in container["env"] if e["name"] != "MANAGEMENT_HEALTH_MAIL_ENABLED"]
+            before_mail = yaml.safe_dump_all(old, sort_keys=False)
+            for probe in ("startupProbe", "readinessProbe", "livenessProbe"):
+                container[probe].pop("timeoutSeconds")
+            original = yaml.safe_dump_all(old, sort_keys=False)
+            records[0]["data"]["manifest"] = original
+            records.extend([
+                deploy.install_record("fruition-bootstrap-probe-recovery", {**records[0]["data"], "original_manifest": original, "manifest": before_mail}),
+                deploy.install_record("fruition-bootstrap-mail-health-recovery", {**records[0]["data"], "original_manifest": before_mail, "manifest": ready_text}),
+            ])
+        return records
+
+    def test_oauth_promotion_preserves_readiness_health_chain_and_never_migrates(self):
+        for chain in (False, True):
+            records = self.pre_oauth_state(chain)
+            original = copy.deepcopy(records)
+            fake, _, error = self.execute(records, bootstrap=False)
+            self.assertIsNotNone(error)
+            self.assertFalse(fake.applied("ConfigMap"))
+            fake, smoke, error = self.execute(records, bootstrap=False, oauth_recovery=True)
+            self.assertIsNone(error)
+            self.assertEqual(smoke, 1)
+            self.assertEqual(records, original)
+            receipts = {d["metadata"]["name"]: d for d in fake.applied("ConfigMap")}
+            self.assertFalse(set(receipts) & {r["metadata"]["name"] for r in records})
+            receipt = receipts["fruition-bootstrap-oauth-recovery"]
+            self.assertTrue(receipt["immutable"])
+            self.assertEqual(receipt["data"]["original_manifest"], records[1]["data"]["manifest"])
+            self.assertEqual(receipt["data"]["fingerprints"], records[1]["data"]["fingerprints"])
+            self.assertIn(deploy.release_name(SHA), receipts)
+            self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in fake.applied("Job")))
+            fake, smoke, error = self.execute(records + [receipt], bootstrap=False)
+            self.assertIsNone(error)
+            self.assertEqual(smoke, 1)
+            self.assertNotIn("fruition-bootstrap-oauth-recovery", {d["metadata"]["name"] for d in fake.applied("ConfigMap")})
+
+    def test_oauth_promotion_checks_schema_and_smoke_and_allows_failed_smoke_retry(self):
+        records = self.pre_oauth_state(True)
+        fake, _, error = self.execute(records, bootstrap=False, oauth_recovery=True, fingerprint="c" * 64)
+        self.assertIsNotNone(error)
+        self.assertFalse(fake.applied("ConfigMap"))
+        fake, smoke, error = self.execute(records, bootstrap=False, oauth_recovery=True, smoke_error=True)
+        self.assertIsNotNone(error)
+        self.assertEqual(smoke, 1)
+        receipts = {d["metadata"]["name"]: d for d in fake.applied("ConfigMap")}
+        self.assertNotIn(deploy.release_name(SHA), receipts)
+        receipt = receipts["fruition-bootstrap-oauth-recovery"]
+        self.assertIsNone(self.execute(records + [receipt], bootstrap=False, oauth_recovery=True)[2])
+        for field in ("original_manifest", "manifest", "fingerprints", "sha", "config"):
+            bad = copy.deepcopy(receipt)
+            bad["data"][field] = "tampered"
+            fake, _, error = self.execute(records + [bad], bootstrap=False)
+            self.assertIsNotNone(error, field)
+            self.assertFalse(fake.applied("Deployment"))
+        bad = copy.deepcopy(receipt)
+        bad["immutable"] = False
+        self.assertIsNotNone(self.execute(records + [bad], bootstrap=False)[2])
+
+    def test_oauth_promotion_rejects_wrong_lifecycle_or_changed_readiness_chain(self):
+        cases = [[], self.pre_oauth_state()[:1], self.state(True),
+                 self.pre_oauth_state() + [{"metadata": {"name": deploy.release_name(SHA)}}]]
+        for records in cases:
+            fake, _, error = self.execute(records, bootstrap=False, oauth_recovery=True)
+            self.assertIsNotNone(error)
+            self.assertFalse(fake.applied("ConfigMap"))
+        records = self.pre_oauth_state(True)
+        self.assertIsNotNone(self.execute(records, oauth_recovery=True)[2])
+        for option in ("probe_recovery", "mail_health_recovery"):
+            self.assertIsNotNone(self.execute(records, bootstrap=False, oauth_recovery=True, **{option: True})[2])
+        for index, key, value in ((0, "sha", "c" * 40), (1, "manifest", "changed"),
+                                  (2, "original_manifest", "changed"), (3, "manifest", "changed")):
+            changed = copy.deepcopy(records)
+            changed[index]["data"][key] = value
+            self.assertIsNotNone(self.execute(changed, bootstrap=False, oauth_recovery=True)[2])
+        for review, rollback in ((REVIEW, False), (None, True)):
+            with self.assertRaisesRegex(ValueError, "OAuth 복구"):
+                deploy.deploy(CONFIG, SHA, self.documents, review=review, rollback=rollback, oauth_recovery=True)
+
+    def test_oauth_matcher_rejects_arbitrary_or_partial_secret_and_workload_changes(self):
+        records = self.pre_oauth_state()
+        before = records[0]["data"]["manifest"]
+        self.assertTrue(deploy.access_oauth_secret_recovery(before, self.documents))
+        for field in ("missing", "duplicate", "remote_key", "property", "version", "other_secret", "image", "target"):
+            changed = copy.deepcopy(self.documents)
+            secret = next(d for d in changed if d["kind"] == "ExternalSecret" and d["metadata"]["name"] == "fruition-access")
+            entry = next(e for e in secret["spec"]["data"] if e["secretKey"] == "GOOGLE_CLIENT_ID")
+            if field == "missing": secret["spec"]["data"].remove(entry)
+            elif field == "duplicate": secret["spec"]["data"].append(copy.deepcopy(entry))
+            elif field == "remote_key": entry["remoteRef"]["key"] = "other/app"
+            elif field == "property": entry["remoteRef"]["property"] = "JWT_SECRET"
+            elif field == "version": entry["remoteRef"]["version"] = "other"
+            elif field == "target": secret["spec"]["target"]["name"] = "other"
+            elif field == "other_secret": secret["spec"]["data"][0]["remoteRef"]["property"] = "other"
+            else:
+                next(d for d in changed if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]["image"] = "different:" + SHA
+            self.assertFalse(deploy.access_oauth_secret_recovery(before, changed), field)
+        self.assertFalse(deploy.access_oauth_secret_recovery("invalid", self.documents))
+        self.assertFalse(deploy.access_oauth_secret_recovery("[invalid", self.documents))
+
+    def test_workflow_wires_explicit_oauth_recovery_input(self):
+        workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
+        self.assertIn("bootstrap_oauth_recovery:", workflow)
+        self.assertIn("BOOTSTRAP_OAUTH_RECOVERY: ${{ inputs.bootstrap_oauth_recovery }}", workflow)
+        self.assertIn('if [ "$BOOTSTRAP_OAUTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-oauth-recovery); fi', workflow)
 
 
 if __name__ == "__main__":

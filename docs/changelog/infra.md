@@ -2,6 +2,8 @@
 
 ## 2026-09-20
 
+- bootstrap 준비 완료 후 OAuth Secret 연결 추가로 최초 deploy가 차단되는 문제에 전용 복구 옵션을 추가했습니다. Access의 6개 연결 추가만 허용하며 기존 설치·health·준비 완료 기록과 DB schema를 대조하고 별도 immutable 복구 기록을 남깁니다. migration 재실행 없이 업무 smoke를 통과해야 성공 처리합니다. AWS 계약 테스트 83개, Terraform validate, actionlint를 통과했고 실제 DB 3개의 schema가 설치 완료 기록과 일치함을 확인했습니다. 운영 복구 배포는 병합 후 승인 실행이 필요합니다.
+
 - Google·Naver·Kakao OAuth 6개 항목의 Terraform 빈 초기값과 Access 전용 ExternalSecret 매핑을 추가했습니다. 서비스별 자격증명 경계 및 원본 키 매핑 검증을 보강했습니다. 기존 Secret의 운영 값은 보존하며 실제 값은 코드에 포함하지 않습니다. 환경변수 대조와 기존 bootstrap manifest 고정으로 인한 배포 전환 조건을 문서화했습니다.
 
 ## 2026-09-18
