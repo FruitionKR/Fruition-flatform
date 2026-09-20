@@ -122,7 +122,7 @@ def ecr_digest(service, release, missing_ok=False):
     return digest
 
 
-def build(path, service, result_path):
+def prepare_build(path, service, result_path):
     data = json.loads(Path(path).read_text())
     release = data["release_sha"]
     validate_manifest(data, release, complete=False)
@@ -150,15 +150,26 @@ def build(path, service, result_path):
         password = run(["aws", "ecr", "get-login-password", "--region", "ap-northeast-2"])
         subprocess.run(["docker", "login", "--username", "AWS", "--password-stdin", registry],
                        input=password, text=True, check=True)
-        try:
-            subprocess.run(["docker", "build", "--platform", "linux/amd64", "--pull",
-                            "--label", "org.opencontainers.image.revision=" + data["sources"][repo],
-                            "--label", "org.opencontainers.image.source=https://github.com/" + repo,
-                            "-f", str(source / dockerfile), "-t", image, str(source / context)], check=True)
-            subprocess.run(["docker", "push", image], check=True)
-        finally:
-            subprocess.run(["docker", "logout", registry], check=False)
-        digest = ecr_digest(service, release)
+        for key, value in {
+            "build": "true", "registry": registry, "image": image,
+            "context": str(source / context), "dockerfile": str(source / dockerfile),
+            "revision": data["sources"][repo], "repository": "https://github.com/" + repo,
+        }.items():
+            output(key, value)
+        return
+    # A retry reuses the immutable tag and never overwrites a published image.
+    output("build", "false")
+    Path(result_path).write_text(json.dumps({service: digest}) + "\n")
+
+
+def record_build(path, service, result_path, expected_digest):
+    data = json.loads(Path(path).read_text())
+    validate_manifest(data, data["release_sha"], complete=False)
+    if not DIGEST.fullmatch(expected_digest or ""):
+        raise ValueError("Build action must return an image digest")
+    digest = ecr_digest(service, data["release_sha"])
+    if digest != expected_digest:
+        raise ValueError("Built digest does not match immutable ECR tag")
     Path(result_path).write_text(json.dumps({service: digest}) + "\n")
 
 
@@ -212,15 +223,17 @@ def notes(path, destination):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["discover", "build", "finalize", "notes", "verify"])
+    parser.add_argument("command", choices=["discover", "prepare-build", "record-build", "finalize", "notes", "verify"])
     parser.add_argument("--manifest", default="release.json")
     parser.add_argument("--service", choices=list(SERVICES))
     parser.add_argument("--results", default="results")
     parser.add_argument("--output", default="release-notes.md")
     parser.add_argument("--release")
+    parser.add_argument("--digest")
     args = parser.parse_args()
     if args.command == "discover": discover(args.manifest)
-    elif args.command == "build": build(args.manifest, args.service, args.output)
+    elif args.command == "prepare-build": prepare_build(args.manifest, args.service, args.output)
+    elif args.command == "record-build": record_build(args.manifest, args.service, args.output, args.digest)
     elif args.command == "finalize": finalize(args.manifest, args.results)
     elif args.command == "notes": notes(args.manifest, args.output)
     else: verify(args.release)

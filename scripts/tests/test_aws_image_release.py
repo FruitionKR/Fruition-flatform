@@ -112,6 +112,54 @@ class ImageReleaseTests(unittest.TestCase):
                     with self.assertRaises(ValueError): release.fetch_release(data["release_sha"])
                     response[field] = False
 
+    def test_record_build_rejects_missing_or_mismatched_action_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); path = root / "release.json"; result = root / "image.json"
+            data = manifest(); path.write_text(json.dumps(data))
+            digest = "sha256:" + "b" * 64
+            with patch.object(release, "ecr_digest", return_value=digest):
+                for value in (None, "", "latest", "sha256:" + "c" * 64):
+                    with self.subTest(value=value), self.assertRaises(ValueError):
+                        release.record_build(path, "pipeline", result, value)
+                    self.assertFalse(result.exists())
+                release.record_build(path, "pipeline", result, digest)
+                self.assertEqual({"pipeline": digest}, json.loads(result.read_text()))
+
+    def test_prepare_retry_does_not_checkout_login_or_rebuild_existing_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); path = root / "release.json"; result = root / "image.json"
+            path.write_text(json.dumps(manifest())); digest = "sha256:" + "b" * 64
+            with patch.dict(release.os.environ, {"AWS_ACCOUNT_ID": "123456789012"}), \
+                 patch.object(release, "run", side_effect=["123456789012", json.dumps({"repositories": [{"imageTagMutability": "IMMUTABLE"}]})]), \
+                 patch.object(release, "ecr_digest", return_value=digest), \
+                 patch.object(release.subprocess, "run") as command, patch.object(release, "output") as output:
+                release.prepare_build(path, "pipeline", result)
+                command.assert_not_called()
+                output.assert_called_once_with("build", "false")
+                self.assertEqual({"pipeline": digest}, json.loads(result.read_text()))
+
+    def test_prepare_new_image_verifies_checkout_before_exposing_build_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); path = root / "release.json"; result = root / "image.json"
+            data = manifest(); path.write_text(json.dumps(data))
+            revision = data["sources"]["FruitionKR/Fruition-ai"]
+            for checked_out in ("f" * 40, revision):
+                with patch.dict(release.os.environ, {"AWS_ACCOUNT_ID": "123456789012"}), \
+                     patch.object(release, "run", side_effect=["123456789012", json.dumps({"repositories": [{"imageTagMutability": "IMMUTABLE"}]}), checked_out, "synthetic-login-token"]), \
+                     patch.object(release, "ecr_digest", return_value=None), \
+                     patch.object(release.subprocess, "run") as command, patch.object(release, "output") as output:
+                    if checked_out != revision:
+                        with self.assertRaises(ValueError): release.prepare_build(path, "pipeline", result)
+                        output.assert_not_called()
+                        self.assertEqual(2, command.call_count)
+                    else:
+                        release.prepare_build(path, "pipeline", result)
+                        values = dict(c.args for c in output.call_args_list)
+                        self.assertEqual("true", values["build"])
+                        self.assertEqual("source/pipeline", values["context"])
+                        self.assertEqual(revision, values["revision"])
+                        self.assertFalse(result.exists())  # only record after push verification
+
     def test_deploy_requires_matching_ecr_digest_for_every_image(self):
         data = manifest()
         with patch.object(release, "fetch_release", return_value=data), patch.object(release, "ecr_digest", return_value="sha256:" + "b" * 64) as lookup:
