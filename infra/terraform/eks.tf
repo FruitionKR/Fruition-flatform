@@ -33,6 +33,25 @@ module "eks" {
 
   eks_managed_node_group_defaults = {
     ami_type = "AL2023_x86_64_STANDARD"
+    # Reclaim unused image layers before a rollout reaches disk pressure.
+    # Kubelet owns GC; do not run a competing privileged prune DaemonSet.
+    cloudinit_pre_nodeadm = [{
+      content_type = "application/node.eks.aws"
+      content = yamlencode({
+        apiVersion = "node.eks.aws/v1alpha1"
+        kind       = "NodeConfig"
+        spec = {
+          kubelet = {
+            config = {
+              imageGCHighThresholdPercent = 70
+              imageGCLowThresholdPercent  = 60
+              imageMaximumGCAge           = "24h"
+            }
+          }
+        }
+      })
+    }]
+    update_config = { max_unavailable = 1 }
   }
 
   eks_managed_node_groups = {

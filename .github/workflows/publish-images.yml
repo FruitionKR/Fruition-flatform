@@ -48,7 +48,7 @@ jobs:
       id-token: write
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 4
       matrix:
         service: [access-svc, document-svc, pipeline, converter]
     env:
@@ -71,8 +71,37 @@ jobs:
           aws-region: ap-northeast-2
           allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           unset-current-credentials: true
-      - name: Build pinned source and push immutable image
-        run: python3 scripts/aws_image_release.py build --service "$SERVICE" --output "$SERVICE.json"
+      - name: Prepare tested source or reuse immutable image
+        id: source
+        run: python3 scripts/aws_image_release.py prepare-build --service "$SERVICE" --output "$SERVICE.json"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        if: steps.source.outputs.build == 'true'
+      - name: Build and push with service cache
+        id: image
+        if: steps.source.outputs.build == 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ steps.source.outputs.context }}
+          file: ${{ steps.source.outputs.dockerfile }}
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: ${{ steps.source.outputs.image }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
+            org.opencontainers.image.source=${{ steps.source.outputs.repository }}
+          cache-from: type=gha,version=2,scope=fruition-${{ matrix.service }}
+          cache-to: type=gha,version=2,scope=fruition-${{ matrix.service }},mode=max,timeout=2m,ignore-error=true
+      - name: Verify pushed digest
+        if: steps.source.outputs.build == 'true'
+        env:
+          BUILT_DIGEST: ${{ steps.image.outputs.digest }}
+        run: python3 scripts/aws_image_release.py record-build --service "$SERVICE" --output "$SERVICE.json" --digest "$BUILT_DIGEST"
+      - name: Remove registry login
+        if: always() && steps.source.outputs.registry != ''
+        env:
+          REGISTRY: ${{ steps.source.outputs.registry }}
+        run: docker logout "$REGISTRY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: image-${{ matrix.service }}
