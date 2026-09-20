@@ -63,6 +63,16 @@ Access의 AWS health에서는 `MANAGEMENT_HEALTH_MAIL_ENABLED=false`로 SMTP 인
 
 URL은 `FruitionKR`의 GitHub Actions 실행·이슈·PR 기록을 사용합니다. 스크립트는 형식과 SHA를 검사하지만, 링크 안의 주장이 사실인지나 SQL 호환성을 자동 증명하지는 않습니다. Environment 승인자가 실제 결과를 확인해야 합니다.
 
+### 준비 완료 후 OAuth 연결 변경으로 최초 deploy가 차단된 경우
+
+bootstrap 준비 완료 이후 Google·Naver·Kakao OAuth Secret 연결 6개가 추가되면 같은 이미지 SHA라도 manifest가 달라 최초 업무 검증이 차단됩니다. 이 경우 `Deploy (EKS)`에서 `action=deploy`, **기존 bootstrap의 release SHA**와 `bootstrap_oauth_recovery=true`를 선택합니다. probe/mail 복구 옵션은 선택하지 않습니다. 새 이미지 릴리스로 실행하거나 `bootstrap`을 다시 실행하는 복구가 아닙니다.
+
+이 옵션은 `fruition-access` ExternalSecret에 `GOOGLE_CLIENT_ID/SECRET`, `NAVER_CLIENT_ID/SECRET`, `KAKAO_CLIENT_ID/SECRET`를 `fruition/app`의 같은 이름 property로 연결하는 6개 항목의 추가만 허용합니다. 연결 대상·기존 Secret 항목·이미지·워크로드·배포 설정이 함께 바뀌면 거부합니다. 실제 자격 증명 값은 복구 기록에 넣지 않습니다.
+
+기존 bootstrap, probe/mail 복구 이력, 준비 완료 기록은 수정·삭제하지 않습니다. 원본 연결과 SHA·설정·현재 DB schema를 확인한 뒤 immutable `fruition-bootstrap-oauth-recovery`를 추가하고, migration을 재실행하지 않고 rollout·로그인·문서·AI smoke를 수행합니다. 실제 smoke가 성공해야 성공 release가 기록됩니다. 실패한 경우 같은 입력으로 재실행할 수 있으며, 기록이 있으면 옵션을 생략해도 기록을 검증합니다. 성공 release가 있는 환경에서는 복구 옵션을 다시 사용하지 않습니다.
+
+`최초 설치 manifest가 다릅니다`는 health 문제에만 해당하는 메시지가 아닙니다. 실제 리소스 차이를 먼저 확인하고 해당 복구 경로를 선택해야 합니다. 설치 기록을 지우거나 검사를 생략해 해결하지 않습니다.
+
 온라인 DB 변경은 **새 컬럼 추가 → 호환 코드 배포 → 데이터 이전 → 이후 릴리스에서 옛 컬럼 제거**로 나눕니다. 실행 중 앱이 계속 DB를 사용하므로 호환 변경도 긴 테이블 잠금을 만들면 안 됩니다.
 
 실패하면 이후 단계를 멈추고 성공 release를 기록하지 않습니다. AWS OIDC 인증 이후 실패는 기존 운영 SNS → Lambda → Discord로 알립니다. AWS 인증 전 실패나 알림 전송 자체의 실패는 GitHub Actions에서 확인해야 합니다. Discord 웹훅 Secret 등록과 실제 수신 시험은 별도로 필요합니다.

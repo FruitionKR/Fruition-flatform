@@ -316,7 +316,40 @@ def access_mail_health_recovery(before, after):
     return original == updated
 
 
-def initial_install_state(config, sha, documents, bootstrap, probe_recovery=False, mail_health_recovery=False):
+def access_oauth_secret_recovery(before, after):
+    """Only add the six reviewed OAuth references to the Access ExternalSecret."""
+    try:
+        original = list(yaml.safe_load_all(before))
+    except yaml.YAMLError:
+        return False
+    if not original or any(not isinstance(d, dict) for d in original):
+        return False
+    updated = copy.deepcopy(after)
+    def access_secret(documents):
+        return [d for d in documents if d.get("kind") == "ExternalSecret"
+                and d.get("metadata", {}).get("name") == "fruition-access"]
+    old, new = access_secret(original), access_secret(updated)
+    if len(old) != 1 or len(new) != 1:
+        return False
+    keys = {provider + suffix for provider in ("GOOGLE", "NAVER", "KAKAO")
+            for suffix in ("_CLIENT_ID", "_CLIENT_SECRET")}
+    old_data = old[0].get("spec", {}).get("data", [])
+    new_data = new[0].get("spec", {}).get("data", [])
+    if (not isinstance(old_data, list) or not isinstance(new_data, list)
+            or any(not isinstance(entry, dict) for entry in old_data + new_data)
+            or any(entry.get("secretKey") in keys for entry in old_data)):
+        return False
+    additions = [entry for entry in new_data if entry.get("secretKey") in keys]
+    if len(additions) != 6 or {entry["secretKey"] for entry in additions} != keys:
+        return False
+    if any(entry != {"secretKey": entry["secretKey"], "remoteRef": {
+            "key": "fruition/app", "property": entry["secretKey"]}} for entry in additions):
+        return False
+    new[0]["spec"]["data"] = [entry for entry in new_data if entry.get("secretKey") not in keys]
+    return original == updated
+
+
+def initial_install_state(config, sha, documents, bootstrap, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False):
     """Bind an empty-DB installation and its promotion to the exact reviewed inputs."""
     records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
     expected = {"initial_install_contract": "1", "sha": sha,
@@ -353,13 +386,36 @@ def initial_install_state(config, sha, documents, bootstrap, probe_recovery=Fals
                 data.get("original_manifest") != previous_manifest or
                 not isinstance(data.get("manifest"), str)):
             raise ValueError("최초 설치 health 복구 기록이 일치하지 않습니다")
-        recovered = list(yaml.safe_load_all(data["manifest"]))
-        if not allowed(previous_manifest, recovered):
+        try:
+            recovered = list(yaml.safe_load_all(data["manifest"]))
+        except yaml.YAMLError:
+            raise ValueError("최초 설치 health 복구 manifest를 읽을 수 없습니다") from None
+        if not recovered or any(not isinstance(d, dict) for d in recovered) or not allowed(previous_manifest, recovered):
             raise ValueError("최초 설치 health 복구 기록에 허용되지 않은 변경이 있습니다")
         previous_manifest = data["manifest"]
+    # OAuth wiring was added after bootstrap readiness. Preserve both the original
+    # readiness evidence and the earlier health recovery chain during promotion.
+    ready_manifest = expected["manifest"]
+    oauth_name = "fruition-bootstrap-oauth-recovery"
+    oauth_record = next((r for r in records if r["metadata"]["name"] == oauth_name), None)
+    if oauth_recovery or oauth_record is not None:
+        if bootstrap or marker is None or ready is None or (oauth_recovery and successes):
+            raise ValueError("OAuth 복구는 준비 완료된 동일 SHA의 최초 deploy 전용입니다")
+        if ready["data"].get("manifest") != previous_manifest:
+            raise ValueError("OAuth 복구의 최초 설치 완료 기록이 기존 복구 이력과 다릅니다")
+        if not access_oauth_secret_recovery(previous_manifest, documents):
+            raise ValueError("Access OAuth Secret 연결 6개 추가 외의 변경은 허용하지 않습니다")
+        oauth_data = {**expected, "original_manifest": previous_manifest,
+                      "fingerprints": ready["data"].get("fingerprints", "")}
+        if oauth_record is None:
+            pending_recovery = install_record(oauth_name, oauth_data)
+        elif oauth_record.get("immutable") is not True or oauth_record.get("data") != oauth_data:
+            raise ValueError("최초 설치 OAuth 복구 기록이 일치하지 않습니다")
+        ready_manifest = previous_manifest
+        previous_manifest = expected["manifest"]
     if marker is not None and previous_manifest != expected["manifest"]:
-        raise ValueError("최초 설치 manifest가 다릅니다. 검토된 health 복구를 명시적으로 선택하세요")
-    if ready is not None and ready["data"].get("manifest") != expected["manifest"]:
+        raise ValueError("최초 설치 manifest가 다릅니다. 변경 내용을 확인하고 해당 복구 경로를 선택하세요")
+    if ready is not None and ready["data"].get("manifest") != ready_manifest:
         raise ValueError("최초 설치 완료 manifest가 다릅니다")
     apps = json.loads(kubectl("get", "deployments", "-o", "json")).get("items", [])
     names = {d["metadata"]["name"] for d in documents if d["kind"] == "Deployment"}
@@ -386,7 +442,7 @@ def install_record(name, data):
             "immutable": True, "data": data}
 
 
-def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False):
+def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False):
     validate(config, sha)
     check_manifest(documents, sha)
     if not rollback:
@@ -397,11 +453,14 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         raise ValueError("health 복구는 한 번에 하나의 검토된 변경만 선택하세요")
     if (probe_recovery or mail_health_recovery) and (not bootstrap or rollback or review["migration_mode"] != "initial-install"):
         raise ValueError("probe 복구는 initial-install bootstrap 전용입니다")
+    if oauth_recovery and (bootstrap or rollback or review["migration_mode"] != "initial-install"
+                           or probe_recovery or mail_health_recovery):
+        raise ValueError("OAuth 복구는 다른 복구 옵션 없는 initial-install deploy 전용입니다")
     settings = None if bootstrap else smoke_settings()
     verify_target(config)
     initial = not rollback and review["migration_mode"] == "initial-install"
     if initial:
-        initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery, mail_health_recovery)
+        initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery, mail_health_recovery, oauth_recovery)
     if bootstrap:
         records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
         if any(d["metadata"]["name"].startswith("fruition-release-") for d in records):
@@ -517,6 +576,7 @@ def main():
     parser.add_argument("--review", type=Path, help="검토된 릴리스별 migration/복원 시험 기록 JSON")
     parser.add_argument("--bootstrap-probe-recovery", action="store_true", help="검토된 Access probe timeout 1→5초 복구만 허용")
     parser.add_argument("--bootstrap-mail-health-recovery", action="store_true", help="SMTP 반복 health 인증 제외 복구만 허용")
+    parser.add_argument("--bootstrap-oauth-recovery", action="store_true", help="준비 완료된 최초 deploy에서 Access OAuth Secret 연결 6개 추가만 허용")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     validate(config, args.sha)
@@ -526,7 +586,8 @@ def main():
     else:
         review = json.loads(args.review.read_text()) if args.review and args.action != "rollback" else None
         deploy(config, args.sha, documents, rollback=args.action == "rollback", review=review,
-               bootstrap=args.action == "bootstrap", probe_recovery=args.bootstrap_probe_recovery, mail_health_recovery=args.bootstrap_mail_health_recovery)
+               bootstrap=args.action == "bootstrap", probe_recovery=args.bootstrap_probe_recovery,
+               mail_health_recovery=args.bootstrap_mail_health_recovery, oauth_recovery=args.bootstrap_oauth_recovery)
 
 
 if __name__ == "__main__":
