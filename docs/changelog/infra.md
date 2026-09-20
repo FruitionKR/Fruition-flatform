@@ -1,5 +1,9 @@
 # 인프라 변경 기록
 
+## 2026-09-20
+
+- Google·Naver·Kakao OAuth 6개 항목의 Terraform 빈 초기값과 Access 전용 ExternalSecret 매핑을 추가했습니다. 서비스별 자격증명 경계 및 원본 키 매핑 검증을 보강했습니다. 기존 Secret의 운영 값은 보존하며 실제 값은 코드에 포함하지 않습니다. 환경변수 대조와 기존 bootstrap manifest 고정으로 인한 배포 전환 조건을 문서화했습니다.
+
 ## 2026-09-18
 
 - Access Pod·ALB health가 SMTP 인증을 반복해 메일 서버 로그인 제한과 HTTP 503을 일으키던 문제를 AWS health의 mail 항목만 제외해 수정했습니다. 실제 메일 발송·DB·Redis health는 유지합니다. 미완료 최초 설치에 명시적 SMTP health 복구 옵션과 원본 보존 기록 연결을 추가했습니다. 테스트 78개 및 같은 이미지의 임시 EKS Pod에서 SMTP egress 차단 상태로 health 10/10 HTTP 200(최대 0.09초)을 확인했습니다. 실제 메일 발송은 제한 해제 후 별도 검증이 필요합니다.

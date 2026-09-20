@@ -31,6 +31,10 @@ DB bootstrap은 Access endpoint에 DB_ISOLATION_TARGET=access, Core endpoint에 
 
 Secrets Manager는 ignore_changes로 운영 값을 보존한다. 기존 환경에 MFA/SMTP/Redis 키를 추가할 때 Terraform 재실행만으로 채워졌다고 가정하지 않는다. MFA 키를 재생성하면 기존 TOTP secret을 복호화하지 못한다. Redis 사용자 password와 서비스 Secret 값을 같은 보안 입력 경로로 맞춘다. 정적 S3 IAM key 제거·Redis 리소스 교체는 실제 plan에서 별도 검토한다.
 
+OAuth 준비: 신규 `fruition/app` Secret에는 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`을 빈 값으로 생성한다. 실제 값은 Secrets Manager 콘솔/보안 입력 경로로 입력하며 Terraform 코드·tfvars에 넣지 않는다. 기존 환경은 `ignore_changes = [secret_string]` 때문에 apply로 키가 추가되지 않는다. 기존 DB·JWT·MFA 등 다른 항목을 보존하면서 위 6개 키만 추가한다. 이를 위해 ignore_changes를 제거하거나 Secret 리소스를 재생성하지 않는다.
+
+이 준비만으로 소셜 로그인이 활성화되지는 않는다. 실제 값 입력 후 `k8s/overlays/aws/external-secrets.yaml`의 Access용 매핑 배포, 동기화 확인, 검토된 앱 배포 절차에 따른 Access Pod 재시작이 별도로 필요하다. `OAUTH_FRONTEND_REDIRECT_URI`와 `CORS_ALLOWED_ORIGINS`는 비밀값이 아니며 AWS ConfigMap과 배포 설정의 프론트 도메인으로 관리한다. 운영 환경에 localhost 값을 복사하지 않는다.
+
 S3의 Document/AI object 권한은 prefix로 제한하지만 신규 객체 404 판별에 필요한 bucket ListBucket metadata는 공유한다. RDS Single-AZ, Redis primary 1개, Kafka broker 1개는 사용자 피드백 profile의 단일 장애점이다. HA·관측성·provider 공정성·실측 부하와 복구는 별도 남은 범위다. ESO 2.9.0의 공식 테스트 표는 Kubernetes 1.36이며 EKS 1.35 실호환 검증을 아직 하지 않았다.
 
 비용 보호 임계값과 적용 후 WAF 연결 검증은 [비용 보호 운영](../../docs/aws-deployment-costs.md#추가한-비용-보호-설정과-적용-방법)을 따른다. Terraform apply만으로 ALB에 WAF가 연결되지는 않으며 앱 배포 JSON에 `waf_acl_arn`을 반영해야 한다.

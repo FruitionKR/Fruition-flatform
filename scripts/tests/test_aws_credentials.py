@@ -23,7 +23,10 @@ GROUPS = {
 ALLOWED = {
     "access": {"ACCESS_DB_RUNTIME_PASSWORD", "JWT_SECRET", "INTERNAL_CALLBACK_TOKEN",
                "MFA_ENCRYPTION_KEY", "SPRING_MAIL_HOST", "REDIS_PASSWORD",
-               "SPRING_MAIL_USERNAME", "SPRING_MAIL_PASSWORD", "MAIL_FROM"},
+               "SPRING_MAIL_USERNAME", "SPRING_MAIL_PASSWORD", "MAIL_FROM",
+               "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+               "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
+               "KAKAO_CLIENT_ID", "KAKAO_CLIENT_SECRET"},
     "document": {"CORE_DB_RUNTIME_PASSWORD", "JWT_SECRET", "INTERNAL_CALLBACK_TOKEN",
                  "AGENT_INTERNAL_TOKEN", "REDIS_PASSWORD"},
     "pipeline": {"AI_DATABASE_URL", "INTERNAL_CALLBACK_TOKEN", "AGENT_INTERNAL_TOKEN",
@@ -44,6 +47,12 @@ class CredentialsTest(unittest.TestCase):
         manifests = render("k8s/overlays/aws")
         secrets = {m["spec"]["target"]["name"]: {d["secretKey"] for d in m["spec"]["data"]}
                    for m in manifests if m["kind"] == "ExternalSecret"}
+        access = next(m for m in manifests if m["kind"] == "ExternalSecret" and m["spec"]["target"]["name"] == "fruition-access")
+        mappings = {item["secretKey"]: item["remoteRef"] for item in access["spec"]["data"]}
+        for provider in ("GOOGLE", "NAVER", "KAKAO"):
+            for suffix in ("CLIENT_ID", "CLIENT_SECRET"):
+                key = provider + "_" + suffix
+                self.assertEqual(mappings[key], {"key": "fruition/app", "property": key})
         accounts = {m["metadata"]["name"] for m in manifests if m["kind"] == "ServiceAccount"}
         seen = set()
         for manifest in manifests:
