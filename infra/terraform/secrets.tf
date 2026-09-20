@@ -63,11 +63,20 @@ resource "aws_secretsmanager_secret_version" "app" {
     MAIL_FROM               = var.mail_from
     INTERNAL_CALLBACK_TOKEN = random_password.internal_callback_token.result
     AGENT_INTERNAL_TOKEN    = random_password.agent_internal_token.result
-    OPENAI_API_KEY          = ""
-    GEMINI_API_KEY          = ""
-    ANTHROPIC_API_KEY       = ""
-    LANGSMITH_API_KEY       = ""
-    TAVILY_API_KEY          = ""
+    # OAuth는 키 자리만 생성한다. 실제 값은 Secrets Manager에서 별도로 입력한다.
+    # 기존 Secret은 ignore_changes로 보존되므로 이 키들도 콘솔/CLI로 추가해야 한다.
+    # Access 전달은 k8s/overlays/aws/external-secrets.yaml 매핑 배포로 처리한다.
+    GOOGLE_CLIENT_ID     = ""
+    GOOGLE_CLIENT_SECRET = ""
+    NAVER_CLIENT_ID      = ""
+    NAVER_CLIENT_SECRET  = ""
+    KAKAO_CLIENT_ID      = ""
+    KAKAO_CLIENT_SECRET  = ""
+    OPENAI_API_KEY       = ""
+    GEMINI_API_KEY       = ""
+    ANTHROPIC_API_KEY    = ""
+    LANGSMITH_API_KEY    = ""
+    TAVILY_API_KEY       = ""
   })
 
   lifecycle {
