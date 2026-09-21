@@ -111,8 +111,11 @@ class BoundaryTests(unittest.TestCase):
         for service in ("document","pipeline"):
             block=re.search(rf'{service}\s*=\s*\{{(.*?)\n\s*\}}',source,re.S).group(1)
             scopes[service]={action:json.loads(re.search(rf'{action}\s*=\s*(\[[^\]]*\])',block).group(1)) for action in ("read","write","delete")}
-        self.assertEqual(["sources/documents/*","assets/*"],scopes["document"]["write"])
-        self.assertEqual(scopes["document"]["write"],scopes["document"]["delete"])
+        self.assertEqual(["sources/documents/*","assets/*","tmp/document-uploads/*"],scopes["document"]["write"])
+        self.assertEqual(["sources/documents/*", "assets/*"], scopes["document"]["delete"])
+        self.assertIn("tmp/document-uploads/*", scopes["document"]["read"])
+        self.assertIn('"s3:ListMultipartUploadParts"', source)
+        self.assertIn('"s3:GetObjectVersion"', source)
         self.assertIn("wiki/*",scopes["document"]["read"])
         self.assertIn("sources/documents/*",scopes["pipeline"]["read"])
         self.assertEqual(["wiki/*","agent-runs/*"],scopes["pipeline"]["delete"])

@@ -137,3 +137,15 @@ variable "smtp_port" {
     error_message = "SMTP port는 1~65535 정수여야 합니다."
   }
 }
+
+variable "document_upload_allowed_origins" {
+  description = "PDF 직접 업로드를 허용하는 프런트엔드 HTTPS origin 목록. 와일드카드는 허용하지 않는다."
+  type        = list(string)
+  default     = []
+  validation {
+    condition = alltrue([
+      for origin in var.document_upload_allowed_origins : can(regex("^https://[a-zA-Z0-9.-]+(:[0-9]+)?$", origin))
+    ])
+    error_message = "직접 업로드에는 구체적인 HTTPS origin을 지정해야 합니다."
+  }
+}

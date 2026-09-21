@@ -20,6 +20,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMESPACE = "fruition"
+CONVERTER_DEPLOYMENT = "converter"
 APP_KINDS = {"ServiceAccount", "ConfigMap", "Service", "Deployment", "Job", "NetworkPolicy", "Ingress",
              "ExternalSecret", "KafkaNodePool", "Kafka", "KafkaTopic", "KafkaUser", "ScaledObject",
              "TriggerAuthentication", "PodDisruptionBudget"}
@@ -538,10 +539,18 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     routing = {"Service", "Ingress"}
     apply([d for d in documents if d["kind"] in routing])
     wait_alb_bindings()
-    apply([d for d in documents if d["kind"] not in foundation | event_kinds | routing |
-           {"Namespace", "Job", "ScaledObject", "KafkaUser", "TriggerAuthentication"}])
-    for document in documents:
-        if document["kind"] == "Deployment":
+    workloads = [d for d in documents if d["kind"] not in foundation | event_kinds | routing |
+                 {"Namespace", "Job", "ScaledObject", "KafkaUser", "TriggerAuthentication"}]
+    # New document-svc calls converter /convert-source-batch. Roll converter out and
+    # confirm readiness before any other workload so documents never see an old converter.
+    converter = [d for d in workloads if d["kind"] == "Deployment" and d["metadata"]["name"] == CONVERTER_DEPLOYMENT]
+    if not converter:
+        raise ValueError(f"{CONVERTER_DEPLOYMENT} Deployment가 manifest에 없습니다")
+    apply(converter)
+    kubectl("rollout", "status", "deployment/" + CONVERTER_DEPLOYMENT, "--timeout=600s")
+    apply([d for d in workloads if d not in converter])
+    for document in workloads:
+        if document["kind"] == "Deployment" and document not in converter:
             kubectl("rollout", "status", "deployment/" + document["metadata"]["name"], "--timeout=600s")
     apply([d for d in documents if d["kind"] == "TriggerAuthentication"])
     apply([d for d in documents if d["kind"] == "ScaledObject"])

@@ -196,6 +196,31 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(2, sum(args[0] == "curl" for args in events))
         self.assertTrue(any(d["metadata"]["name"] == deploy.release_name(SHA) for d in fake.applied("ConfigMap")))
 
+    def test_converter_rolls_out_and_is_ready_before_other_workloads(self):
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+        applied = [(i, d["metadata"]["name"]) for i, (_, docs) in enumerate(fake.events) for d in docs if d["kind"] == "Deployment"]
+        converter_apply = [i for i, name in applied if name == "converter"]
+        others = [i for i, name in applied if name != "converter"]
+        converter_ready = next(i for i, (args, _) in enumerate(fake.events) if args[3:6] == ["rollout", "status", "deployment/converter"])
+        self.assertEqual(1, len(converter_apply))
+        self.assertLess(converter_apply[0], converter_ready)
+        self.assertTrue(others and all(converter_ready < i for i in others))
+        self.assertEqual({"document-svc", "access-svc", "pipeline-api"} - {name for _, name in applied}, set())
+
+    def test_converter_rollout_failure_prevents_document_rollout(self):
+        fake = FakeCluster(fail="deployment/converter")
+        with patch.object(deploy, "run", fake.run), self.assertRaises(subprocess.CalledProcessError):
+            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+        self.assertEqual(["converter"], [d["metadata"]["name"] for d in fake.applied("Deployment")])
+        self.assertFalse(any(d["metadata"]["name"] == deploy.release_name(SHA) for d in fake.applied("ConfigMap")))
+        without = [d for d in self.documents if not (d["kind"] == "Deployment" and d["metadata"]["name"] == "converter")]
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run), self.assertRaisesRegex(ValueError, "converter Deployment"):
+            deploy.deploy(CONFIG, SHA, without, review=REVIEW)
+        self.assertFalse(fake.applied("Deployment"))
+
     def test_failed_secret_preflight_or_migration_prevents_runtime(self):
         for failure in ("ExternalSecret/fruition-access", "Job/access-db-preflight", "Job/document-migration"):
             fake = FakeCluster(fail=failure)
@@ -635,6 +660,19 @@ class InitialInstallTests(unittest.TestCase):
         self.assertIn("bootstrap_oauth_recovery:", workflow)
         self.assertIn("BOOTSTRAP_OAUTH_RECOVERY: ${{ inputs.bootstrap_oauth_recovery }}", workflow)
         self.assertIn('if [ "$BOOTSTRAP_OAUTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-oauth-recovery); fi', workflow)
+
+    def test_workflow_runs_pdf_smoke_only_after_deploy(self):
+        workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
+        step = workflow.index("scripts/aws_pdf_smoke.py")
+        self.assertGreater(step, workflow.index("scripts/aws_deploy.py \"$ACTION\""))
+        self.assertLess(step, workflow.index("aws-deploy-notify.py"))
+        block = workflow[workflow.rindex("- name:", 0, step):step]
+        self.assertIn("if: inputs.action == 'deploy'", block)
+        for name in ("AWS_SMOKE_EMAIL: ${{ secrets.AWS_SMOKE_EMAIL }}", "AWS_SMOKE_PASSWORD: ${{ secrets.AWS_SMOKE_PASSWORD }}",
+                     "AWS_SMOKE_WORKSPACE_ID: ${{ vars.AWS_SMOKE_WORKSPACE_ID }}"):
+            self.assertIn(name, block)
+        self.assertIn('--config "$RUNNER_TEMP/deploy-config.json" --report "$RUNNER_TEMP/pdf-smoke-report.json"', workflow)
+        self.assertIn('"$RUNNER_TEMP/pdf-smoke-report.json"\n', workflow[workflow.index("Remove temporary deployment files"):])
 
 
 if __name__ == "__main__":
