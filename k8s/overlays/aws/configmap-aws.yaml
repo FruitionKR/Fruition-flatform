@@ -26,3 +26,6 @@ data:
   REDIS_SSL: "true"
   PGSSLMODE: "require"
   SPRING_MAIL_PORT: "REPLACE_ME_SMTP_PORT"
+
+  CONVERTER_SOURCE_HOSTS: "s3.ap-northeast-2.amazonaws.com,REPLACE_ME_S3_BUCKET.s3.ap-northeast-2.amazonaws.com"
+  PDF_PAGES_PER_BATCH: "10"

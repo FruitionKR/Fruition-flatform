@@ -636,6 +636,19 @@ class InitialInstallTests(unittest.TestCase):
         self.assertIn("BOOTSTRAP_OAUTH_RECOVERY: ${{ inputs.bootstrap_oauth_recovery }}", workflow)
         self.assertIn('if [ "$BOOTSTRAP_OAUTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-oauth-recovery); fi', workflow)
 
+    def test_workflow_runs_pdf_smoke_only_after_deploy(self):
+        workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
+        step = workflow.index("scripts/aws_pdf_smoke.py")
+        self.assertGreater(step, workflow.index("scripts/aws_deploy.py \"$ACTION\""))
+        self.assertLess(step, workflow.index("aws-deploy-notify.py"))
+        block = workflow[workflow.rindex("- name:", 0, step):step]
+        self.assertIn("if: inputs.action == 'deploy'", block)
+        for name in ("AWS_SMOKE_EMAIL: ${{ secrets.AWS_SMOKE_EMAIL }}", "AWS_SMOKE_PASSWORD: ${{ secrets.AWS_SMOKE_PASSWORD }}",
+                     "AWS_SMOKE_WORKSPACE_ID: ${{ vars.AWS_SMOKE_WORKSPACE_ID }}"):
+            self.assertIn(name, block)
+        self.assertIn('--config "$RUNNER_TEMP/deploy-config.json" --report "$RUNNER_TEMP/pdf-smoke-report.json"', workflow)
+        self.assertIn('"$RUNNER_TEMP/pdf-smoke-report.json"\n', workflow[workflow.index("Remove temporary deployment files"):])
+
 
 if __name__ == "__main__":
     unittest.main()

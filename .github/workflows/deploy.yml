@@ -109,6 +109,14 @@ jobs:
           if [ "$BOOTSTRAP_MAIL_HEALTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-mail-health-recovery); fi
           if [ "$BOOTSTRAP_OAUTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-oauth-recovery); fi
           python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --review "docs/releases/$IMAGE_SHA.json" "${EXTRA[@]}"
+      - name: Verify large PDF multipart upload, Range read, batch conversion and AI
+        # deploy 전용 gate. bootstrap/rollback은 제외하며 실패 시 아래 Discord 알림이 실행된다.
+        if: inputs.action == 'deploy'
+        env:
+          AWS_SMOKE_EMAIL: ${{ secrets.AWS_SMOKE_EMAIL }}
+          AWS_SMOKE_PASSWORD: ${{ secrets.AWS_SMOKE_PASSWORD }}
+          AWS_SMOKE_WORKSPACE_ID: ${{ vars.AWS_SMOKE_WORKSPACE_ID }}
+        run: python scripts/aws_pdf_smoke.py --config "$RUNNER_TEMP/deploy-config.json" --report "$RUNNER_TEMP/pdf-smoke-report.json"
       - name: Notify deployment failure through operations Discord
         if: failure() && steps.aws_credentials.outcome == 'success'
         env:
@@ -117,5 +125,5 @@ jobs:
       - name: Remove temporary deployment files
         if: always()
         run: |
-          rm -f "$KUBECONFIG" "$RUNNER_TEMP/deploy-config.json" "$RUNNER_TEMP/rendered.yaml"
+          rm -f "$KUBECONFIG" "$RUNNER_TEMP/deploy-config.json" "$RUNNER_TEMP/rendered.yaml" "$RUNNER_TEMP/pdf-smoke-report.json"
           rm -rf "$RUNNER_TEMP/fruition-venv"

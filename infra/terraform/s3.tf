@@ -59,6 +59,19 @@ resource "aws_s3_bucket_public_access_block" "storage" {
   restrict_public_buckets = true
 }
 
+# 브라우저는 서명된 multipart PUT로만 임시 PDF를 업로드한다. 공개 읽기 권한을 부여하지 않는다.
+resource "aws_s3_bucket_cors_configuration" "document_upload" {
+  count  = length(var.document_upload_allowed_origins) > 0 ? 1 : 0
+  bucket = aws_s3_bucket.storage.id
+  cors_rule {
+    allowed_origins = var.document_upload_allowed_origins
+    allowed_methods = ["PUT", "GET", "HEAD"]
+    allowed_headers = ["content-type", "range"]
+    expose_headers  = ["ETag", "Content-Range", "Accept-Ranges", "Content-Length"]
+    max_age_seconds = 300
+  }
+}
+
 # 임시 파일 lifecycle (tmp/ prefix 7일 후 삭제)
 resource "aws_s3_bucket_lifecycle_configuration" "storage" {
   bucket = aws_s3_bucket.storage.id
@@ -81,14 +94,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
     expiration {
       days = 7
     }
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
   }
 }
 
 locals {
   storage_permissions = {
     document = {
-      read   = ["sources/documents/*", "assets/*", "wiki/*"]
-      write  = ["sources/documents/*", "assets/*"]
+      read   = ["sources/documents/*", "assets/*", "wiki/*", "tmp/document-uploads/*"]
+      write  = ["sources/documents/*", "assets/*", "tmp/document-uploads/*"]
       delete = ["sources/documents/*", "assets/*"]
     }
     pipeline = {
@@ -119,7 +135,7 @@ resource "aws_iam_policy" "storage" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      { Effect = "Allow", Action = ["s3:GetObject"], Resource = [for p in each.value.read : "${aws_s3_bucket.storage.arn}/${p}"] },
+      { Effect = "Allow", Action = each.key == "document" ? ["s3:GetObject", "s3:GetObjectVersion"] : ["s3:GetObject"], Resource = [for p in each.value.read : "${aws_s3_bucket.storage.arn}/${p}"] },
       { Effect = "Allow", Action = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"], Resource = [for p in each.value.write : "${aws_s3_bucket.storage.arn}/${p}"] },
       { Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in each.value.delete : "${aws_s3_bucket.storage.arn}/${p}"] },
       # 없는 객체의 GET을 403 대신 404로 판별해야 AI journal이 신규 생성을 기록한다.

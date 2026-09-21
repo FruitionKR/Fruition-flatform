@@ -24,6 +24,18 @@ spec:
           ports:
             - containerPort: 8000
           env:
+            - name: CONVERTER_SOURCE_HOSTS
+              valueFrom:
+                configMapKeyRef:
+                  name: fruition-config
+                  key: CONVERTER_SOURCE_HOSTS
+                  optional: true
+            - name: PDF_PAGES_PER_BATCH
+              valueFrom:
+                configMapKeyRef:
+                  name: fruition-config
+                  key: PDF_PAGES_PER_BATCH
+                  optional: true
             - name: MAX_UPLOAD_MB
               value: "50"
             - name: OCR_LANGUAGE
