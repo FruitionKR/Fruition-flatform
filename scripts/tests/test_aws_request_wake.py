@@ -31,6 +31,7 @@ class WakeTests(unittest.TestCase):
             }
             self.groups[key + "-asg"] = {
                 "AutoScalingGroupName": key + "-asg",
+                "DesiredCapacity": desired,
                 "SuspendedProcesses": [],
                 "Instances": [{"LifecycleState": "InService"}] * desired,
             }
@@ -55,6 +56,9 @@ class WakeTests(unittest.TestCase):
         node = self.nodes[kwargs["nodegroupName"]]
         node["scalingConfig"].update(kwargs["scalingConfig"])
         node["status"] = "UPDATING"
+        self.groups[kwargs["nodegroupName"] + "-asg"]["DesiredCapacity"] = kwargs[
+            "scalingConfig"
+        ]["desiredSize"]
 
     def tick(self):
         return self.controller.run({"action": "tick"})
@@ -104,15 +108,47 @@ class WakeTests(unittest.TestCase):
         self.nodes["general"]["status"] = "ACTIVE"
         self.assertEqual("sleeping", self.tick()["phase"])
 
-    def test_request_during_scale_down_waits_for_eks_update_then_wakes(self):
+    def test_errors_during_drain_do_not_wake_before_asleep(self):
         self.sleep()
         self.metrics.get_metric_statistics.return_value = {"Datapoints": [{"Sum": 1}]}
-        self.eks.update_nodegroup_config.reset_mock()
+        self.assertEqual("sleeping", self.tick()["phase"])
+        self.metrics.get_metric_statistics.assert_not_called()
+        self.finish_updates()
+        self.assertEqual("asleep", self.tick()["phase"])
         self.assertEqual("waking", self.tick()["phase"])
-        self.eks.update_nodegroup_config.assert_not_called()
         self.finish_updates()
         self.tick()
         self.assertEqual(2, self.nodes["general"]["scalingConfig"]["desiredSize"])
+
+    def test_detection_window_starts_when_asleep(self):
+        self.sleep()
+        self.finish_updates()
+        self.controller.now += 600
+        self.tick()
+        self.assertEqual(self.controller.now, self.item["since"])
+        self.tick()
+        start = self.metrics.get_metric_statistics.call_args.kwargs["StartTime"]
+        self.assertEqual(self.controller.now // 60 * 60, start.timestamp())
+
+    def test_stale_asg_desired_blocks_asleep_and_is_reset(self):
+        self.sleep()
+        self.finish_updates()
+        # Autoscaler wrote the ASG after the EKS update; EKS still reports 0.
+        self.groups["ai_worker-asg"]["DesiredCapacity"] = 1
+        self.eks.update_nodegroup_config.reset_mock()
+        self.assertEqual("sleeping", self.tick()["phase"])
+        self.eks.update_nodegroup_config.assert_called_once()
+        self.assertEqual(0, self.groups["ai_worker-asg"]["DesiredCapacity"])
+        self.finish_updates()
+        self.assertEqual("asleep", self.tick()["phase"])
+
+    def test_wake_uses_larger_live_asg_capacity(self):
+        self.sleep()
+        self.finish_updates()
+        self.tick()
+        self.groups["general-asg"]["DesiredCapacity"] = 3
+        self.controller.run({"action": "wake"})
+        self.assertEqual(3, self.nodes["general"]["scalingConfig"]["desiredSize"])
 
     def test_failed_sleep_is_persisted_and_manual_wake_recovers(self):
         self.scaling.suspend_processes.side_effect = RuntimeError("partial failure")
@@ -180,12 +216,30 @@ class WakeTests(unittest.TestCase):
 
     def test_single_delayed_request_is_included_and_long_sleep_uses_valid_period(self):
         self.sleep()
+        self.finish_updates()
+        self.tick()
         self.controller.now += 70 * 86400
         self.tick()
         kwargs = self.metrics.get_metric_statistics.call_args.kwargs
         self.assertEqual(0, kwargs["Period"] % 3600)
         self.assertLessEqual((self.controller.now - self.item["since"]) / kwargs["Period"], 1440)
         self.assertLessEqual(kwargs["StartTime"].timestamp(), self.item["since"])
+
+    def test_mid_length_sleep_uses_five_minute_period_within_datapoint_limit(self):
+        self.sleep()
+        self.finish_updates()
+        self.tick()
+        self.controller.now += 20 * 86400
+        self.tick()
+        kwargs = self.metrics.get_metric_statistics.call_args.kwargs
+        self.assertEqual(0, kwargs["Period"] % 300)
+        self.assertLessEqual((self.controller.now - self.item["since"]) / kwargs["Period"], 1440)
+
+    def test_sleep_stays_incomplete_while_node_group_is_updating(self):
+        self.sleep()
+        for group in self.groups.values():
+            group["Instances"] = []
+        self.assertEqual("sleeping", self.tick()["phase"])
 
 
 if __name__ == "__main__":

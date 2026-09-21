@@ -47,8 +47,10 @@ class Controller:
         )["AutoScalingGroups"][0]
 
     def has_request(self, state):
+        # Only 5XX after the nodes are gone count. Errors from evicted pods
+        # during the drain would otherwise wake the cluster before it sleeps.
         # Retain the first partial minute: delayed datapoints must not lose the
-        # only request. A pre-sleep error in that minute can cause a safe wake.
+        # only request.
         start = int(state["since"]) // 60 * 60
         age = self.now - start
         unit = 3600 if age >= 63 * 86400 else 300 if age >= 15 * 86400 else 60
@@ -64,14 +66,17 @@ class Controller:
         )
         return any(point.get("Sum", 0) > 0 for point in result["Datapoints"])
 
-    def resize(self, key, node, desired):
+    def resize(self, key, node, group, desired):
         if node["status"] != "ACTIVE":
             return False
         config = node["scalingConfig"]
+        # EKS syncs scalingConfig from the ASG only periodically; the autoscaler
+        # writes the ASG directly. Trust the live ASG value over the EKS copy.
+        actual = group["DesiredCapacity"]
         # During wake retain any larger operator/autoscaler capacity.
-        wanted = max(desired, config["desiredSize"]) if desired else 0
+        wanted = max(desired, config["desiredSize"], actual) if desired else 0
         minimum = 2 if desired else 0
-        if config["desiredSize"] == wanted and config["minSize"] == minimum:
+        if config["desiredSize"] == wanted == actual and config["minSize"] == minimum:
             return True
         self.eks.update_nodegroup_config(
             clusterName=self.cluster,
@@ -106,7 +111,7 @@ class Controller:
                 self.save(state, "sleeping")
         if action == "wake" and state["phase"] != "awake":
             self.save(state, "waking")
-        if state["phase"] in {"sleeping", "asleep"} and action == "tick":
+        if state["phase"] == "asleep" and action == "tick":
             if self.has_request(state):
                 self.save(state, "waking")
         if state["phase"] == "awake":
@@ -128,9 +133,11 @@ class Controller:
                 )
             complete = True
             for key, node in nodes.items():
-                if not self.resize(key, node, 0) or groups[key]["Instances"]:
+                if not self.resize(key, node, groups[key], 0) or groups[key]["Instances"]:
                     complete = False
             if complete and state["phase"] != "asleep":
+                # Request detection starts here, not at the sleep command.
+                state["since"] = self.now
                 self.save(state, "asleep")
         elif state["phase"] == "waking":
             # Restore Launch even if an EKS update is still in progress, so a
@@ -139,7 +146,7 @@ class Controller:
                 self.scaling.resume_processes(
                     AutoScalingGroupName=name, ScalingProcesses=["Launch"]
                 )
-            ready = self.resize("general", nodes["general"], 2)
+            ready = self.resize("general", nodes["general"], groups["general"], 2)
             running = sum(
                 i["LifecycleState"] == "InService" for i in groups["general"]["Instances"]
             )

@@ -4,12 +4,6 @@ variable "request_wake_enabled" {
   default = false
 }
 
-variable "request_wake_alb_arn_suffix" {
-  description = "Existing application ALB ARN suffix used to detect requests during sleep."
-  type        = string
-  default     = ""
-}
-
 locals {
   request_wake_groups = {
     for key in ["general", "ai_worker"] : key => split(":", module.eks.eks_managed_node_groups[key].node_group_id)[1]
@@ -102,13 +96,13 @@ resource "aws_lambda_function" "request_wake" {
       # Strip the cluster prefix from the module's cluster:nodegroup output.
       NODE_GROUPS = jsonencode(local.request_wake_groups)
       STATE_TABLE = aws_dynamodb_table.request_wake[0].name
-      ALB_SUFFIX  = var.request_wake_alb_arn_suffix
+      ALB_SUFFIX  = var.observability_alb_arn_suffix
     }
   }
   lifecycle {
     precondition {
-      condition     = can(regex("^app/[A-Za-z0-9-]+/[0-9a-f]+$", var.request_wake_alb_arn_suffix))
-      error_message = "Request wake requires the existing application ALB suffix."
+      condition     = var.observability_alb_arn_suffix != ""
+      error_message = "Request wake requires observability_alb_arn_suffix (the existing application ALB)."
     }
   }
   depends_on = [aws_iam_role_policy.request_wake]

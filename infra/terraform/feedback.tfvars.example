@@ -24,9 +24,8 @@ waf_emergency_block    = false
 cloudwatch_addon_version = "v6.6.0-eksbuild.1"
 observability_alb_arn_suffix = ""
 
-# ALB 생성 후 활성화. docs/aws-request-wake.md의 절전/복구 절차를 따른다.
+# ALB 생성 후 활성화. observability_alb_arn_suffix를 함께 사용한다. docs/aws-request-wake.md 참조.
 request_wake_enabled = false
-request_wake_alb_arn_suffix = ""
 
 # gh api repos/FruitionKR/Fruition-flatform/actions/oidc/customization/sub --jq .sub_claim_prefix
 github_oidc_subject_prefix = "repo:FruitionKR@OWNER_ID/Fruition-flatform@REPO_ID"
