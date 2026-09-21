@@ -23,7 +23,7 @@
   "agent": {
     "config": {
       "agent": {
-        "metrics_collection_interval": 60
+        "metrics_collection_interval": 300
       },
       "logs": {
         "metrics_collected": {
@@ -31,7 +31,7 @@
             "cluster_name": "fruition-eks",
             "enhanced_container_insights": true,
             "accelerated_compute_metrics": false,
-            "metrics_collection_interval": 60
+            "metrics_collection_interval": 300
           }
         }
       }

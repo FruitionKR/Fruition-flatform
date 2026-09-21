@@ -44,3 +44,7 @@ CloudWatch addon·로그 14일 보존·운영 대시보드·Discord 장애/복�
 ### EKS 애드온 관리
 
 기본 애드온 4개는 `aws_eks_addon.core`에서 관리합니다. EKS 20.37.2 모듈의 전체 애드온 출력이 AWS provider 5.x의 deprecated `resolve_conflicts` 속성까지 읽는 경고를 피하기 위한 구성입니다. 버전, VPC CNI NetworkPolicy, EBS IRSA, preserve 및 충돌 처리 설정은 기존과 같습니다. 노드 그룹 생성 후 설치하며 기존 모듈 주소에서의 개별 `moved` 블록을 유지합니다. 이 변경 뒤에는 이전 저장 plan을 사용하지 말고 새 plan을 검토하세요.
+
+### 요청 기반 기동
+
+개발·시연 환경에서 작업 완료 후 노드를 절전하고, API 요청이 들어오면 외부 Lambda가 다시 기동하는 선택 기능은 [절전·기동 운영 절차](../../docs/aws-request-wake.md)를 따릅니다. `request_wake_enabled` 기본값은 `false`입니다. 활성화 자체는 노드를 끄지 않습니다.
