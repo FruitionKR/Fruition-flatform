@@ -3,6 +3,8 @@ import re
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock
+from urllib.error import HTTPError
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,6 +13,24 @@ import aws_pdf_smoke as smoke
 
 
 class PdfSmokeTests(unittest.TestCase):
+    def test_api_failure_preserves_status_without_sensitive_http_details(self):
+        probe = smoke.Probe({'domain': 'example.test'}, {'AWS_SMOKE_WORKSPACE_ID': 'ws_test'})
+        probe.opener = Mock()
+        probe.opener.open.side_effect = HTTPError(
+            'https://example.test/?signature=secret', 500, 'private body', {}, None)
+        with self.assertRaises(smoke.ApiStatusError) as raised:
+            probe.api('POST', probe.base + '/uploads', {})
+        self.assertEqual(smoke.failure_report(raised.exception, 'multipart-start'), {
+            'status': 'failed', 'error_type': 'ApiStatusError',
+            'stage': 'multipart-start', 'http_status': 500})
+
+    def test_storage_failure_report_does_not_expose_signed_url(self):
+        failure = HTTPError('https://storage.test/?signature=secret', 403, 'private', {}, None)
+        self.addCleanup(failure.close)
+        self.assertEqual(smoke.failure_report(failure, 'multipart-part-put'), {
+            'status': 'failed', 'error_type': 'HTTPError',
+            'stage': 'multipart-part-put', 'http_status': 403})
+
     def test_fixture_has_consistent_xref_and_multiple_text_pages(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'probe.pdf'

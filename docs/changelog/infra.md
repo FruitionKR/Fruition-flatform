@@ -1,3 +1,9 @@
+## 2026-09-21 — PDF 배포 검증 실패 단계와 HTTP 상태 기록
+
+- multipart 시작·파트 URL 발급·S3 PUT·완료·완료 재호출 단계를 구분해 실패 위치를 보고한다.
+- API와 S3 오류의 HTTP 상태 코드만 기록하며 서명 URL·응답 본문·인증 정보는 출력하지 않는다.
+- API 500 및 S3 403 오류 보고 회귀 테스트를 추가했다.
+
 ## 2026-09-21 — 대용량 PDF 직접 업로드 인프라와 converter 설정
 
 - 브라우저 S3 multipart 업로드를 위해 storage 버킷 CORS를 `document_upload_allowed_origins` 변수로 생성한다. 구체적인 HTTPS origin만 허용하며 PUT/GET/HEAD와 Range·ETag 관련 헤더만 노출한다. 공개 읽기 권한은 추가하지 않는다.
