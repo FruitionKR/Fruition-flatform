@@ -1,0 +1,6 @@
+{
+  "release_sha": "ed5c3285e1ae945db0c1b73b6273264a0a54c5cd",
+  "migration_mode": "expand-only",
+  "compatibility_test_url": "https://github.com/FruitionKR/Fruition-document/pull/8",
+  "restore_test_url": "https://github.com/FruitionKR/Fruition-document/pull/8"
+}

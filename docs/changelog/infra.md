@@ -6,6 +6,30 @@
 - 첫 요청은 저장·재전송하지 않으며 기동에 수분이 걸릴 수 있다. 자동 유휴 종료는 하지 않고 절전·수동 기동·복구 절차를 문서화했다.
 - AWS 검증 101개(기동 제어 15개 포함)와 Terraform validate를 통과했다. 실제 AWS에 기동 장치와 300초 수집 설정을 적용했으며, 실제 노드 절전 후 요청으로 복구하는 시험은 아직 수행하지 않았다.
 
+## 2026-09-21 — PDF 배포 검증 실패 단계와 HTTP 상태 기록
+
+- multipart 시작·파트 URL 발급·S3 PUT·완료·완료 재호출 단계를 구분해 실패 위치를 보고한다.
+- API와 S3 오류의 HTTP 상태 코드만 기록하며 서명 URL·응답 본문·인증 정보는 출력하지 않는다.
+- API 500 및 S3 403 오류 보고 회귀 테스트를 추가했다.
+
+## 2026-09-21 — 대용량 PDF 직접 업로드 인프라와 converter 설정
+
+- 브라우저 S3 multipart 업로드를 위해 storage 버킷 CORS를 `document_upload_allowed_origins` 변수로 생성한다. 구체적인 HTTPS origin만 허용하며 PUT/GET/HEAD와 Range·ETag 관련 헤더만 노출한다. 공개 읽기 권한은 추가하지 않는다.
+- 문서 IRSA 정책에 `tmp/document-uploads/*` 읽기·쓰기와 `s3:GetObjectVersion`을 추가한다. 임시 prefix 삭제 권한은 부여하지 않으며 `tmp/` 이전 버전은 7일 lifecycle로 만료한다.
+- converter Deployment에 `CONVERTER_SOURCE_HOSTS`, `PDF_PAGES_PER_BATCH` 환경 변수를 ConfigMap에서 주입한다. AWS overlay 값은 리전 S3 endpoint와 버킷 hostname placeholder로 두며 배포 시 실제 버킷으로 치환한다.
+- 처리 경로·배포 순서·검증 범위는 `docs/aws-document-transfer.md`에 정리했다. S3 CORS·lifecycle·IAM 대상 plan(1 add, 2 change, 0 destroy)을 운영에 적용하고 라이브 상태를 확인했다. 앱 이미지(converter·document-svc)와 프런트엔드 flag 배포는 별도 진행한다.
+- 배포 순서를 converter 우선으로 바꾼다. foundation·migration·routing 이후 converter Deployment를 먼저 적용하고 rollout 완료를 확인한 뒤에만 document·pipeline 등 나머지 workload를 적용한다. 새 document-svc가 converter `/convert-source-batch`를 요구하므로 converter 실패 시 document rollout을 시작하지 않는다.
+- deploy workflow에 `deploy` 액션 전용 gate `scripts/aws_pdf_smoke.py`를 추가한다. 배포 성공 후 검증 계정으로 65MiB 합성 PDF의 multipart 업로드·완료 재호출·Range 읽기·11페이지 분할 변환·AI 완료를 확인하고 테스트 문서만 정리한다. bootstrap/rollback에서는 실행하지 않는다.
+- 프런트엔드는 `BACKEND_URL`이 있으면 직접 업로드를 기본 활성화하며 `DOCUMENT_DIRECT_UPLOAD_ENABLED=false`로만 비활성화한다.
+- 검증: Terraform validate, actionlint, boundaries 테스트에 임시 prefix·GetObjectVersion 계약 추가, PDF smoke 테스트 3개와 workflow 배선 테스트 추가.
+
+## 2026-09-21 — 문서 본문 API 전체에 WAF 본문 규칙 예외 확장
+
+- 파일 업로드 외 Markdown 생성·문서 저장·AI 편집·질의·위키 스키마·Skill API도 임의 본문을 받아 CommonRuleSet 본문 규칙과 SQLi 본문 규칙에 차단되던 문제를 수정한다.
+- 허용 요청 조건(메서드·경로·Content-Type)을 `infra/waf/document-content-contracts.json` 한 곳에서 정의하고 Terraform과 테스트가 함께 읽는다. 조건 일치 시 Count 라벨만 부여하고, 본문 규칙 라벨이 있으나 문서 요청 라벨이 없는 요청은 `document-content-body-guard`가 차단한다.
+- 종료 Allow는 추가하지 않는다. URI·쿼리·헤더·쿠키 검사, IP 평판, KnownBadInputs, rate limit과 서버 인증·파일 검증은 유지한다. 상세는 `docs/aws-waf-document-content.md`.
+- 검증: `aws_wafv2_web_acl.cost_guard` 단일 리소스 대상 plan을 운영에 적용했다. 합성 프로브 57건(예외 44건 401, 차단 유지 13건 403)과 WAF 로그 대조를 통과했다. 새 계약 테스트 6개 추가.
+
 ## 2026-09-21 — 문서 업로드 WAF 본문 규칙 조정
 
 - 정상 파일 업로드가 CommonRuleSet의 8KB 크기 제한 및 GenericLFI 본문 검사로 차단되는 문제를 수정한다.

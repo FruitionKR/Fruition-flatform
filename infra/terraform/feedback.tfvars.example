@@ -29,3 +29,6 @@ request_wake_enabled = false
 
 # gh api repos/FruitionKR/Fruition-flatform/actions/oidc/customization/sub --jq .sub_claim_prefix
 github_oidc_subject_prefix = "repo:FruitionKR@OWNER_ID/Fruition-flatform@REPO_ID"
+
+# PDF 직접 업로드를 허용할 프런트엔드 HTTPS origin. 와일드카드 불가, 비우면 CORS 미생성.
+document_upload_allowed_origins = ["https://REPLACE_ME_FRONTEND_HOST"]

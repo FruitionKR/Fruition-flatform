@@ -1,0 +1,42 @@
+{
+  "upload": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/documents$",
+    "content_type_regex": "^multipart/form-data;[ \\t]*boundary=.+$"
+  },
+  "save": {
+    "method": "PUT",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/documents/doc_[0-9a-f]{32}/content$",
+    "content_type_regex": "^multipart/form-data;[ \\t]*boundary=.+$"
+  },
+  "markdown": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/documents/markdown$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  },
+  "agent": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/agent/turn$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  },
+  "query": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/chat/sessions/session_[0-9a-f]{32}/query(/runs)?$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  },
+  "schema": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/wiki-schema/(preview|drafts)$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  },
+  "skill-author": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/skills/author(/publish)?$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  },
+  "skill-update": {
+    "method": "PATCH",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/skills/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  }
+}
