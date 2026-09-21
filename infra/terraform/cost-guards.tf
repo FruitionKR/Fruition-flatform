@@ -24,6 +24,20 @@ variable "waf_emergency_block" {
   default     = false
 }
 
+locals {
+  waf_document_content_contracts = jsondecode(file("${path.module}/../waf/document-content-contracts.json"))
+  waf_content_body_overrides = {
+    AWSManagedRulesCommonRuleSet = {
+      SizeRestrictions_BODY   = "awswaf:managed:aws:core-rule-set:SizeRestrictions_Body"
+      GenericLFI_BODY         = "awswaf:managed:aws:core-rule-set:GenericLFI_Body"
+      CrossSiteScripting_BODY = "awswaf:managed:aws:core-rule-set:CrossSiteScripting_Body"
+    }
+    AWSManagedRulesSQLiRuleSet = {
+      SQLi_BODY = "awswaf:managed:aws:sql-database:SQLi_Body"
+    }
+  }
+}
+
 resource "aws_wafv2_web_acl" "cost_guard" {
   name  = "${var.project}-cost-guard"
   scope = "REGIONAL"
@@ -60,13 +74,76 @@ resource "aws_wafv2_web_acl" "cost_guard" {
     }
   }
 
-  # 보안 룰: 관리형 룰 그룹이 rate limit보다 먼저 평가된다.
+  # Mark only routes that intentionally carry arbitrary document text. Count
+  # continues evaluation; this is never a terminating Allow or an auth bypass.
+  rule {
+    name     = "document-content-contract"
+    priority = 1
+    action {
+      count {}
+    }
+    rule_label { name = "fruition:document-content" }
+    statement {
+      or_statement {
+        dynamic "statement" {
+          for_each = local.waf_document_content_contracts
+          content {
+            and_statement {
+              statement {
+                byte_match_statement {
+                  search_string         = statement.value.method
+                  positional_constraint = "EXACTLY"
+                  field_to_match {
+                    method {}
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "NONE"
+                  }
+                }
+              }
+              statement {
+                regex_match_statement {
+                  regex_string = statement.value.path_regex
+                  field_to_match {
+                    uri_path {}
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "NONE"
+                  }
+                }
+              }
+              statement {
+                regex_match_statement {
+                  regex_string = statement.value.content_type_regex
+                  field_to_match {
+                    single_header { name = "content-type" }
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "LOWERCASE"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "fruition-document-content-contract"
+      sampled_requests_enabled   = false
+    }
+  }
+
   dynamic "rule" {
     for_each = {
-      1 = "AWSManagedRulesAmazonIpReputationList"
-      2 = "AWSManagedRulesCommonRuleSet"
-      3 = "AWSManagedRulesKnownBadInputsRuleSet"
-      4 = "AWSManagedRulesSQLiRuleSet"
+      10 = "AWSManagedRulesAmazonIpReputationList"
+      11 = "AWSManagedRulesCommonRuleSet"
+      12 = "AWSManagedRulesKnownBadInputsRuleSet"
+      13 = "AWSManagedRulesSQLiRuleSet"
     }
     content {
       name     = rule.value
@@ -78,12 +155,12 @@ resource "aws_wafv2_web_acl" "cost_guard" {
         managed_rule_group_statement {
           vendor_name = "AWS"
           name        = rule.value
-          # Keep labels for these two body rules, then re-block all requests
-          # except the exact multipart document upload contract below.
+          # Preserve labels; the guard below re-blocks these outside the contract.
+          # Header, cookie, URI, query, reputation and known-bad-input rules remain.
           dynamic "rule_action_override" {
-            for_each = rule.value == "AWSManagedRulesCommonRuleSet" ? ["SizeRestrictions_BODY", "GenericLFI_BODY"] : []
+            for_each = lookup(local.waf_content_body_overrides, rule.value, {})
             content {
-              name = rule_action_override.value
+              name = rule_action_override.key
               action_to_use {
                 count {}
               }
@@ -99,88 +176,50 @@ resource "aws_wafv2_web_acl" "cost_guard" {
     }
   }
 
-  # Count overrides are NOT global exceptions: re-block their labels unless
-  # POST + exact document collection path + multipart boundary all match.
-  # No terminating Allow: every other managed rule and both rate limits apply.
-  dynamic "rule" {
-    for_each = {
-      5 = "SizeRestrictions_Body"
-      6 = "GenericLFI_Body"
+  rule {
+    name     = "document-content-body-guard"
+    priority = 20
+    action {
+      block {}
     }
-    content {
-      name     = "body-guard-${rule.value}"
-      priority = rule.key
-      action {
-        block {}
-      }
-      statement {
-        and_statement {
-          statement {
-            label_match_statement {
-              scope = "LABEL"
-              key   = "awswaf:managed:aws:core-rule-set:${rule.value}"
-            }
-          }
-          statement {
-            not_statement {
-              statement {
-                and_statement {
-                  statement {
-                    byte_match_statement {
-                      search_string         = "POST"
-                      positional_constraint = "EXACTLY"
-                      field_to_match {
-                        method {}
-                      }
-                      text_transformation {
-                        priority = 0
-                        type     = "NONE"
-                      }
-                    }
-                  }
-                  statement {
-                    regex_match_statement {
-                      regex_string = "^/api/workspaces/ws_[0-9a-f]{32}/documents$"
-                      field_to_match {
-                        uri_path {}
-                      }
-                      text_transformation {
-                        priority = 0
-                        type     = "NONE"
-                      }
-                    }
-                  }
-                  statement {
-                    regex_match_statement {
-                      regex_string = "^multipart/form-data;[ ]*boundary="
-                      field_to_match {
-                        single_header {
-                          name = "content-type"
-                        }
-                      }
-                      text_transformation {
-                        priority = 0
-                        type     = "LOWERCASE"
-                      }
-                    }
-                  }
+    statement {
+      and_statement {
+        statement {
+          or_statement {
+            dynamic "statement" {
+              for_each = toset(flatten([for rules in local.waf_content_body_overrides : values(rules)]))
+              content {
+                label_match_statement {
+                  scope = "LABEL"
+                  key   = statement.value
                 }
               }
             }
           }
         }
+        statement {
+          not_statement {
+            statement {
+              label_match_statement {
+                scope = "LABEL"
+                # Same-WebACL labels use their local name; AWS adds the prefix.
+                key = "fruition:document-content"
+              }
+            }
+          }
+        }
       }
-      visibility_config {
-        cloudwatch_metrics_enabled = true
-        metric_name                = "fruition-body-guard-${rule.value}"
-        sampled_requests_enabled   = false
-      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "fruition-document-content-body-guard"
+      sampled_requests_enabled   = false
     }
   }
 
   rule {
     name     = "per-source-ip"
-    priority = 10
+    priority = 30
     action {
       block {
         custom_response {
@@ -204,7 +243,7 @@ resource "aws_wafv2_web_acl" "cost_guard" {
 
   rule {
     name     = "all-api-requests"
-    priority = 20
+    priority = 40
     action {
       block {
         custom_response {

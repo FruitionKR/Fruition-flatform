@@ -1,3 +1,10 @@
+## 2026-09-21 — 문서 본문 API 전체에 WAF 본문 규칙 예외 확장
+
+- 파일 업로드 외 Markdown 생성·문서 저장·AI 편집·질의·위키 스키마·Skill API도 임의 본문을 받아 CommonRuleSet 본문 규칙과 SQLi 본문 규칙에 차단되던 문제를 수정한다.
+- 허용 요청 조건(메서드·경로·Content-Type)을 `infra/waf/document-content-contracts.json` 한 곳에서 정의하고 Terraform과 테스트가 함께 읽는다. 조건 일치 시 Count 라벨만 부여하고, 본문 규칙 라벨이 있으나 문서 요청 라벨이 없는 요청은 `document-content-body-guard`가 차단한다.
+- 종료 Allow는 추가하지 않는다. URI·쿼리·헤더·쿠키 검사, IP 평판, KnownBadInputs, rate limit과 서버 인증·파일 검증은 유지한다. 상세는 `docs/aws-waf-document-content.md`.
+- 검증: `aws_wafv2_web_acl.cost_guard` 단일 리소스 대상 plan을 운영에 적용했다. 합성 프로브 57건(예외 44건 401, 차단 유지 13건 403)과 WAF 로그 대조를 통과했다. 새 계약 테스트 6개 추가.
+
 ## 2026-09-21 — 문서 업로드 WAF 본문 규칙 조정
 
 - 정상 파일 업로드가 CommonRuleSet의 8KB 크기 제한 및 GenericLFI 본문 검사로 차단되는 문제를 수정한다.
