@@ -78,11 +78,101 @@ resource "aws_wafv2_web_acl" "cost_guard" {
         managed_rule_group_statement {
           vendor_name = "AWS"
           name        = rule.value
+          # Keep labels for these two body rules, then re-block all requests
+          # except the exact multipart document upload contract below.
+          dynamic "rule_action_override" {
+            for_each = rule.value == "AWSManagedRulesCommonRuleSet" ? ["SizeRestrictions_BODY", "GenericLFI_BODY"] : []
+            content {
+              name = rule_action_override.value
+              action_to_use {
+                count {}
+              }
+            }
+          }
         }
       }
       visibility_config {
         cloudwatch_metrics_enabled = true
         metric_name                = "fruition-${rule.value}"
+        sampled_requests_enabled   = false
+      }
+    }
+  }
+
+  # Count overrides are NOT global exceptions: re-block their labels unless
+  # POST + exact document collection path + multipart boundary all match.
+  # No terminating Allow: every other managed rule and both rate limits apply.
+  dynamic "rule" {
+    for_each = {
+      5 = "SizeRestrictions_Body"
+      6 = "GenericLFI_Body"
+    }
+    content {
+      name     = "body-guard-${rule.value}"
+      priority = rule.key
+      action {
+        block {}
+      }
+      statement {
+        and_statement {
+          statement {
+            label_match_statement {
+              scope = "LABEL"
+              key   = "awswaf:managed:aws:core-rule-set:${rule.value}"
+            }
+          }
+          statement {
+            not_statement {
+              statement {
+                and_statement {
+                  statement {
+                    byte_match_statement {
+                      search_string         = "POST"
+                      positional_constraint = "EXACTLY"
+                      field_to_match {
+                        method {}
+                      }
+                      text_transformation {
+                        priority = 0
+                        type     = "NONE"
+                      }
+                    }
+                  }
+                  statement {
+                    regex_match_statement {
+                      regex_string = "^/api/workspaces/ws_[0-9a-f]{32}/documents$"
+                      field_to_match {
+                        uri_path {}
+                      }
+                      text_transformation {
+                        priority = 0
+                        type     = "NONE"
+                      }
+                    }
+                  }
+                  statement {
+                    regex_match_statement {
+                      regex_string = "^multipart/form-data;[ ]*boundary="
+                      field_to_match {
+                        single_header {
+                          name = "content-type"
+                        }
+                      }
+                      text_transformation {
+                        priority = 0
+                        type     = "LOWERCASE"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = "fruition-body-guard-${rule.value}"
         sampled_requests_enabled   = false
       }
     }

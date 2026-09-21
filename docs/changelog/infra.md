@@ -1,3 +1,9 @@
+## 2026-09-21 — 문서 업로드 WAF 본문 규칙 조정
+
+- 정상 파일 업로드가 CommonRuleSet의 8KB 크기 제한 및 GenericLFI 본문 검사로 차단되는 문제를 수정한다.
+- POST `/api/workspaces/ws_[0-9a-f]{32}/documents`의 multipart/form-data boundary 요청만 두 본문 규칙의 예외로 처리한다. Count label과 후속 Block으로 다른 경로·메서드·Content-Type에는 기존 차단을 유지한다.
+- 나머지 관리형 규칙·rate limit·서버 인증 및 파일 검증은 유지한다. WAF 전체 Allow나 인증 실패 무시는 추가하지 않는다.
+
 ## 2026-09-20 — 노드 이미지 자동 정리와 빌드 캐시
 
 - 20GiB 노드의 DiskPressure 재발 대응으로 kubelet 이미지 정리를 85/80%에서 70/60%로 앞당기고 24시간 미사용 이미지 정리를 활성화한다. 디스크 크기는 유지하며 노드 그룹당 최대 1대씩 순차 업데이트한다.
