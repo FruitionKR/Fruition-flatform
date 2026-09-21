@@ -60,6 +60,21 @@ def storage_url(url, bucket):
     return url
 
 
+class ApiStatusError(ValueError):
+    def __init__(self, status):
+        super().__init__('Unexpected PDF smoke API status')
+        self.status = status
+
+
+def failure_report(exc, stage):
+    # Never serialize exception messages: HTTPError can contain a signed URL.
+    report = {'status': 'failed', 'error_type': type(exc).__name__, 'stage': stage}
+    status = exc.status if isinstance(exc, ApiStatusError) else exc.code if isinstance(exc, error.HTTPError) else None
+    if type(status) is int and 100 <= status <= 599:
+        report['http_status'] = status
+    return report
+
+
 class Probe:
     def __init__(self, config, settings):
         self.config, self.settings = config, settings
@@ -80,7 +95,7 @@ class Probe:
         try:
             with self.opener.open(req, timeout=120) as response:
                 if response.status not in expected:
-                    raise ValueError('Unexpected API status')
+                    raise ApiStatusError(response.status)
                 raw = response.read(8 * 1024 * 1024)
                 return json.loads(raw) if raw else {}
         except error.HTTPError as exc:
@@ -90,7 +105,7 @@ class Probe:
                 self.token = None
                 self.login()
                 return self.api(method, url, payload, expected, key, renew=False)
-            raise ValueError(f'PDF smoke API failed: HTTP {status}') from None
+            raise ApiStatusError(status) from None
         except (error.URLError, json.JSONDecodeError):
             raise ValueError('PDF smoke API transport or JSON failure') from None
 
@@ -123,7 +138,7 @@ class Probe:
             raise ValueError('PDF smoke login failed')
     def run(self, path, timeout):
         self.login()
-        self.stage = 'multipart-upload'
+        self.stage = 'multipart-start'
         started = self.api('POST', self.base + '/uploads',
                            {'filename': 'deployment-' + uuid.uuid4().hex + '.pdf', 'size': path.stat().st_size})
         ticket = started['ticket']
@@ -132,16 +147,20 @@ class Probe:
                 raise ValueError('Fixture did not exercise multipart upload')
             with path.open('rb') as source:
                 for part in range(1, started['part_count'] + 1):
+                    self.stage = 'multipart-part-url'
                     urls = self.api('POST', self.base + '/uploads/parts',
                                     {'ticket': ticket, 'first_part': part, 'count': 1})['parts']
                     signed = storage_url(urls[0]['url'], self.config['s3_bucket'])
                     # Only the signed storage URL receives these bytes; no API Bearer/cookies.
+                    self.stage = 'multipart-part-put'
                     req = request.Request(signed, data=source.read(started['part_size']), method='PUT')
                     with self.opener.open(req, timeout=180) as response:
                         if response.status not in (200, 204):
-                            raise ValueError('Multipart PUT failed')
+                            raise ApiStatusError(response.status)
             key = str(uuid.uuid4())
+            self.stage = 'multipart-complete'
             original = self.remember(self.api('POST', self.base + '/uploads/complete', {'ticket': ticket}, expected=(201,), key=key))
+            self.stage = 'multipart-completion-replay'
             replay = self.api('POST', self.base + '/uploads/complete', {'ticket': ticket}, expected=(201,), key=key)
             if replay.get('id') != original:
                 raise ValueError('Completion replay created a duplicate')
@@ -193,9 +212,7 @@ def main():
             write_pdf(pdf)
             report = probe.run(pdf, args.timeout)
     except Exception as exc:
-        # HTTP errors may include the signed URL. Expose only the type, never repr/traceback.
-        report['error_type'] = type(exc).__name__
-        report['stage'] = probe.stage
+        report = failure_report(exc, probe.stage)
     finally:
         report['cleanup_failures'] = probe.cleanup()
         if report['cleanup_failures']:
