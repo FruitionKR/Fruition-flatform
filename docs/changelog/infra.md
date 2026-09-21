@@ -4,6 +4,7 @@
 - 문서 IRSA 정책에 `tmp/document-uploads/*` 읽기·쓰기와 `s3:GetObjectVersion`을 추가한다. 임시 prefix 삭제 권한은 부여하지 않으며 `tmp/` 이전 버전은 7일 lifecycle로 만료한다.
 - converter Deployment에 `CONVERTER_SOURCE_HOSTS`, `PDF_PAGES_PER_BATCH` 환경 변수를 ConfigMap에서 주입한다. AWS overlay 값은 리전 S3 endpoint와 버킷 hostname placeholder로 두며 배포 시 실제 버킷으로 치환한다.
 - 처리 경로·배포 순서·검증 범위는 `docs/aws-document-transfer.md`에 정리했다. S3 CORS·lifecycle·IAM 대상 plan(1 add, 2 change, 0 destroy)을 운영에 적용하고 라이브 상태를 확인했다. 앱 이미지(converter·document-svc)와 프런트엔드 flag 배포는 별도 진행한다.
+- 배포 순서를 converter 우선으로 바꾼다. foundation·migration·routing 이후 converter Deployment를 먼저 적용하고 rollout 완료를 확인한 뒤에만 document·pipeline 등 나머지 workload를 적용한다. 새 document-svc가 converter `/convert-source-batch`를 요구하므로 converter 실패 시 document rollout을 시작하지 않는다.
 - deploy workflow에 `deploy` 액션 전용 gate `scripts/aws_pdf_smoke.py`를 추가한다. 배포 성공 후 검증 계정으로 65MiB 합성 PDF의 multipart 업로드·완료 재호출·Range 읽기·11페이지 분할 변환·AI 완료를 확인하고 테스트 문서만 정리한다. bootstrap/rollback에서는 실행하지 않는다.
 - 프런트엔드는 `BACKEND_URL`이 있으면 직접 업로드를 기본 활성화하며 `DOCUMENT_DIRECT_UPLOAD_ENABLED=false`로만 비활성화한다.
 - 검증: Terraform validate, actionlint, boundaries 테스트에 임시 prefix·GetObjectVersion 계약 추가, PDF smoke 테스트 3개와 workflow 배선 테스트 추가.
