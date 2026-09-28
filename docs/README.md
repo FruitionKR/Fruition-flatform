@@ -17,6 +17,7 @@
 | [AWS 운영 보완 계획](architecture.md#aws-운영-보완-계획) | 확인된 부족 항목·담당·우선순위·완료 기준 |
 | [운영 보완 실행 계획](script.md#aws-운영-보완-실행-계획) | 알림 초안·Runbook·복원 시험·배포 전 검증 |
 | [ADR-0021](adr/0021-aws-observability-and-operations.md) | CloudWatch 중심 관측과 운영 준비 결정 |
+| [ADR-0022](adr/0022-realtime-speech-transcription.md) | 음성 기능 서비스 책임과 실시간 전사 WebSocket 중계 결정(제안) |
 | [backlog/](backlog/README.md) | 과거 통합 설계·이슈·다이어그램 보관 |
 
 서비스별 문서: [frontend](https://github.com/FruitionKR/Fruition-frontend/blob/main/docs/README.md) · [Access](https://github.com/FruitionKR/Fruition-access/blob/main/docs/README.md) · [Document](https://github.com/FruitionKR/Fruition-document/blob/main/docs/README.md) · [AI](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/README.md)
