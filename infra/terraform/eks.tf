@@ -66,19 +66,6 @@ module "eks" {
     ai_worker = {
       instance_types = ["m5.xlarge", "m6i.xlarge"] # 4 vCPU / 16GiB
       capacity_type  = "SPOT"
-      # 기본 20GiB에서는 AI 이미지(압축 해제 약 3.3GB)와 작업자별 BGE-M3 캐시(약 2.3GB)로
-      # ephemeral-storage 회수가 일어난다. Spot 교체 때 새 노드부터 적용된다.
-      block_device_mappings = {
-        xvda = {
-          device_name = "/dev/xvda"
-          ebs = {
-            volume_size           = 50
-            volume_type           = "gp3"
-            encrypted             = true
-            delete_on_termination = true
-          }
-        }
-      }
       min_size       = 0
       desired_size   = 0
       max_size       = 2
