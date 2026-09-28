@@ -194,6 +194,8 @@ patches:
   # BGE-M3를 올리는 worker만 semantic 검색을 켠다. query·agent는 질의 임베딩, maintenance는
   # post-ingest·복구 임베딩을 만든다. 모델(약 2.2GB)은 첫 사용 때 받아 pod의 emptyDir에 둔다.
   # 나머지 AI pod는 fruition-config의 text-only를 유지해 모델을 올리지 않는다.
+  # 메모리: 배치 1 임베딩의 최고치가 약 2.5GB라(Fruition-ai #22) 요청 2.5Gi, 한도 3.5Gi로 둔다.
+  # 디스크: 모델 캐시(최대 5Gi)를 스케줄러가 알도록 ephemeral-storage를 요청한다.
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment
@@ -214,9 +216,11 @@ patches:
                 resources:
                   requests:
                     cpu: 500m
-                    memory: 3Gi
+                    memory: 2560Mi
+                    ephemeral-storage: 3Gi
                   limits:
-                    memory: 4Gi
+                    memory: 3584Mi
+                    ephemeral-storage: 6Gi
                 volumeMounts:
                   - name: model-cache
                     mountPath: /cache
@@ -244,9 +248,11 @@ patches:
                 resources:
                   requests:
                     cpu: 500m
-                    memory: 3Gi
+                    memory: 2560Mi
+                    ephemeral-storage: 3Gi
                   limits:
-                    memory: 4Gi
+                    memory: 3584Mi
+                    ephemeral-storage: 6Gi
                 volumeMounts:
                   - name: model-cache
                     mountPath: /cache
@@ -274,9 +280,11 @@ patches:
                 resources:
                   requests:
                     cpu: 500m
-                    memory: 3Gi
+                    memory: 2560Mi
+                    ephemeral-storage: 3Gi
                   limits:
-                    memory: 4Gi
+                    memory: 3584Mi
+                    ephemeral-storage: 6Gi
                 volumeMounts:
                   - name: model-cache
                     mountPath: /cache
