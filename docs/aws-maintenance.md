@@ -89,6 +89,30 @@ bootstrap 준비 완료 이후 Google·Naver·Kakao OAuth Secret 연결 6개가 
 
 이 저장소는 실제 DB를 생성하거나 복원 시험을 실행했다는 증거를 대신 만들지 않습니다.
 
+## 의미 검색(BGE-M3) 켜기와 기존 위키 임베딩
+
+질의·에이전트·유지보수 작업자만 `QUERY_EMBEDDING_MODE=bge-m3`로 실행합니다. 나머지 AI Pod는 `fruition-config`의 `text-only`를 유지합니다. 모델(약 2.2GB)은 각 Pod가 처음 사용할 때 Hugging Face에서 받아 `emptyDir`(`/cache/huggingface`, 최대 5Gi)에 둡니다. Pod가 다시 뜨면 다시 받습니다. 그래서 재시작 직후 첫 질의는 모델을 받는 동안 늦어집니다.
+
+세 작업자는 각각 메모리 3Gi를 요청하고 4Gi까지 씁니다. 최소 구성(각 1개)은 AI 노드 1대에 들어갑니다. KEDA가 질의·에이전트 작업자를 늘리면 AI 노드 상한(2대)에 닿아 Pod가 대기할 수 있습니다.
+
+`text-only`로 운영하던 동안 편입한 위키 페이지에는 임베딩이 없습니다. 이 페이지들은 자동 재처리 대상이 아닙니다. 배포 뒤 한 번 아래 명령으로 채웁니다. 페이지 50개씩 처리하며, 같은 모델로 같은 내용을 이미 임베딩한 페이지는 건너뜁니다.
+
+```bash
+kubectl -n fruition exec -i deploy/maintenance-task-worker -- python - <<'PY'
+from app.modules.wiki_embedding.infrastructure.threaded_wiki_embedding_job import build_wiki_embeddings
+from app.modules.wiki_ingestion.infrastructure import postgres_wiki_ingestion_repository as database
+
+with database.connect() as conn:
+    page_ids = [str(row["id"]) for row in conn.execute(
+        "SELECT id FROM wiki_pages WHERE status = 'active' ORDER BY id"
+    ).fetchall()]
+for start in range(0, len(page_ids), 50):
+    print(start, build_wiki_embeddings(page_ids[start:start + 50]), flush=True)
+PY
+```
+
+각 줄의 `failed_count`가 0인지 확인합니다. 실패한 페이지는 `wiki_page_embeddings.status = 'failed'`로 남아 이후 임베딩 작업이 다시 시도합니다.
+
 ## 노드·EKS 버전 점검
 
 API는 각 2개 Pod이며 `maxUnavailable: 0`, `maxSurge: 1`로 교체합니다. 노드 점검은 PDB가 최소 1개 Pod를 보호합니다. ALB Service/Ingress와 TargetGroupBinding을 먼저 만들고 Pod를 생성해 readiness gate가 주입되게 합니다. ALB Pod webhook 실패 시 새 Pod 생성을 막아 gate 없이 배포가 진행되지 않도록 합니다. 이미 있는 Pod에는 자동 주입되지 않으므로 최초 전환의 재배포 후 실제 Pod의 gate와 ALB target 상태를 확인하세요.
