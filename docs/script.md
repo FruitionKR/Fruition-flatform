@@ -761,7 +761,7 @@ eks_addon_versions에는 vpc-cni/coredns/kube-proxy/aws-ebs-csi-driver 네 key�
 
 Helm install/upgrade는 스크립트의 --version과 --wait를 사용한다. ALB controller에는 실제 EKS VPC ID를 지정해 metadata 추론에 의존하지 않는다. 플랫폼 관리자는 k8s/platform/aws의 Namespace, gp3 StorageClass, ClusterSecretStore, 앱 배포 Role/RoleBinding 및 이름이 제한된 read-only ClusterRole/Binding을 설치한다. gp3는 ebs.csi.aws.com, 암호화, WaitForFirstConsumer, Retain이며 AWS KafkaNodePool은 class=gp3다.
 
-앱 EKS access entry는 fruition:deployers 그룹만 부여한다. 앱 role은 fruition namespace의 ConfigMap/ServiceAccount/Service/Deployment/Job/Ingress/NetworkPolicy/ExternalSecret/Kafka/ScaledObject를 배포하고 Pod 상태·로그를 조회한다. Secrets/Role/Binding이나 다른 namespace를 직접 읽고 쓰지 못한다. 플랫폼 자원은 이름이 지정된 읽기만 허용한다. 앱 코드도 허용 kind·namespace 밖 apply를 거부한다. 플랫폼 RBAC는 앱 workflow에 넣지 않는다.
+앱 EKS access entry는 fruition:deployers 그룹만 부여한다. runner 호스트 role은 fruition:operators 그룹으로 fruition namespace의 Pod 생성·삭제·로그와 Deployment 조회만 받는 별도 access entry를 가진다(운영 DB 일회성 조회용, `k8s/platform/aws/deploy-rbac.yaml`의 operations-query). 앱 role은 fruition namespace의 ConfigMap/ServiceAccount/Service/Deployment/Job/Ingress/NetworkPolicy/ExternalSecret/Kafka/ScaledObject를 배포하고 Pod 상태·로그를 조회한다. Secrets/Role/Binding이나 다른 namespace를 직접 읽고 쓰지 못한다. 플랫폼 자원은 이름이 지정된 읽기만 허용한다. 앱 코드도 허용 kind·namespace 밖 apply를 거부한다. 플랫폼 RBAC는 앱 workflow에 넣지 않는다.
 
     # 플랫폼 관리자 또는 별도 권한 검증 담당자가 실제 AWS에서 수행할 검증
     kubectl auth can-i create deployments -n fruition --as-group=fruition:deployers --as=permission-check

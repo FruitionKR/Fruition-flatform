@@ -90,3 +90,36 @@ roleRef:
   kind: ClusterRole
   name: fruition-platform-reader
   apiGroup: rbac.authorization.k8s.io
+---
+# runner 호스트의 운영자(fruition:operators)가 fruition namespace 안에서 일회성 조회 Pod(예: psql로 운영 DB SELECT)를
+# 띄우고 로그를 읽는 용도. Deployment는 DB 호스트 같은 env 값을 읽기 위해 조회만 허용한다.
+# Secret·ConfigMap 값은 Pod env 주입으로만 쓰이고 직접 읽지 못한다. 배포·변경 권한은 없다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: operations-query
+  namespace: fruition
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: operations-query
+  namespace: fruition
+subjects:
+  - kind: Group
+    name: fruition:operators
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: operations-query
+  apiGroup: rbac.authorization.k8s.io

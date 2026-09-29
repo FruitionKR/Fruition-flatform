@@ -125,7 +125,7 @@ GitHub **Actions → Check deployment runner → Run workflow → main**을 실�
 |---|---|
 | private subnet의 t3.small 1대, 암호화 gp3 30GB | GitHub 배포 명령을 실행하는 상시 서버 |
 | 기존 NAT Gateway | GitHub·패키지 저장소·AWS API로 나가는 연결 |
-| SSM + 서버 IAM role | 관리 접속. 서버 role에 앱 배포 권한은 없음 |
+| SSM + 서버 IAM role | 관리 접속. 서버 role에 앱 배포 권한은 없음. `eks:DescribeCluster`와 `fruition:operators` access entry로 fruition namespace 안 일회성 조회 Pod(psql 등) 생성·로그 조회만 가능 |
 | GitHub OIDC + deploy role | 작업 시 임시 AWS 인증, ECR 태그 확인과 대상 EKS 조회 |
 | EKS access entry + RBAC | 허용된 namespace의 앱 배포 권한 |
 | Python 3.12, AWS CLI, kubectl | 설정 렌더링, AWS 인증, Kubernetes 배포 실행 |
