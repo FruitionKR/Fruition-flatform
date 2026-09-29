@@ -136,9 +136,13 @@ services:
       retries: 20
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # quay.io/minio/minio·minio/mc 공개 태그가 삭제돼(2026-09) 소스에서 빌드한 Chainguard 이미지를 digest로 고정한다.
+    # Fruition-document Testcontainers(TestcontainersConfiguration.MINIO_IMAGE)와 같은 digest다.
+    image: cgr.dev/chainguard/minio@sha256:6a1d0b45c8669726bba580ced0bfa4cb9fdeed1ed636dfabd81d1577beb6937b
     container_name: fruition-minio-dev
     restart: unless-stopped
+    # Chainguard 이미지는 비root(65532)라 named volume을 쓰려면 root로 띄운다. 로컬 개발 전용이다.
+    user: "0:0"
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-fruition}
@@ -150,24 +154,26 @@ services:
       - minio-data:/data
 
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    # mc 이미지가 사라져 AWS CLI(public ECR, digest 고정)로 버킷을 만든다. 새 버킷은 기본이 비공개라 anonymous 설정은 필요 없다.
+    image: public.ecr.aws/aws-cli/aws-cli@sha256:37458ae4e84ce11cdd92da543e72ece6d75ca73c35a0bcd3fe4571ccc882cf98
     container_name: fruition-minio-init-dev
     depends_on:
       minio:
         condition: service_started
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-fruition}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-fruition_dev_secret}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-fruition}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-fruition_dev_secret}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
       S3_BUCKET: ${S3_BUCKET:-fruition-storage}
     entrypoint:
       - /bin/sh
       - -c
       - |
-        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
+        until aws --endpoint-url http://minio:9000 s3api head-bucket --bucket "$${S3_BUCKET}" 2>/dev/null \
+           || aws --endpoint-url http://minio:9000 s3api create-bucket --bucket "$${S3_BUCKET}"; do
           sleep 1;
-        done &&
-        mc mb --ignore-existing "local/$${S3_BUCKET}" &&
-        mc anonymous set none "local/$${S3_BUCKET}"
+        done
     restart: "no"
 
 volumes:
