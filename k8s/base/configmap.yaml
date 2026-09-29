@@ -43,6 +43,10 @@ data:
   WIKI_SCHEMA_ENDPOINT: "http://pipeline-api:8000/wiki-schema"
   WIKI_PAGE_ENDPOINT: "http://pipeline-api:8000/wiki/pages"
   WIKI_STATE_ENDPOINT: "http://pipeline-api:8000/wiki"
+  # 음성·회의 기능(document V54~V56, ADR-0022). 없으면 localhost:8000 기본값으로 나가 503이 된다.
+  SPEECH_LIVE_ENDPOINT: "ws://pipeline-api:8000/speech/transcriptions/live"
+  SPEECH_TRANSCRIPTION_ENDPOINT: "http://pipeline-api:8000/speech/transcriptions"
+  MEETING_NOTES_ENDPOINT: "http://pipeline-api:8000/meeting-notes/preview"
   # PDF → Markdown 변환기(converter Service, ClusterIP) — document-svc가 내부 호출
   CONVERTER_ENDPOINT: "http://converter:8000"
   # 서비스 간 내부 호출 — document-svc -> access-svc(/internal/authz·users),
