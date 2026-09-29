@@ -8,6 +8,7 @@
 - `back-test.sh`: Java 21을 찾아 백엔드 Gradle 테스트 실행
 - `ai-up.sh` / `ai-down.sh`: Pipeline API와 AI 워커
 - `bootstrap.sh`: 필수 도구와 의존성 준비
+- `aws-ops-db-query.sh`: runner 호스트에서 운영 core_db에 읽기 전용 SELECT 실행(일회성 psql Pod, `fruition:operators` 권한)
 - `lib/`: 스크립트 공용 함수
 
 상세 사용법은 [`docs/script.md`](../docs/script.md)를 참고한다.

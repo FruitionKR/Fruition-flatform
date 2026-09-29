@@ -60,11 +60,28 @@ resource "aws_iam_role" "runner_host" {
   })
 }
 
-# Host credentials provide management connectivity only. No EKS access entry,
-# application secrets, image push or Terraform privileges are assigned here.
+# Host credentials provide management connectivity plus a namespace-scoped EKS
+# operations entry (fruition:operators; see eks.tf and k8s/platform/aws/deploy-rbac.yaml)
+# so an operator on the runner can run one-off query pods inside the cluster.
+# No application secrets, image push or Terraform privileges are assigned here.
 resource "aws_iam_role_policy_attachment" "runner_ssm" {
   role       = aws_iam_role.runner_host.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# `aws eks update-kubeconfig` on the runner needs DescribeCluster. Kubernetes
+# authorization comes from the access entry + RoleBinding, not from IAM.
+resource "aws_iam_role_policy" "runner_host_eks_describe" {
+  name = "${var.project}-feedback-runner-eks-describe"
+  role = aws_iam_role.runner_host.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["eks:DescribeCluster"]
+      Resource = [module.eks.cluster_arn]
+    }]
+  })
 }
 
 resource "aws_iam_instance_profile" "runner" {

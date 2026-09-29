@@ -89,6 +89,11 @@ module "eks" {
         principal_arn     = aws_iam_role.github_deploy.arn
         kubernetes_groups = ["fruition:deployers"]
       }
+      # runner 호스트의 운영자가 일회성 조회 Pod(psql 등)를 띄우는 용도. deploy-rbac.yaml의 operations-query Role만 받는다.
+      runner_operations = {
+        principal_arn     = aws_iam_role.runner_host.arn
+        kubernetes_groups = ["fruition:operators"]
+      }
     },
     var.eks_admin_role_arn == null ? {} : {
       break_glass_admin = {
