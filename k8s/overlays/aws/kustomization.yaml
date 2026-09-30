@@ -243,6 +243,16 @@ patches:
             operator: Equal
             value: "true"
             effect: NoSchedule
+  # 워커는 SIGTERM을 받으면 새 메시지를 그만 받고 진행 중인 건을 마친 뒤 offset을 commit한다(ingest/task worker).
+  # 기본 30초로는 분 단위 LLM 작업이 SIGKILL로 끊겨 재전달·LLM 재호출이 된다. rollout·scale-down·노드 drain 때
+  # 진행 중 건을 마칠 시간을 준다. Spot 회수는 통보 후 2분 상한이라 그 안에 끝나는 건만 살린다.
+  - target:
+      kind: Deployment
+      name: (ingest-worker|pipeline-agent-worker|query-task-worker|agent-task-worker|maintenance-task-worker|converter)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 900
 
   - target:
       kind: Kafka
