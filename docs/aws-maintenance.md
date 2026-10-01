@@ -89,6 +89,41 @@ bootstrap 준비 완료 이후 Google·Naver·Kakao OAuth Secret 연결 6개가 
 
 이 저장소는 실제 DB를 생성하거나 복원 시험을 실행했다는 증거를 대신 만들지 않습니다.
 
+## 의미 검색(BGE-M3) 켜기와 기존 위키 임베딩
+
+질의·에이전트·유지보수 작업자만 `QUERY_EMBEDDING_MODE=bge-m3`로 실행합니다. 나머지 AI Pod는 `fruition-config`의 `text-only`를 유지합니다. 모델(약 2.1GB)은 `fruition-pipeline` 이미지에 들어 있고(`HF_HOME=/opt/huggingface`, `HF_HUB_OFFLINE=1`) Pod가 뜰 때 Hugging Face에서 받지 않습니다. 같은 이미지를 쓰는 AI Pod들이 이미지 레이어를 공유하므로 노드 디스크에는 한 번만 저장됩니다. AI 노드 디스크(20GiB)는 늘리지 않습니다.
+
+세 작업자는 메모리를 2.5Gi 요청하고 3.5Gi까지 씁니다. BGE-M3를 배치 1로 계산하면(Fruition-ai #22) 최고치가 약 2.5GB입니다. 모델을 넣은 이미지(Fruition-ai #23)와 배치 1 코드가 먼저 배포돼야 합니다. 배치 16이던 이전 코드는 긴 문서에서 5GB를 넘습니다.
+
+최소 구성(세 작업자 각 1개)은 AI 노드 1대에 들어갑니다. KEDA가 질의·에이전트 작업자를 늘리면 AI 노드 상한(2대)에 닿아 Pod가 대기할 수 있습니다.
+
+### 기존 위키 임베딩 채우기
+
+`text-only`로 운영하던 동안 편입한 페이지에는 페이지 임베딩 행이 없어 자동 재처리 대상이 아닙니다. 유지보수 작업자는 시작할 때 `pending`·`failed` 행을 자기 프로세스의 모델로 다시 계산합니다. 그래서 빈 페이지를 `pending`으로 표시한 뒤 작업자를 재시작합니다. 표시 명령은 모델을 올리지 않으므로 작업자 메모리에 영향이 없습니다.
+
+```bash
+kubectl -n fruition exec -i deploy/maintenance-task-worker -- python - <<'PY'
+from app.modules.wiki_ingestion.infrastructure import postgres_wiki_ingestion_repository as database
+
+with database.connect() as conn:
+    marked = conn.execute("""
+        INSERT INTO wiki_page_embeddings
+            (page_id, embedding_model, representation_hash, embedding_vector, embedding_dimension, status)
+        SELECT page.id, 'BAAI/bge-m3', 'backfill', '{}', 0, 'pending'
+        FROM wiki_pages page
+        WHERE page.status = 'active'
+          AND NOT EXISTS (
+              SELECT 1 FROM wiki_page_embeddings embedding
+              WHERE embedding.page_id = page.id AND embedding.embedding_model = 'BAAI/bge-m3'
+          )
+    """).rowcount
+print("pending으로 표시한 페이지", marked)
+PY
+kubectl -n fruition rollout restart deploy/maintenance-task-worker
+```
+
+재시작한 작업자 로그에서 `wiki page embedding job completed run_id=pending-recovery`를 확인합니다. 페이지의 근거 단위 벡터도 같은 작업에서 채워집니다. 실패가 남으면 `wiki_page_embeddings.status = 'failed'`로 기록되고, 작업자가 다시 시작하거나 다음 임베딩 작업이 돌 때만 재시도합니다. 실패 수가 0이 될 때까지 재시작을 반복합니다.
+
 ## 노드·EKS 버전 점검
 
 API는 각 2개 Pod이며 `maxUnavailable: 0`, `maxSurge: 1`로 교체합니다. 노드 점검은 PDB가 최소 1개 Pod를 보호합니다. ALB Service/Ingress와 TargetGroupBinding을 먼저 만들고 Pod를 생성해 readiness gate가 주입되게 합니다. ALB Pod webhook 실패 시 새 Pod 생성을 막아 gate 없이 배포가 진행되지 않도록 합니다. 이미 있는 Pod에는 자동 주입되지 않으므로 최초 전환의 재배포 후 실제 Pod의 gate와 ALB target 상태를 확인하세요.
