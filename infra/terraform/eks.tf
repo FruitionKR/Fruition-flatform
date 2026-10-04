@@ -51,7 +51,21 @@ module "eks" {
     # 2026-10-04 배포에서 AI 노드 image filesystem이 19.9GiB의 100%까지 차
     # pipeline-agent-worker가 ephemeral-storage 부족으로 Evicted 됐다.
     # BGE-M3 모델 약 2.1GB가 pipeline 이미지에 포함되어 교체 한 번에 그만큼이 두 벌 필요하다.
-    disk_size = 30
+    #
+    # 이 모듈은 커스텀 launch template을 쓰므로 node group의 disk_size를 null로 버린다
+    # (eks-managed-node-group/main.tf: use_custom_launch_template ? null : var.disk_size).
+    # 볼륨은 block_device_mappings로 지정해야 실제로 반영된다.
+    block_device_mappings = {
+      root = {
+        device_name = "/dev/xvda"
+        ebs = {
+          volume_size           = 30
+          volume_type           = "gp3"
+          encrypted             = true
+          delete_on_termination = true
+        }
+      }
+    }
     # Reclaim unused image layers before a rollout reaches disk pressure.
     # Kubelet owns GC; do not run a competing privileged prune DaemonSet.
     cloudinit_pre_nodeadm = [{
