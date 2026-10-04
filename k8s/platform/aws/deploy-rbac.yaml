@@ -45,6 +45,10 @@ rules:
   - apiGroups: [keda.sh]
     resources: [scaledobjects, triggerauthentications]
     verbs: [get, list, watch, create, update, patch]
+  # API Pod의 CPU 기준 HPA. KEDA는 Kafka 적체만 보므로 HTTP 트래픽 구간은 HPA가 담당한다.
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch, create, update, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
