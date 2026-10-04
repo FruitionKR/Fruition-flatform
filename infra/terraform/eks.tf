@@ -29,6 +29,20 @@ module "eks" {
     }
   }
 
+  # metrics-server는 10251에서 metrics.k8s.io를 제공한다. 모듈 기본 규칙은
+  # kubelet 10250까지만 열어 두어 API 서버가 Pod에 닿지 못하고 APIService가
+  # Available=False로 남는다. 그러면 API HPA의 CPU 지표가 <unknown>이 된다.
+  node_security_group_additional_rules = {
+    metrics_server = {
+      description                   = "Cluster API to metrics-server 10251/tcp"
+      type                          = "ingress"
+      protocol                      = "tcp"
+      from_port                     = 10251
+      to_port                       = 10251
+      source_cluster_security_group = true
+    }
+  }
+
   # 애드온은 아래에서 직접 관리: 모듈의 전체 resource 출력에서 deprecated 속성 참조 방지.
 
   eks_managed_node_group_defaults = {
