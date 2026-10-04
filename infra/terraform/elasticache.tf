@@ -61,12 +61,16 @@ resource "aws_elasticache_user_group" "services" {
 }
 
 resource "aws_elasticache_replication_group" "main" {
-  replication_group_id       = "${var.project}-redis"
-  description                = "Feedback Redis with per-service ACLs"
-  engine                     = "redis"
-  engine_version             = "7.1"
-  node_type                  = "cache.t4g.micro"
-  num_cache_clusters         = 1
+  replication_group_id = "${var.project}-redis"
+  description          = "Feedback Redis with per-service ACLs"
+  engine               = "redis"
+  engine_version       = "7.1"
+  node_type            = "cache.t4g.micro"
+  # 단일 노드는 죽으면 세션·권한 projection·SSE relay가 함께 사라져 전원 로그아웃이 된다.
+  # 복제본 1개와 자동 장애 조치로 노드 교체·장애를 견딘다. 두 AZ에 나눠 배치한다.
+  num_cache_clusters         = 2
+  automatic_failover_enabled = true
+  multi_az_enabled           = true
   port                       = 6379
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true

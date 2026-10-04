@@ -12,6 +12,7 @@ resources:
   - service-accounts.yaml
   - migration-jobs.yaml
   - api-disruption-budgets.yaml
+  - api-autoscaling.yaml
   - kafka-users.yaml
   - kafka-trigger-auth.yaml
 
