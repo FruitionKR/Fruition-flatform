@@ -37,4 +37,12 @@ spec:
     authorization:
       type: simple
   entityOperator:
-    userOperator: {}
+    # topicOperator와 동일한 이유로 AdminClient 재접속 로그를 억제한다 (base/kafka.yaml 참조).
+    userOperator:
+      logging:
+        type: inline
+        loggers:
+          logger.adminmeta.name: org.apache.kafka.clients.admin.internals.AdminMetadataManager
+          logger.adminmeta.level: WARN
+          logger.netclient.name: org.apache.kafka.clients.NetworkClient
+          logger.netclient.level: ERROR
