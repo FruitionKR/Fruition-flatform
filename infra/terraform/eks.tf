@@ -97,7 +97,10 @@ module "eks" {
       max_size             = 4 # 플랫폼 DaemonSet·Kafka·API 2 replicas와 rollout 여유
     }
     ai_worker = {
-      instance_types = ["m5.xlarge", "m6i.xlarge"] # 4 vCPU / 16GiB
+      # 4 vCPU / 16GiB. 두 종류만 두면 Spot 풀이 말라 교체가 실패한다.
+      # 2026-10-04 rebalance recommendation 때 UnfulfillableCapacity로 기동이 깨졌다.
+      # 2a/2b 양쪽에 모두 제공되는 동급 타입으로 풀을 넓힌다.
+      instance_types = ["m5.xlarge", "m5d.xlarge", "m6i.xlarge", "m7i.xlarge"]
       capacity_type  = "SPOT"
       min_size       = 0
       desired_size   = 0
