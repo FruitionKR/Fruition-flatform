@@ -55,7 +55,18 @@ spec:
       min.insync.replicas: 1
       auto.create.topics.enable: false
   entityOperator:
-    topicOperator: {}
+    topicOperator:
+      # AdminClient는 브로커를 못 찾으면 백오프 없이 재부트스트랩을 반복하고
+      # 그 과정을 INFO로 남긴다. 2026-10-04 노드그룹 롤링으로 브로커가 6분간
+      # 사라졌을 때 entity-operator 한 파드가 15분에 118MiB를 쏟아 로그 유입
+      # 경보를 울렸다. 두 flood 소스만 올려 운영 로그는 그대로 둔다.
+      logging:
+        type: inline
+        loggers:
+          logger.adminmeta.name: org.apache.kafka.clients.admin.internals.AdminMetadataManager
+          logger.adminmeta.level: WARN
+          logger.netclient.name: org.apache.kafka.clients.NetworkClient
+          logger.netclient.level: ERROR
 ---
 # partition 수 = ingest worker 병렬 상한. document_id key로 문서별 순서 보장.
 apiVersion: kafka.strimzi.io/v1
