@@ -238,6 +238,71 @@ class DeploymentTests(unittest.TestCase):
         with patch.object(deploy, "run", fake.run), self.assertRaises(ValueError):
             deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
 
+    def test_scaling_policy_changes_without_new_release_sha(self):
+        """HPA는 release 기록에 고정하지 않는다. 기존 성공 release에 HPA를 더하거나
+        범위를 바꿔도 같은 SHA로 재배포할 수 있어야 한다. 나머지 리소스는 그대로 고정한다."""
+        hpa = {"apiVersion": "autoscaling/v2", "kind": "HorizontalPodAutoscaler",
+               "metadata": {"name": "access-svc", "namespace": "fruition"},
+               "spec": {"scaleTargetRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": "access-svc"},
+                        "minReplicas": 2, "maxReplicas": 4}}
+        # 기록에는 HPA가 없다(HPA 도입 전에 성공한 release).
+        base = deploy.pinned(self.documents)
+        record = {"data": {"safety_contract_version": "2", "config": json.dumps(CONFIG),
+                           "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64)),
+                           "manifest": yaml.safe_dump_all(base)}}
+
+        fake = FakeCluster(record=record)
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, base + [hpa], review=REVIEW)
+        applied = fake.applied("HorizontalPodAutoscaler")
+        self.assertEqual(["access-svc"], [d["metadata"]["name"] for d in applied])
+        self.assertEqual(4, applied[0]["spec"]["maxReplicas"])
+
+        # 범위만 바꾼 재배포도 허용한다.
+        wider = copy.deepcopy(hpa)
+        wider["spec"]["maxReplicas"] = 6
+        fake = FakeCluster(record=record)
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, base + [wider], review=REVIEW)
+        self.assertEqual(6, fake.applied("HorizontalPodAutoscaler")[0]["spec"]["maxReplicas"])
+
+        # 고정 대상이 바뀌면 여전히 거부한다.
+        changed = copy.deepcopy(base)
+        deployment = next(d for d in changed if d["kind"] == "Deployment")
+        deployment["spec"]["template"]["spec"]["containers"][0]["env"] = [{"name": "INJECTED", "value": "1"}]
+        fake = FakeCluster(record=record)
+        with patch.object(deploy, "run", fake.run), self.assertRaisesRegex(ValueError, "manifest가 다릅니다"):
+            deploy.deploy(CONFIG, SHA, changed + [hpa], review=REVIEW)
+
+    def test_scaling_policy_is_applied_after_deployment_rollout(self):
+        """Deployment의 replicas가 HPA 판단을 덮으므로 롤아웃 뒤에 건다."""
+        hpa = {"apiVersion": "autoscaling/v2", "kind": "HorizontalPodAutoscaler",
+               "metadata": {"name": "access-svc", "namespace": "fruition"},
+               "spec": {"scaleTargetRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": "access-svc"},
+                        "minReplicas": 2, "maxReplicas": 4}}
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, self.documents + [hpa], review=REVIEW)
+        hpa_at = next(i for i, (_, docs) in enumerate(fake.events)
+                      if any(d["kind"] == "HorizontalPodAutoscaler" for d in docs))
+        last_rollout = max(i for i, (args, _) in enumerate(fake.events)
+                           if args[3:5] == ["rollout", "status"])
+        self.assertGreater(hpa_at, last_rollout)
+
+    def test_release_record_excludes_scaling_policy(self):
+        """새 성공 release 기록에도 HPA를 남기지 않는다. 남기면 다음 변경이 다시 막힌다."""
+        hpa = {"apiVersion": "autoscaling/v2", "kind": "HorizontalPodAutoscaler",
+               "metadata": {"name": "access-svc", "namespace": "fruition"},
+               "spec": {"scaleTargetRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": "access-svc"},
+                        "minReplicas": 2, "maxReplicas": 4}}
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, self.documents + [hpa], review=REVIEW)
+        record = next(d for d in fake.applied("ConfigMap") if d["metadata"]["name"] == deploy.release_name(SHA))
+        saved = list(yaml.safe_load_all(record["data"]["manifest"]))
+        self.assertFalse(any(d["kind"] == "HorizontalPodAutoscaler" for d in saved))
+        self.assertEqual(len(deploy.pinned(self.documents)), len(saved))
+
     def test_rollback_requires_actual_matching_schema_and_skips_migrations(self):
         record = {"data": {"safety_contract_version": "2", "config": json.dumps(CONFIG), "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64)),
                            "manifest": yaml.safe_dump_all(self.documents)}}

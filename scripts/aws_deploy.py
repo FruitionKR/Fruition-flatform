@@ -24,6 +24,10 @@ CONVERTER_DEPLOYMENT = "converter"
 APP_KINDS = {"ServiceAccount", "ConfigMap", "Service", "Deployment", "Job", "NetworkPolicy", "Ingress",
              "ExternalSecret", "KafkaNodePool", "Kafka", "KafkaTopic", "KafkaUser", "ScaledObject",
              "TriggerAuthentication", "PodDisruptionBudget", "HorizontalPodAutoscaler"}
+# release 기록에 고정하지 않는 운영 설정. 이미지·업무 동작이 아니라 Pod 수만 정하며,
+# 실행 중에도 부하에 따라 replicas가 계속 바뀐다. 고정하면 "검증한 그대로"를 보장하지
+# 못하면서 확장 정책만 영구히 못 바꾸게 된다. 나머지 리소스의 고정은 그대로 유지한다.
+SCALING_KINDS = {"HorizontalPodAutoscaler"}
 PLACEHOLDER = re.compile(r"REPLACE_ME|PLACEHOLDER|CHANGEME|<[^>]+>|\$\{[^}]+\}", re.I)
 DNS = r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}"
 KEYS = {"account_id", "access_rds_endpoint", "core_rds_endpoint", "redis_endpoint", "s3_bucket", "app_domain", "domain", "acm_cert_arn",
@@ -235,6 +239,11 @@ def fingerprints(config, *, require_empty=False):
 
 def release_name(sha):
     return "fruition-release-" + sha
+
+
+def pinned(documents):
+    """release 기록에 고정하는 문서만 남긴다. 확장 정책은 제외한다."""
+    return [d for d in documents if d["kind"] not in SCALING_KINDS]
 
 
 def verify_target(config):
@@ -494,9 +503,10 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         if json.loads(record["config"]) != config:
             raise ValueError("기존 release와 배포 환경이 다릅니다. 새 SHA가 필요합니다")
         saved_documents = list(yaml.safe_load_all(record["manifest"]))
-        if not rollback and saved_documents != documents:
+        if not rollback and pinned(saved_documents) != pinned(documents):
             raise ValueError("기존 release와 manifest가 다릅니다. 새 SHA가 필요합니다")
-        documents = saved_documents
+        # 고정 대상은 기록된 그대로 배포하고, 확장 정책만 현재 저장소 값을 따른다.
+        documents = pinned(saved_documents) + [d for d in documents if d["kind"] in SCALING_KINDS]
         check_manifest(documents, sha)
         # 현재 Secret과 ServiceAccount로 먼저 확인한다. 불일치 시 업무 설정도 변경하지 않는다.
         current = fingerprints(config)
@@ -539,7 +549,7 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     routing = {"Service", "Ingress"}
     apply([d for d in documents if d["kind"] in routing])
     wait_alb_bindings()
-    workloads = [d for d in documents if d["kind"] not in foundation | event_kinds | routing |
+    workloads = [d for d in documents if d["kind"] not in foundation | event_kinds | routing | SCALING_KINDS |
                  {"Namespace", "Job", "ScaledObject", "KafkaUser", "TriggerAuthentication"}]
     # New document-svc calls converter /convert-source-batch. Roll converter out and
     # confirm readiness before any other workload so documents never see an old converter.
@@ -557,6 +567,9 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     for document in documents:
         if document["kind"] == "ScaledObject":
             wait(document)
+    # Deployment rollout이 끝난 뒤에 건다. 앞서 적용한 Deployment의 replicas가 HPA의
+    # 현재 판단을 잠시 덮으므로, 교체가 끝난 다음 확장 정책을 올려 되돌림을 줄인다.
+    apply([d for d in documents if d["kind"] in SCALING_KINDS])
     for host in ("api", "access"):
         response = run(["curl", "--fail", "--silent", "--show-error", "--retry", "8", "--retry-all-errors",
                         "--retry-delay", "5", "--max-time", "30", f"https://{host}.{config['domain']}/v3/api-docs"])
@@ -572,7 +585,7 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     if not existing.strip():
         record = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": release_name(sha), "namespace": NAMESPACE},
                   "immutable": True, "data": {"safety_contract_version": "2", "fingerprints": json.dumps(current), "config": json.dumps(config),
-                                             "manifest": yaml.safe_dump_all(documents, sort_keys=False),
+                                             "manifest": yaml.safe_dump_all(pinned(documents), sort_keys=False),
                                              "review": json.dumps(review)}}
         apply([record])
 
