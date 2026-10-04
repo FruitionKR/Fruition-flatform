@@ -23,7 +23,7 @@ NAMESPACE = "fruition"
 CONVERTER_DEPLOYMENT = "converter"
 APP_KINDS = {"ServiceAccount", "ConfigMap", "Service", "Deployment", "Job", "NetworkPolicy", "Ingress",
              "ExternalSecret", "KafkaNodePool", "Kafka", "KafkaTopic", "KafkaUser", "ScaledObject",
-             "TriggerAuthentication", "PodDisruptionBudget"}
+             "TriggerAuthentication", "PodDisruptionBudget", "HorizontalPodAutoscaler"}
 PLACEHOLDER = re.compile(r"REPLACE_ME|PLACEHOLDER|CHANGEME|<[^>]+>|\$\{[^}]+\}", re.I)
 DNS = r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}"
 KEYS = {"account_id", "access_rds_endpoint", "core_rds_endpoint", "redis_endpoint", "s3_bucket", "app_domain", "domain", "acm_cert_arn",

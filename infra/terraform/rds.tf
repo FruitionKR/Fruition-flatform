@@ -65,8 +65,10 @@ resource "aws_db_instance" "access" {
   ca_cert_identifier     = "rds-ca-rsa2048-g1"
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
-  multi_az               = false
-  publicly_accessible    = false
+  # 로그인이 막히면 전체 서비스가 막힌다. access DB만 먼저 Multi-AZ로 올린다.
+  # core DB는 부하 근거가 생길 때 같은 방식으로 검토한다(2026-10-04 기준 CPU 평균 8%).
+  multi_az            = true
+  publicly_accessible = false
 
   backup_retention_period   = 7
   deletion_protection       = true

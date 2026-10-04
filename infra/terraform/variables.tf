@@ -73,10 +73,10 @@ variable "eks_addon_versions" {
   description = "서울 EKS 1.35 describe-addon-versions로 확인한 정확한 addon build (기본값 없음)"
   type        = map(string)
   validation {
-    condition = toset(keys(var.eks_addon_versions)) == toset(["vpc-cni", "coredns", "kube-proxy", "aws-ebs-csi-driver"]) && alltrue([
+    condition = toset(keys(var.eks_addon_versions)) == toset(["vpc-cni", "coredns", "kube-proxy", "aws-ebs-csi-driver", "metrics-server"]) && alltrue([
       for version in values(var.eks_addon_versions) : can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+-eksbuild\\.[0-9]+$", version))
     ])
-    error_message = "네 managed addon의 검증된 정확한 vX.Y.Z-eksbuild.N을 모두 제공해야 합니다."
+    error_message = "다섯 managed addon의 검증된 정확한 vX.Y.Z-eksbuild.N을 모두 제공해야 합니다."
   }
 }
 

@@ -33,6 +33,11 @@ module "eks" {
 
   eks_managed_node_group_defaults = {
     ami_type = "AL2023_x86_64_STANDARD"
+    # AL2023 기본 20GiB로는 롤아웃 중 구·신 이미지가 함께 있는 순간을 못 버틴다.
+    # 2026-10-04 배포에서 AI 노드 image filesystem이 19.9GiB의 100%까지 차
+    # pipeline-agent-worker가 ephemeral-storage 부족으로 Evicted 됐다.
+    # BGE-M3 모델 약 2.1GB가 pipeline 이미지에 포함되어 교체 한 번에 그만큼이 두 벌 필요하다.
+    disk_size = 30
     # Reclaim unused image layers before a rollout reaches disk pressure.
     # Kubelet owns GC; do not run a competing privileged prune DaemonSet.
     cloudinit_pre_nodeadm = [{
@@ -120,6 +125,8 @@ locals {
       addon_version            = var.eks_addon_versions["aws-ebs-csi-driver"]
       service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
     }
+    # API HPA가 CPU 사용률을 읽으려면 필요하다. 없으면 HPA가 <unknown>으로 멈춘다.
+    metrics-server = { addon_version = var.eks_addon_versions["metrics-server"] }
   }
 }
 

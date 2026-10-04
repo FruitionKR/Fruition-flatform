@@ -13,6 +13,7 @@ eks_addon_versions = {
   coredns            = "REPLACE_ME_COREDNS_BUILD"
   kube-proxy         = "REPLACE_ME_KUBE_PROXY_BUILD"
   aws-ebs-csi-driver = "REPLACE_ME_EBS_CSI_BUILD"
+  metrics-server     = "REPLACE_ME_METRICS_SERVER_BUILD"
 }
 
 # 소규모 피드백 환경 WAF 초기값. 프록시 공유 IP/정상 부하 검증 후 조정.
