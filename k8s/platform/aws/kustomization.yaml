@@ -5,3 +5,4 @@ resources:
   - storage-class.yaml
   - secret-store.yaml
   - deploy-rbac.yaml
+  - fargate-logging.yaml

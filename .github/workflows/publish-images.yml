@@ -50,7 +50,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        service: [access-svc, document-svc, pipeline, converter]
+        service: [access-svc, document-svc, pipeline, converter, frontend]
     env:
       AWS_REGION: ap-northeast-2
       AWS_DEFAULT_REGION: ap-northeast-2

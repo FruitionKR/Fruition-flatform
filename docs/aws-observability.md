@@ -63,7 +63,9 @@ flowchart LR
 /aws/containerinsights/fruition-eks/performance
 ```
 
-컴퓨터 안의 아무 파일이나 전부 읽는 것은 아닙니다. Pod 안에 따로 저장한 파일, S3의 `pipeline-runs/...` 파일, Vercel 기록, runner 컴퓨터의 OS 기록은 자동으로 합쳐지지 않습니다. 앱이 필요한 기록을 stdout/stderr로 남겨야 합니다.
+컴퓨터 안의 아무 파일이나 전부 읽는 것은 아닙니다. Pod 안에 따로 저장한 파일, S3의 `pipeline-runs/...` 파일, runner 컴퓨터의 OS 기록은 자동으로 합쳐지지 않습니다. 앱이 필요한 기록을 stdout/stderr로 남겨야 합니다.
+
+화면(frontend)은 Fargate에서 돌아서 위 수집 도구(DaemonSet)가 닿지 않습니다. 대신 EKS 내장 기록 전달기가 [`fargate-logging.yaml`](../k8s/platform/aws/fargate-logging.yaml) 설정대로 같은 `application` 기록함에 `fargate-`로 시작하는 이름으로 보냅니다. 이 전달기는 `application` 기록함에만 쓸 수 있는 권한(`fargate_logs` 정책)을 써요. 화면 Pod의 CPU·메모리 같은 Container Insights 사용량은 모이지 않습니다.
 
 **일기에 비밀번호를 쓰면 안 됩니다.** 이 수집기가 앱 로그의 비밀번호·개인정보를 저절로 가려주지는 않습니다. AI 작업 한 번의 요금, Kafka에 밀린 일 수, 요청의 자세한 이동 기록도 별도 준비가 필요합니다.
 

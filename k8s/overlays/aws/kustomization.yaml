@@ -8,6 +8,7 @@ resources:
   - networkpolicy.yaml
   - ../../base
   - ingress.yaml
+  - frontend.yaml
   - external-secrets.yaml
   - service-accounts.yaml
   - migration-jobs.yaml
@@ -33,6 +34,9 @@ images:
     newTag: latest
   - name: fruition-converter
     newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-converter
+    newTag: latest
+  - name: fruition-frontend
+    newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-frontend
     newTag: latest
 
 patches:

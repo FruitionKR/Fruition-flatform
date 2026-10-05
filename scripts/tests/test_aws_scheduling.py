@@ -43,7 +43,8 @@ class SchedulingTest(unittest.TestCase):
         resources = list(yaml.safe_load_all(output))
         apis = {"access-svc", "document-svc", "pipeline-api"}
         budgets = {r["metadata"]["name"]: r["spec"] for r in resources if r["kind"] == "PodDisruptionBudget"}
-        self.assertEqual(set(budgets), apis)
+        # frontend는 Fargate라 노드 분산 제약 없이 PDB만 둔다.
+        self.assertEqual(set(budgets), apis | {"frontend"})
         for r in resources:
             if r["kind"] != "Deployment" or r["metadata"]["name"] not in apis:
                 continue

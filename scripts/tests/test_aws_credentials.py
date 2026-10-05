@@ -19,6 +19,7 @@ GROUPS = {
     "agent-task-worker": "pipeline",
     "maintenance-task-worker": "pipeline",
     "converter": "converter",
+    "frontend": "frontend",
 }
 ALLOWED = {
     "access": {"ACCESS_DB_RUNTIME_PASSWORD", "JWT_SECRET", "INTERNAL_CALLBACK_TOKEN",
@@ -33,6 +34,7 @@ ALLOWED = {
                  "REDIS_PASSWORD", "OPENAI_API_KEY", "GEMINI_API_KEY",
                  "ANTHROPIC_API_KEY", "LANGSMITH_API_KEY", "TAVILY_API_KEY"},
     "converter": {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"},
+    "frontend": {"ACCESS_CODE"},
 }
 
 

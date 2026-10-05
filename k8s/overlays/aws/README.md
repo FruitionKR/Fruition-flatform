@@ -12,9 +12,9 @@ postgres → RDS, redis → ElastiCache, minio → S3, secret.yaml → Secrets M
 
 실제 환경값은 Git에 커밋하지 않는다. 로컬 준비 파일 `k8s/overlays/aws/deploy-config.feedback.json`은 `.gitignore`로 제외하며, 저장소에는 `deploy-config.example.json`만 추적한다. 새 checkout에서는 예시를 로컬 준비 파일 또는 저장소 밖 파일로 복사한다. 로컬 파일은 Git으로 백업되지 않으므로 필요한 경우 접근 제한된 별도 위치에 보관한다. ARN 기록만으로 인증서 `Issued` 상태나 ALB 연결이 확인된 것은 아니다.
 
-준비 파일에 계정·도메인·ACM ARN, Terraform output의 RDS·Redis·S3·서비스별 storage role·네트워크 값과 실제 Vercel production 호스트를 채운다. `smtp_port=587`은 기존 STARTTLS 기본값이며 실제 SMTP 설정과 맞춰 확인한다. placeholder가 남아 있으면 기존 검증기가 배포 전에 중단한다. 비밀번호와 webhook URL은 이 JSON에 넣지 않는다.
+준비 파일에 계정·도메인·ACM ARN, Terraform output의 RDS·Redis·S3·서비스별 storage role·네트워크 값과 화면 호스트(`app_domain`, 예: fruitiontest.accesscam.org)를 채운다. `smtp_port=587`은 기존 STARTTLS 기본값이며 실제 SMTP 설정과 맞춰 확인한다. placeholder가 남아 있으면 기존 검증기가 배포 전에 중단한다. 비밀번호와 webhook URL은 이 JSON에 넣지 않는다.
 
-ALB 생성 후 DNS의 `api`와 `access` CNAME을 ALB DNS 이름으로 연결한다. 같은 이름의 A/AAAA가 있다면 CNAME과 충돌하지 않도록 정리한다. ACM 검증용 밑줄 CNAME 두 개는 갱신을 위해 유지한다. 프론트엔드에는 `NEXT_PUBLIC_BACKEND_URL=https://api.<domain>`, `NEXT_PUBLIC_ACCESS_URL=https://access.<domain>`을 설정하고 로그인·업로드·AI 스트리밍을 검증한다.
+ALB 생성 후 DNS의 `api`·`access`와 화면 호스트(`app_domain`) CNAME을 ALB DNS 이름으로 연결한다. 같은 이름의 A/AAAA가 있다면 CNAME과 충돌하지 않도록 정리한다. ACM 인증서는 화면 호스트도 포함해야 하며, 검증용 밑줄 CNAME은 갱신을 위해 유지한다. 화면(`frontend.yaml`, Fargate)은 `SAME_ORIGIN_API=true` 이미지라 API 주소 환경 변수가 필요 없다. 화면 호스트의 경로 규칙은 `ingress.yaml`이 정하며, 화면 호스트 DNS 전환 후 로그인·업로드·AI 스트리밍을 검증한다. 상세: [aws-frontend-hosting.md](../../../docs/aws-frontend-hosting.md).
 
 ## 설정 완료 후 GitHub Environment로 이전
 
@@ -33,7 +33,7 @@ ALB 생성 후 DNS의 `api`와 `access` CNAME을 ALB DNS 이름으로 연결한�
 | `kustomization.yaml` patches | `REPLACE_ME_ACCESS_RDS_ENDPOINT` | `terraform output access_rds_endpoint` |
 | `configmap-aws.yaml` | `REPLACE_ME_REDIS_ENDPOINT` | `terraform output redis_endpoint` |
 | `configmap-aws.yaml` | `REPLACE_ME_S3_BUCKET` | `terraform output s3_bucket` |
-| `configmap-aws.yaml` | `REPLACE_ME_APP_DOMAIN` | Vercel production 도메인 |
+| `configmap-aws.yaml`, `ingress.yaml` | `REPLACE_ME_APP_DOMAIN` | 화면 호스트(`app_domain`). Terraform `app_domain`과 같은 값 |
 | `ingress.yaml` | `REPLACE_ME_WAF_ACL_ARN` | `terraform output -raw waf_acl_arn` (필수, 서울 regional ACL) |
 | `ingress.yaml` | `REPLACE_ME_ACM_CERT_ARN` | ACM 인증서 ARN |
 | `ingress.yaml` | `REPLACE_ME_DOMAIN` | API 도메인 (api.·access. 붙는 zone) |

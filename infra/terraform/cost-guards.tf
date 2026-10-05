@@ -1,4 +1,5 @@
-# Initial small feedback traffic limits; both API hosts share the global limit.
+# Initial small feedback traffic limits. The global limit counts /api/ requests on every host;
+# the per-IP limit counts everything except immutable /_next/static/ assets.
 # Source IP is the TCP peer, not an untrusted X-Forwarded-For header.
 variable "waf_requests_per_ip_5m" {
   type    = number
@@ -24,8 +25,32 @@ variable "waf_emergency_block" {
   default     = false
 }
 
+variable "app_domain" {
+  description = "Host serving the frontend and same-origin API on the shared ALB (e.g. fruitiontest.accesscam.org). Empty disables the access-code rule."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.app_domain == "" || can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.app_domain))
+    error_message = "app_domain must be a lowercase DNS name."
+  }
+}
+
+# The frontend pod reads ACCESS_CODE from the same secret. Reading it here keeps the WAF hash from
+# drifting from the pod; after changing ACCESS_CODE in Secrets Manager, run terraform apply again.
+data "aws_secretsmanager_secret_version" "app_current" {
+  secret_id  = aws_secretsmanager_secret.app.id
+  depends_on = [aws_secretsmanager_secret_version.app]
+}
+
 locals {
-  waf_document_content_contracts = jsondecode(file("${path.module}/../waf/document-content-contracts.json"))
+  # Same as the frontend: trimmed code, cookie = lowercase hex SHA-256 (hashAccessCode).
+  waf_access_code = trimspace(try(jsondecode(data.aws_secretsmanager_secret_version.app_current.secret_string).ACCESS_CODE, ""))
+  # The frontend middleware no longer sees /api/* once the ALB routes it, so WAF enforces the same gate.
+  # Whether a code is set is not secret; for_each cannot take a sensitive value.
+  waf_access_code_enabled = var.app_domain != "" && nonsensitive(local.waf_access_code != "")
+  # Paths open without the code, mirroring OPEN_API_PATTERNS in the frontend middleware.ts.
+  waf_access_code_open_path_regex = "^/api/(auth/|invitations/|workspaces$|workspaces/[^/]+$)"
+  waf_document_content_contracts  = jsondecode(file("${path.module}/../waf/document-content-contracts.json"))
   waf_content_body_overrides = {
     AWSManagedRulesCommonRuleSet = {
       SizeRestrictions_BODY   = "awswaf:managed:aws:core-rule-set:SizeRestrictions_Body"
@@ -43,6 +68,15 @@ resource "aws_wafv2_web_acl" "cost_guard" {
   scope = "REGIONAL"
   default_action {
     allow {}
+  }
+
+  dynamic "custom_response_body" {
+    for_each = local.waf_access_code_enabled ? [1] : []
+    content {
+      key          = "access-code-required"
+      content_type = "APPLICATION_JSON"
+      content      = jsonencode({ error = { message = "설정에서 접근 코드를 입력해야 사용할 수 있습니다." } })
+    }
   }
 
   dynamic "rule" {
@@ -71,6 +105,45 @@ resource "aws_wafv2_web_acl" "cost_guard" {
         metric_name                = "fruition-emergency-block"
         sampled_requests_enabled   = false
       }
+    }
+  }
+
+  # ALB path rules return 404 for these, but ALB matches the raw path; a percent-encoded path
+  # (/%69nternal/...) would skip them and Tomcat would decode it. Block the decoded path on every host.
+  rule {
+    name     = "not-public-paths"
+    priority = 2
+    action {
+      block {
+        custom_response {
+          response_code = 404
+        }
+      }
+    }
+    statement {
+      regex_match_statement {
+        regex_string = "^/+(internal|swagger-ui|v3/api-docs)"
+        field_to_match {
+          uri_path {}
+        }
+        text_transformation {
+          priority = 0
+          type     = "URL_DECODE"
+        }
+        text_transformation {
+          priority = 1
+          type     = "NORMALIZE_PATH"
+        }
+        text_transformation {
+          priority = 2
+          type     = "LOWERCASE"
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "fruition-not-public-paths"
+      sampled_requests_enabled   = false
     }
   }
 
@@ -217,6 +290,96 @@ resource "aws_wafv2_web_acl" "cost_guard" {
     }
   }
 
+  dynamic "rule" {
+    for_each = local.waf_access_code_enabled ? [1] : []
+    content {
+      name     = "frontend-access-code"
+      priority = 25
+      action {
+        block {
+          custom_response {
+            response_code            = 403
+            custom_response_body_key = "access-code-required"
+          }
+        }
+      }
+      statement {
+        and_statement {
+          statement {
+            byte_match_statement {
+              search_string         = var.app_domain
+              positional_constraint = "EXACTLY"
+              field_to_match {
+                single_header { name = "host" }
+              }
+              text_transformation {
+                priority = 0
+                type     = "LOWERCASE"
+              }
+            }
+          }
+          statement {
+            byte_match_statement {
+              search_string         = "/api/"
+              positional_constraint = "STARTS_WITH"
+              field_to_match {
+                uri_path {}
+              }
+              text_transformation {
+                priority = 0
+                type     = "NONE"
+              }
+            }
+          }
+          statement {
+            not_statement {
+              statement {
+                regex_match_statement {
+                  regex_string = local.waf_access_code_open_path_regex
+                  field_to_match {
+                    uri_path {}
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "NONE"
+                  }
+                }
+              }
+            }
+          }
+          statement {
+            not_statement {
+              statement {
+                byte_match_statement {
+                  search_string         = sha256(local.waf_access_code)
+                  positional_constraint = "EXACTLY"
+                  field_to_match {
+                    cookies {
+                      match_pattern {
+                        included_cookies = ["fruition_access"]
+                      }
+                      match_scope       = "VALUE"
+                      oversize_handling = "NO_MATCH"
+                    }
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "NONE"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = "fruition-frontend-access-code"
+        sampled_requests_enabled   = false
+      }
+    }
+  }
+
   rule {
     name     = "per-source-ip"
     priority = 30
@@ -232,6 +395,24 @@ resource "aws_wafv2_web_acl" "cost_guard" {
         aggregate_key_type    = "IP"
         limit                 = var.waf_requests_per_ip_5m
         evaluation_window_sec = 300
+        # Immutable Next.js build assets are cached by browsers; counting them would 429 page loads.
+        scope_down_statement {
+          not_statement {
+            statement {
+              byte_match_statement {
+                search_string         = "/_next/static/"
+                positional_constraint = "STARTS_WITH"
+                field_to_match {
+                  uri_path {}
+                }
+                text_transformation {
+                  priority = 0
+                  type     = "NONE"
+                }
+              }
+            }
+          }
+        }
       }
     }
     visibility_config {
@@ -256,10 +437,12 @@ resource "aws_wafv2_web_acl" "cost_guard" {
         aggregate_key_type    = "CONSTANT"
         limit                 = var.waf_requests_total_5m
         evaluation_window_sec = 300
+        # API calls only. Page HTML and assets on the frontend host would otherwise make one
+        # crawler or page-load burst return 429 to every user's API calls.
         scope_down_statement {
-          size_constraint_statement {
-            comparison_operator = "GT"
-            size                = 0
+          byte_match_statement {
+            search_string         = "/api/"
+            positional_constraint = "STARTS_WITH"
             field_to_match {
               uri_path {}
             }

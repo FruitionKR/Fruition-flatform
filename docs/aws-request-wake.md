@@ -2,7 +2,12 @@
 
 `request_wake_enabled = true`이면 EKS 밖의 Lambda가 1분마다 절전 상태를 확인합니다. 노드가 모두 종료된 `asleep` 상태에서 기존 ALB에 HTTPS 요청이 들어와 `HTTPCode_ELB_5XX_Count`가 발생하면 일반 노드의 최소·희망 수를 2대로 복구합니다. AI 노드의 Launch 중단도 해제하므로 KEDA와 Cluster Autoscaler가 작업에 맞춰 다시 확장할 수 있습니다. ALB의 라우팅·도메인·WAF는 그대로 사용합니다.
 
-**첫 요청은 보관하거나 재실행하지 않습니다.** ALB가 502·503·504 등을 반환할 수 있으며 지표 전달과 노드·Kafka·API 기동에 수분이 걸립니다. 기동 후 요청을 다시 보내야 합니다. 업로드·결제·문서 수정 등의 요청을 무조건 자동 재시도하면 안 됩니다. 프런트엔드는 별도 저장소에 있으므로 이 변경에는 로딩 화면이나 프런트엔드 재시도가 포함되지 않습니다.
+**첫 요청은 보관하거나 재실행하지 않습니다.** ALB가 502·503·504 등을 반환할 수 있으며 지표 전달과 노드·Kafka·API 기동에 수분이 걸립니다. 기동 후 요청을 다시 보내야 합니다. 업로드·결제·문서 수정 등의 요청을 무조건 자동 재시도하면 안 됩니다. 이 변경에는 로딩 화면이나 프런트엔드 재시도가 포함되지 않습니다.
+
+프런트엔드는 노드 그룹 밖 EKS Fargate에서 실행하므로 절전 중에도 화면 주소의 화면은 계속 응답합니다([aws-frontend-hosting.md](aws-frontend-hosting.md)). 화면 요청 자체는 정상 응답이라 깨우지 않으며, 화면이 부르는 `/api/...` 요청이 ALB 503을 받으면서 기동이 시작됩니다. 접근 코드가 없어 WAF `frontend-access-code`에 막힌 요청은 깨우지 않습니다. 절전 중 한계는 다음과 같습니다.
+
+- ALB Controller webhook(`failurePolicy=Fail`)과 CoreDNS가 일반 노드에서 돌기 때문에, 절전 중에는 frontend Pod를 새로 만들거나 재배포할 수 없습니다. 이미 떠 있는 frontend Pod만 계속 응답합니다. frontend 배포는 기동 후에 합니다.
+- frontend는 클러스터 내부 호출을 하지 않으므로 CoreDNS가 없어도 응답에는 영향이 없습니다. NetworkPolicy와 DaemonSet은 Fargate Pod에 적용되지 않습니다.
 
 ## 절전 기준
 

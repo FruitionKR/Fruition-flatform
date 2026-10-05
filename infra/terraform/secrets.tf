@@ -77,6 +77,8 @@ resource "aws_secretsmanager_secret_version" "app" {
     ANTHROPIC_API_KEY    = ""
     LANGSMITH_API_KEY    = ""
     TAVILY_API_KEY       = ""
+    # 화면 접근 코드. 비우면 게이트가 꺼진다. 바꾸면 WAF 해시(cost-guards.tf)를 위해 apply한다.
+    ACCESS_CODE = ""
   })
 
   lifecycle {

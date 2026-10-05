@@ -15,12 +15,14 @@ release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
 
-def manifest():
-    sources = {repo: str(i + 1) * 40 for i, repo in enumerate(release.REPOS)}
+def manifest(schema=2):
+    services = release.SCHEMA_SERVICES[schema]
+    repos = sorted({release.SERVICES[service][0] for service in services})
+    sources = {repo: str(i + 1) * 40 for i, repo in enumerate(repos)}
     recipe = "a" * 64
-    return {"schema_version": 1, "sources": sources, "recipe": recipe,
+    return {"schema_version": schema, "sources": sources, "recipe": recipe,
             "release_sha": release.identity(sources, recipe),
-            "images": {service: "sha256:" + "b" * 64 for service in release.SERVICES}}
+            "images": {service: "sha256:" + "b" * 64 for service in services}}
 
 
 class ImageReleaseTests(unittest.TestCase):
@@ -164,9 +166,35 @@ class ImageReleaseTests(unittest.TestCase):
         data = manifest()
         with patch.object(release, "fetch_release", return_value=data), patch.object(release, "ecr_digest", return_value="sha256:" + "b" * 64) as lookup:
             release.verify(data["release_sha"])
-            self.assertEqual(4, lookup.call_count)
+            self.assertEqual(5, lookup.call_count)
         with patch.object(release, "fetch_release", return_value=data), patch.object(release, "ecr_digest", return_value="sha256:" + "c" * 64):
             with self.assertRaises(ValueError): release.verify(data["release_sha"])
+
+    def test_current_release_includes_frontend_image_and_repository(self):
+        self.assertEqual(("FruitionKR/Fruition-frontend", ".", "Dockerfile"), release.SERVICES["frontend"])
+        self.assertIn("FruitionKR/Fruition-frontend", release.REPOS)
+        data = manifest()
+        bad = copy.deepcopy(data); del bad["images"]["frontend"]
+        with self.assertRaises(ValueError): release.validate_manifest(bad, data["release_sha"])
+
+    def test_legacy_four_image_release_verifies_only_for_rollback(self):
+        legacy = manifest(schema=1)
+        self.assertNotIn("frontend", legacy["images"])
+        release.validate_manifest(legacy, legacy["release_sha"])
+        mixed = copy.deepcopy(legacy); mixed["images"]["frontend"] = "sha256:" + "b" * 64
+        with self.assertRaises(ValueError): release.validate_manifest(mixed, legacy["release_sha"])
+        with patch.object(release, "fetch_release", return_value=legacy), patch.object(release, "ecr_digest", return_value="sha256:" + "b" * 64) as lookup:
+            # 이전 형식은 frontend 이미지가 없으니 새 manifest로 deploy하면 frontend가 없는 태그를 받는다.
+            with self.assertRaises(ValueError): release.verify(legacy["release_sha"])
+            release.verify(legacy["release_sha"], allow_legacy=True)
+            self.assertEqual(4, lookup.call_count)
+        with self.assertRaises(ValueError): release.validate_manifest({**legacy, "schema_version": 3}, legacy["release_sha"])
+
+    def test_deploy_workflow_allows_legacy_release_only_for_rollback(self):
+        workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
+        self.assertIn('if [ "$ACTION" = rollback ]; then VERIFY+=(--allow-legacy); fi', workflow)
+        publisher = yaml.safe_load((ROOT / ".github/workflows/publish-images.yml").read_text())
+        self.assertEqual(list(release.SERVICES), publisher["jobs"]["build"]["strategy"]["matrix"]["service"])
 
 
 if __name__ == "__main__":

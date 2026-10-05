@@ -1,0 +1,140 @@
+# Next.js 화면. app=frontend label이 Fargate profile(infra/terraform/eks.tf) selector와 같아
+# 노드 그룹 밖에서 실행된다. 절전으로 노드가 0대여도 화면은 계속 응답한다.
+# Fargate는 DaemonSet·NetworkPolicy를 적용하지 않는다. 이 Pod는 클러스터 내부 서비스를 부르지 않는다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: fruition
+  labels:
+    app: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      serviceAccountName: fruition-frontend
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: frontend
+          image: fruition-frontend
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            # 비우면 게이트가 꺼진다. /api/* 검사는 WAF가, 쿠키 발급(/access/verify)은 화면이 맡는다.
+            - name: ACCESS_CODE
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-frontend
+                  key: ACCESS_CODE
+          # Fargate는 requests에 관리 여유분 256Mi를 더해 크기를 고른다. 768Mi면 0.25 vCPU / 1GiB 조합이다.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              memory: 768Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          lifecycle:
+            # ALB가 target을 빼기 전에 들어온 요청을 끝낸다.
+            preStop:
+              sleep:
+                seconds: 10
+          volumeMounts:
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: next-cache
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+# AWS 권한(IRSA)이 없는 전용 계정. 다른 서비스 계정을 빌려 쓰지 않는다.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fruition-frontend
+  namespace: fruition
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: fruition
+  annotations:
+    # Ingress 전역 헬스체크(/actuator/health:8082)는 Spring 서비스용이다. 화면은 자기 포트로 확인한다.
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: fruition-frontend
+  namespace: fruition
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-secrets-manager
+  target:
+    name: fruition-frontend
+    creationPolicy: Owner
+  data:
+    - secretKey: ACCESS_CODE
+      remoteRef:
+        key: fruition/app
+        property: ACCESS_CODE
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+  namespace: fruition
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: frontend

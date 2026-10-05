@@ -268,10 +268,41 @@ def wait_alb_bindings():
         ready = {item.get("spec", {}).get("serviceRef", {}).get("name")
                  for item in bindings.get("items", []) if item.get("spec", {}).get("targetType") == "ip"
                  and item.get("spec", {}).get("targetGroupARN") and not item.get("metadata", {}).get("deletionTimestamp")}
-        if {"access-svc", "document-svc"} <= ready:
+        if {"access-svc", "document-svc", "frontend"} <= ready:
             return
         time.sleep(5)
     raise ValueError("ALB TargetGroupBinding 준비 시간 초과: 앱 Pod 생성 전 중단합니다")
+
+
+def http_status(url, *extra):
+    # --retry는 연결 실패와 408/429/5xx만 다시 시도한다. 404·401은 그대로 돌려준다.
+    return run(["curl", "--silent", "--show-error", "--output", "/dev/null", "--write-out", "%{http_code}",
+                "--retry", "8", "--retry-all-errors", "--retry-delay", "5", "--max-time", "30", *extra, url]).strip()
+
+
+def wait_status(url, expected, *extra, attempts=24):
+    # Ingress 적용 직후에는 새 규칙이 퍼지기 전이라 ALB 기본 404가 올 수 있다.
+    for _ in range(attempts):
+        status = http_status(url, *extra)
+        if status == expected:
+            return
+        time.sleep(5)
+    raise ValueError(f"{url}: {expected}가 아니라 {status}입니다")
+
+
+def check_public_routes(config):
+    """서비스 간 내부 API·OpenAPI는 공개 ALB에서 막히고, 화면은 같은 ALB에서 떠야 한다."""
+    app = config["app_domain"]
+    # 화면 주소의 DNS가 아직 이전 호스팅을 가리켜도 이 ALB로 확인한다. 인증서 SNI는 화면 주소 그대로다.
+    ingress = json.loads(kubectl("get", "ingress", "fruition-api", "-o", "json"))
+    balancer = ingress["status"]["loadBalancer"]["ingress"][0]["hostname"]
+    via_alb = {app: ("--connect-to", f"{app}:443:{balancer}:443")}
+    for path in ("/healthz", "/"):
+        wait_status(f"https://{app}{path}", "200", *via_alb[app])
+    for host in (f"api.{config['domain']}", f"access.{config['domain']}", app):
+        for path in ("/v3/api-docs", "/internal/"):
+            if http_status(f"https://{host}{path}", *via_alb.get(host, ())) != "404":
+                raise ValueError(f"{host}{path}: 공개 ALB에서 차단되어야 합니다")
 
 
 def access_probe_timeout_recovery(before, after):
@@ -570,12 +601,7 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     # Deployment rollout이 끝난 뒤에 건다. 앞서 적용한 Deployment의 replicas가 HPA의
     # 현재 판단을 잠시 덮으므로, 교체가 끝난 다음 확장 정책을 올려 되돌림을 줄인다.
     apply([d for d in documents if d["kind"] in SCALING_KINDS])
-    for host in ("api", "access"):
-        response = run(["curl", "--fail", "--silent", "--show-error", "--retry", "8", "--retry-all-errors",
-                        "--retry-delay", "5", "--max-time", "30", f"https://{host}.{config['domain']}/v3/api-docs"])
-        body = json.loads(response)
-        if not str(body.get("openapi", "")).startswith("3.") or not isinstance(body.get("paths"), dict) or not body["paths"]:
-            raise ValueError(f"{host}: 유효한 OpenAPI 응답이 아닙니다")
+    check_public_routes(config)
     if bootstrap:
         if initial:
             apply([install_record("fruition-bootstrap-ready", {**initial_data, "fingerprints": json.dumps(current)})])
