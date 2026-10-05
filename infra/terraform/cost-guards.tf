@@ -26,7 +26,7 @@ variable "waf_emergency_block" {
 }
 
 variable "app_domain" {
-  description = "Host serving the frontend and same-origin API on the shared ALB (e.g. fruitiontest.accesscam.org). Empty disables the access-code rule."
+  description = "Host serving the frontend and same-origin API on the shared ALB (e.g. web.fruitiontest.accesscam.org). Empty disables the access-code rule."
   type        = string
   default     = ""
   validation {

@@ -26,13 +26,13 @@
 
 ## 운영자가 직접 할 일 (순서대로)
 
-1. **인증서.** ACM 인증서가 `app_domain`(예: `fruitiontest.accesscam.org`)도 포함하도록 새로 발급하고 검증합니다. 배포 JSON의 `acm_cert_arn`을 새 ARN으로 바꿉니다.
+1. **인증서.** ACM 인증서가 `app_domain`(예: `web.fruitiontest.accesscam.org`)도 포함하도록 새로 발급하고 검증합니다. 배포 JSON의 `acm_cert_arn`을 새 ARN으로 바꿉니다.
 2. **비밀값.** Secrets Manager `fruition/app`에 `ACCESS_CODE` 속성을 추가합니다. 게이트를 쓰지 않으려면 빈 문자열로 둡니다. 속성이 없으면 ExternalSecret 동기화가 실패해 배포가 멈춥니다.
 3. **Terraform 입력.** 로컬 `feedback.tfvars`에 아래를 넣습니다.
 
    ```hcl
-   app_domain                      = "fruitiontest.accesscam.org"
-   document_upload_allowed_origins = ["https://fruitiontest.accesscam.org"]
+   app_domain                      = "web.fruitiontest.accesscam.org"
+   document_upload_allowed_origins = ["https://web.fruitiontest.accesscam.org"]
    ```
 
    WAF가 비교할 쿠키 값은 Terraform이 `fruition/app`의 `ACCESS_CODE`를 읽어 화면과 같은 방식(앞뒤 공백 제거 후 SHA-256 소문자 16진수)으로 계산합니다. 그래서 Terraform 실행 계정에 이 Secret 읽기 권한이 필요합니다.
@@ -41,7 +41,7 @@
 6. **GitHub 배포 입력.** `AWS_DEPLOY_CONFIG_JSON`의 `app_domain`을 새 주소로 바꿉니다. `CORS_ALLOWED_ORIGINS`·OAuth 복귀 주소·초대 주소가 이 값에서 만들어집니다.
 7. **OAuth 제공자.** Google·Naver·Kakao 콘솔에 `https://<app_domain>/login/oauth2/code/{google|naver|kakao}`를 redirect URI로 추가합니다. 기존 `access.` 주소는 전환이 끝날 때까지 지우지 않습니다.
 8. **이미지 게시와 배포.** frontend 저장소 main CI가 성공하면 다음 게시 실행이 이미지 5개짜리 release를 만듭니다. `docs/releases/<ID>.json` 검토 기록을 main에 반영한 뒤 `deploy`를 실행하고 승인합니다. 배포 스크립트는 DNS 전환 전에도 ALB 주소로 `/healthz`와 `/`를 확인합니다.
-9. **DNS 전환.** `app_domain`을 ALB 주소로 연결합니다. 이 이름이 DNS zone의 최상위(apex)라면 CNAME을 쓸 수 없으므로 ALIAS 또는 CNAME flattening이 되는지 확인합니다.
+9. **DNS 전환.** `app_domain`을 `api.`·`access.`와 같은 ALB 주소로 CNAME 연결합니다. ALB IP는 바뀌므로 A 레코드는 쓰지 않습니다. 현재 DNS(Dynu)는 호스트명 자체(`fruitiontest.accesscam.org`)에 CNAME을 걸기 어려워 `web.` 같은 하위 이름을 씁니다.
 10. **확인 후 정리.** 아래 확인을 마친 뒤 Vercel 프로젝트와 이전 Vercel 주소를 정리합니다.
 
 ## 배포 후 확인
