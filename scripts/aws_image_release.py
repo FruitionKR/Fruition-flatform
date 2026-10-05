@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish tested public main revisions as one immutable four-image release."""
+"""Publish tested public main revisions as one immutable five-image release."""
 import argparse
 import hashlib
 import json
@@ -16,8 +16,12 @@ SERVICES = {
     "document-svc": ("FruitionKR/Fruition-document", ".", "Dockerfile"),
     "pipeline": ("FruitionKR/Fruition-ai", "pipeline", "pipeline/Dockerfile"),
     "converter": ("FruitionKR/Fruition-ai", ".", "converter/Dockerfile"),
+    "frontend": ("FruitionKR/Fruition-frontend", ".", "Dockerfile"),
 }
 REPOS = sorted({s[0] for s in SERVICES.values()})
+# schema 1은 frontend가 EKS로 오기 전 release다. 검증은 하되 rollback으로만 쓴다.
+SCHEMA_SERVICES = {1: ["access-svc", "document-svc", "pipeline", "converter"], 2: list(SERVICES)}
+SCHEMA_VERSION = 2
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
@@ -50,20 +54,23 @@ def identity(sources, recipe):
 def validate_manifest(data, release, complete=True):
     if not SHA.fullmatch(release) or data.get("release_sha") != release:
         raise ValueError("Invalid release identifier")
+    services = SCHEMA_SERVICES.get(data.get("schema_version"))
+    if services is None:
+        raise ValueError("Unsupported release schema")
     sources = data.get("sources", {})
-    if set(sources) != set(REPOS) or any(not isinstance(v, str) or not SHA.fullmatch(v)
-                                        for v in sources.values()):
-        raise ValueError("Only the three approved service repositories are allowed")
+    if set(sources) != {SERVICES[s][0] for s in services} or any(not isinstance(v, str) or not SHA.fullmatch(v)
+                                                                  for v in sources.values()):
+        raise ValueError("Only the approved service repositories are allowed")
     recipe = data.get("recipe", "")
     if not isinstance(recipe, str) or not re.fullmatch(r"[0-9a-f]{64}", recipe):
         raise ValueError("Invalid build recipe digest")
-    if identity(sources, recipe) != release or data.get("schema_version") != 1:
+    if identity(sources, recipe) != release:
         raise ValueError("Release content does not match its identifier")
     if complete:
         images = data.get("images", {})
-        if set(images) != set(SERVICES) or any(not isinstance(v, str) or not DIGEST.fullmatch(v)
-                                              for v in images.values()):
-            raise ValueError("A published release must contain exactly four image digests")
+        if set(images) != set(services) or any(not isinstance(v, str) or not DIGEST.fullmatch(v)
+                                               for v in images.values()):
+            raise ValueError("A published release must contain every image digest of its schema")
     return data
 
 
@@ -101,7 +108,7 @@ def discover(path):
         print(f"Already published: images-{release}")
         output("ready", "false")
         return
-    data = {"schema_version": 1, "release_sha": release, "recipe": recipe, "sources": sources}
+    data = {"schema_version": SCHEMA_VERSION, "release_sha": release, "recipe": recipe, "sources": sources}
     validate_manifest(data, release, complete=False)
     Path(path).write_text(json.dumps(data, indent=2) + "\n")
     output("ready", "true")
@@ -202,12 +209,15 @@ def fetch_release(release):
     return validate_manifest(json.loads(raw), release)
 
 
-def verify(release):
+def verify(release, allow_legacy=False):
     data = fetch_release(release)
+    # 이전 schema는 frontend 이미지가 없어 현재 manifest로 deploy하면 없는 태그를 받는다.
+    if data["schema_version"] != SCHEMA_VERSION and not allow_legacy:
+        raise ValueError("A release without the frontend image can only be used for rollback")
     for service, digest in data["images"].items():
         if ecr_digest(service, release) != digest:
             raise ValueError("Published digest does not match ECR: " + service)
-    print("Published release and all four ECR digests verified")
+    print(f"Published release and all {len(data['images'])} ECR digests verified")
 
 
 def notes(path, destination):
@@ -230,13 +240,14 @@ def main():
     parser.add_argument("--output", default="release-notes.md")
     parser.add_argument("--release")
     parser.add_argument("--digest")
+    parser.add_argument("--allow-legacy", action="store_true")
     args = parser.parse_args()
     if args.command == "discover": discover(args.manifest)
     elif args.command == "prepare-build": prepare_build(args.manifest, args.service, args.output)
     elif args.command == "record-build": record_build(args.manifest, args.service, args.output, args.digest)
     elif args.command == "finalize": finalize(args.manifest, args.results)
     elif args.command == "notes": notes(args.manifest, args.output)
-    else: verify(args.release)
+    else: verify(args.release, args.allow_legacy)
 
 
 if __name__ == "__main__":

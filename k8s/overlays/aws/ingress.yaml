@@ -1,7 +1,10 @@
 # ALB Ingress (AWS Load Balancer Controller 필요 — infra/terraform README의 addon 절차 참조).
-# Vercel next.config.mjs rewrite가 path 분기를 이미 수행하므로 ALB는 host 기반 라우팅만 한다:
-#   NEXT_PUBLIC_BACKEND_URL = https://api.<domain>    → document-svc
-#   NEXT_PUBLIC_ACCESS_URL  = https://access.<domain> → access-svc
+# 화면 주소(app_domain)는 화면(frontend, Fargate)과 API를 같은 호스트에서 경로로 나눈다.
+# 브라우저가 ALB를 직접 부르므로 access-svc가 XFF 오른쪽 1개로 실제 클라이언트 IP를 얻는다.
+# api./access. 호스트는 배포 smoke와 직접 API 호출용으로 그대로 둔다.
+#
+# 규칙은 나열 순서대로 평가된다. ALB 경로 패턴의 *는 /도 넘어 매칭하므로 순서가 의미를 정한다.
+# 서비스 간 내부 API(/internal)와 OpenAPI·Swagger는 모든 호스트에서 404로 막는다(X-Internal-Token만으로는 공개하지 않는다).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -23,14 +26,209 @@ metadata:
     # actuator는 관리 포트로 분리돼 있다. 트래픽 포트(8080/8081)에는 /actuator가 없다.
     alb.ingress.kubernetes.io/healthcheck-port: "8082"
     alb.ingress.kubernetes.io/group.name: fruition
+    alb.ingress.kubernetes.io/actions.not-public: >-
+      {"type":"fixed-response","fixedResponseConfig":{"contentType":"text/plain","statusCode":"404","messageBody":"Not Found"}}
 spec:
   ingressClassName: alb
   rules:
+    - host: REPLACE_ME_APP_DOMAIN
+      http:
+        paths:
+          # 1. 공개하지 않는 경로
+          - path: /internal*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          - path: /swagger-ui*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          - path: /v3/api-docs*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          # 2. 화면의 Next route handler (아래 document /api/* 보다 먼저)
+          - path: /api/document-transport
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000
+          # 3. access의 /{id}/restore 패턴과 겹치는 document 복구 경로를 먼저 보낸다
+          - path: /api/workspaces/*/documents/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: document-svc
+                port:
+                  number: 8080
+          - path: /api/workspaces/*/folders/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: document-svc
+                port:
+                  number: 8080
+          - path: /api/workspaces/*/ai-operation-logs/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: document-svc
+                port:
+                  number: 8080
+          # 4. 워크스페이스 하위에서 access가 소유한 경로(복구·아이콘·멤버·초대)
+          - path: /api/workspaces/*/restore
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*/icon
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*/icon/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*/members
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*/members/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*/invitations
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*/invitations/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          # 5. 그 밖의 워크스페이스 하위 기능은 document. 새 document 경로는 규칙 추가 없이 여기로 온다
+          - path: /api/workspaces/*/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: document-svc
+                port:
+                  number: 8080
+          # 6. 워크스페이스 목록·단건·휴지통, 인증, 초대 수락, OAuth 시작·콜백은 access
+          - path: /api/workspaces
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/auth/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/invitations/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /oauth2/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /login/oauth2/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          # 7. 나머지 API(ai-models, query SSE, 회의 WebSocket)는 document
+          - path: /api/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: document-svc
+                port:
+                  number: 8080
+          # 8. 화면
+          - path: /*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000
     - host: api.REPLACE_ME_DOMAIN
       http:
         paths:
-          - path: /
-            pathType: Prefix
+          - path: /internal*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          - path: /swagger-ui*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          - path: /v3/api-docs*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          - path: /*
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: document-svc
@@ -39,8 +237,29 @@ spec:
     - host: access.REPLACE_ME_DOMAIN
       http:
         paths:
-          - path: /
-            pathType: Prefix
+          - path: /internal*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          - path: /swagger-ui*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          - path: /v3/api-docs*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: not-public
+                port:
+                  name: use-annotation
+          - path: /*
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: access-svc

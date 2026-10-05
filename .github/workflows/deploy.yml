@@ -94,7 +94,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python scripts/aws_image_release.py verify --release "$IMAGE_SHA"
+          VERIFY=(--release "$IMAGE_SHA")
+          if [ "$ACTION" = rollback ]; then VERIFY+=(--allow-legacy); fi
+          python scripts/aws_image_release.py verify "${VERIFY[@]}"
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
       - name: Deploy with DB, migration, rollout and smoke gates

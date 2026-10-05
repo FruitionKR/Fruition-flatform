@@ -1,6 +1,7 @@
 # 서비스별 컨테이너 레지스트리. pipeline-api·ingest-worker는 같은 이미지(fruition-pipeline)를 쓴다.
+# frontend는 Fargate에서 실행하는 Next.js 화면이다.
 locals {
-  ecr_repos = ["document-svc", "access-svc", "pipeline", "converter"]
+  ecr_repos = ["document-svc", "access-svc", "pipeline", "converter", "frontend"]
 }
 
 resource "aws_ecr_repository" "services" {

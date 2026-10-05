@@ -5,12 +5,12 @@
 ## 1. 서비스 경계 (전부 독립 배포 단위)
 
 ```text
-frontend (Next.js, Vercel)
-  │ /api/* 경로 기반 rewrite (next.config.mjs)
+frontend (Next.js, AWS는 EKS Fargate)
+  │ /api/* 경로 기반 분기 (AWS: app 호스트 ALB 경로 규칙 ingress.yaml, 로컬: next.config.mjs rewrite)
   ├─ /api/auth/*, 워크스페이스 자체 CRUD·휴지통·복구 ─▶ access-svc
   └─ 그 외 ───────────────────────────────────────────▶ document-svc
 
-frontend/          Next.js (Vercel 배포), 독립 npm 프로젝트
+frontend/          Next.js (EKS Fargate 배포), 독립 npm 프로젝트
 Access/            Spring :8081, 독립 Gradle — 로그인·OAuth·세션·워크스페이스·권한
 Document/          Spring :8080, 독립 Gradle — 문서·채팅·Wiki·Skill gateway·query
 AI/
@@ -123,13 +123,13 @@ ingest Kafka key는 `document_id`라 같은 문서의 순서는 유지하면서 
 | minio | S3 |
 | 이미지 | ECR (GitHub OIDC push) |
 | Secret(YAML) | Secrets Manager + external-secrets |
-| frontend | Vercel |
+| frontend | EKS Fargate profile `frontend` (노드 그룹 밖) |
 
 - 매니페스트: `k8s/base` + `k8s/overlays/aws` (ingress·external-secrets·KEDA)
 - IaC: `infra/terraform` (EKS·RDS·ElastiCache·S3·ECR·OIDC·Secrets·budgets) — apply는 AWS 계정 준비 후
 - 실제 배포 단위 검증은 `compose.infra.yml` + `compose.ai.yml` + `compose.converter.yml` + `compose.containerized.yml`을 함께 구성한다. document-svc가 `core_db` Flyway를 먼저 적용한 뒤 access-svc와 pipeline API/worker를 기동하며, AI 저장소 maintenance cutover는 [script.md](script.md) 절차를 따른다. `JWT_SECRET`·`INTERNAL_CALLBACK_TOKEN`은 두 앱 동일 값 필수.
 - ALB는 `api.<domain>`을 document-svc, `access.<domain>`을 access-svc로 host 라우팅한다.
-  공개 `/api/**`의 서비스 분기는 Vercel `next.config.mjs` rewrite가 담당한다.
+  화면 호스트(`app_domain`)는 같은 ALB가 경로로 나눈다: `/api/**`는 access-svc·document-svc, 나머지는 frontend. 기존 Vercel `next.config.mjs` rewrite를 대체하며, 브라우저가 ALB를 직접 부르므로 access-svc가 `X-Forwarded-For` 오른쪽 값으로 실제 클라이언트 IP를 얻는다. 상세: [aws-frontend-hosting.md](aws-frontend-hosting.md).
 - actuator는 업무 포트가 아니라 관리 포트로 분리한다(로컬 8082·8083, k8s는 configmap `MANAGEMENT_PORT`로 8082 통일).
   ALB는 업무 포트만 라우팅하므로 `/actuator/prometheus`가 인터넷에 열리지 않는다. probe와 ALB healthcheck만 관리 포트를 본다.
 
@@ -137,12 +137,11 @@ ingest Kafka key는 `document_id`라 같은 문서의 순서는 유지하면서 
 
 아래는 **2026-09-11 기준 저장소의 Terraform·Kubernetes·배포 스크립트가 정의하는 구조**다. 실제 AWS 계정에 배포되어 있다는 뜻은 아니다. 서울 리전의 feedback 환경을 대상으로 하며, 실제 AWS 검증은 수행하지 않았다.
 
-쉽게 말하면 Vercel은 손님이 보는 화면, ALB는 안내 데스크, EKS는 여러 담당자가 일하는 건물이다. Access는 회원·권한 담당, Document는 문서·업무 담당, AI는 분석 담당이다. Kafka는 오래 걸리는 일을 맡겨 두는 작업함이며, DB와 S3는 담당자별 열쇠로 여는 보관함이다.
+쉽게 말하면 frontend(Fargate)는 손님이 보는 화면, ALB는 안내 데스크, EKS는 여러 담당자가 일하는 건물이다. Access는 회원·권한 담당, Document는 문서·업무 담당, AI는 분석 담당이다. Kafka는 오래 걸리는 일을 맡겨 두는 작업함이며, DB와 S3는 담당자별 열쇠로 여는 보관함이다.
 
 ```mermaid
 flowchart TB
-    user["사용자 브라우저"] --> frontend["Vercel · Next.js 화면/API rewrite"]
-    frontend --> alb
+    user["사용자 브라우저"] --> alb
     subgraph aws["AWS 서울 리전"]
         subgraph vpc["VPC · 2개 가용 영역"]
             subgraph public["Public subnet"]
@@ -151,6 +150,9 @@ flowchart TB
             end
             subgraph private["Private subnet"]
                 subgraph eks["EKS · fruition namespace"]
+                    subgraph fargate["Fargate profile · 노드 그룹 밖"]
+                        frontend["frontend · Next.js 화면"]
+                    end
                     subgraph general["General · On-Demand 노드"]
                         access["Access API"]
                         document["Document API"]
@@ -169,10 +171,11 @@ flowchart TB
         end
         s3["S3 · 문서/AI 객체/실행 로그"]
         secrets["Secrets Manager · 서비스별 Secret 공급"]
-        ecr["ECR · 서비스 이미지 4개"]
+        ecr["ECR · 서비스 이미지 5개"]
     end
-    alb -->|"access 도메인"| access
-    alb -->|"api 도메인"| document
+    alb -->|"app 도메인 /*"| frontend
+    alb -->|"access 도메인 · app /api/auth 등"| access
+    alb -->|"api 도메인 · app /api/*"| document
     document -->|"내부 권한 API"| access
     document -->|"내부 HTTP"| pipeline
     document -->|"파일 변환 HTTP"| converter
@@ -195,15 +198,16 @@ flowchart TB
 
 | 구성 | 현재 배치와 책임 |
 |---|---|
-| 공개 진입점 | 인터넷용 ALB가 host별로 Access 8081·Document 8080에 전달한다. `target-type: ip`로 Pod IP를 대상으로 삼는다. 관리 포트 8082는 probe·healthcheck용이다. AI·Converter·DB는 공개 Ingress 대상이 아니다. |
+| 공개 진입점 | 인터넷용 ALB가 host별로 Access 8081·Document 8080에 전달하고, 화면 호스트는 경로별로 frontend 3000·Access·Document에 나눈다. `target-type: ip`로 Pod IP를 대상으로 삼는다. 관리 포트 8082는 probe·healthcheck용이다. AI·Converter·DB는 공개 Ingress 대상이 아니다. |
+| Fargate | `fruition` namespace의 `app=frontend` Pod만 실행한다. 노드 그룹이 0대인 절전 중에도 화면이 유지된다. |
 | General 노드 | `t3.large` On-Demand, 최소·초기 2대, 최대 3대. API와 Kafka를 배치한다. |
 | AI 노드 | `m5.xlarge`/`m6i.xlarge` Spot, 최소·초기 0대, 최대 2대. nodeSelector와 taint/toleration으로 AI worker·Converter를 배치한다. |
 | PostgreSQL | RDS 2개다. Access 인스턴스는 `access_db`, Core 인스턴스는 `core_db`와 `ai_db`를 가진다. **AI와 Document는 물리 인스턴스를 공유하지만 DB와 접속 권한은 분리한다.** runtime DML 계정과 migration DDL 계정도 분리한다. |
 | Redis | ElastiCache를 공유하되 서비스별 ACL로 key 값 접근을 제한한다. 업무 원장의 대체물이 아니라 캐시·일시 상태·권한 projection 저장소다. |
 | 파일·이벤트 저장 | 파일과 실행 로그는 S3, Kafka 데이터는 EBS gp3에 저장한다. Kafka는 EKS 안의 Strimzi 단일 broker 구성이다. |
-| 배포 이미지 | Access·Document·Pipeline·Converter의 ECR 이미지 4개다. Pipeline 이미지로 API와 여러 worker Deployment를 실행한다. worker는 독립 확장 단위지만 별도 DB를 소유하는 새로운 업무 서비스는 아니다. |
+| 배포 이미지 | Access·Document·Pipeline·Converter·frontend의 ECR 이미지 5개다. Pipeline 이미지로 API와 여러 worker Deployment를 실행한다. worker는 독립 확장 단위지만 별도 DB를 소유하는 새로운 업무 서비스는 아니다. |
 
-구현 근거: [VPC](../infra/terraform/vpc.tf), [EKS](../infra/terraform/eks.tf), [RDS](../infra/terraform/rds.tf), [AWS overlay](../k8s/overlays/aws/kustomization.yaml), [ALB Ingress](../k8s/overlays/aws/ingress.yaml), [frontend rewrite](https://github.com/FruitionKR/Fruition-frontend/blob/main/next.config.mjs).
+구현 근거: [VPC](../infra/terraform/vpc.tf), [EKS](../infra/terraform/eks.tf), [RDS](../infra/terraform/rds.tf), [AWS overlay](../k8s/overlays/aws/kustomization.yaml), [ALB Ingress](../k8s/overlays/aws/ingress.yaml), [frontend](../k8s/overlays/aws/frontend.yaml).
 
 ### 7.2 사용하는 아키텍처 패턴과 판단
 
@@ -340,7 +344,7 @@ DB 서버·계정·네트워크는 platform이 제공하지만 테이블과 migr
 | OPS-06 | [변환 큐](https://github.com/FruitionKR/Fruition-document/blob/main/src/main/java/fruition/core/document/service/DocumentConvertWorker.java), [편집 outbox](https://github.com/FruitionKR/Fruition-document/blob/main/src/main/java/fruition/core/document/service/PostgresDocumentEditOutboxPublisher.java) | 변환 큐는 전체 `processing` 재설정과 잠금 없는 pending 선택을 사용한다. 편집 outbox도 잠금 없는 조회다. 롤링 배포·다중 Pod에서 중복 실행 위험이 있어 HPA보다 먼저 보완해야 한다. AI command outbox의 기존 잠금 보완과는 다른 경로다 |
 | OPS-07 | [AWS overlay](../k8s/overlays/aws/kustomization.yaml), [KEDA](../k8s/base/keda-scaledobject.yaml), [Kafka](../k8s/base/kafka.yaml) | API HPA·PDB가 없고 API·Kafka·Redis는 단일 인스턴스, RDS는 Single-AZ다. KEDA는 일부 worker만 확장한다. Pod 증설만으로 DB·브로커 장애를 해결할 수 없다 |
 | OPS-08 | [배포기](../scripts/aws_deploy.py), [workflow](../.github/workflows/deploy.yml) | 서비스별 SHA release manifest와 서비스 이미지 게시 CI가 없다. 현재 smoke는 OpenAPI 조회 중심이고, rollback은 같은 DB 스키마에서만 가능하다 |
-| OPS-09 | [frontend 설정](https://github.com/FruitionKR/Fruition-frontend/blob/main/next.config.mjs), [로그 필터](https://github.com/FruitionKR/Fruition-document/blob/main/src/main/java/fruition/shared/logging/HttpRequestLoggingFilter.java) | frontend는 Vercel이므로 EKS 수집 대상 밖이다. HTTP 요청 ID는 일부 준비됐지만 브라우저→rewrite→업무 API→Kafka→worker의 일관된 추적 계약과 오류 연결 검증이 없다 |
+| OPS-09 | [Fargate 로그](../k8s/platform/aws/fargate-logging.yaml), [로그 필터](https://github.com/FruitionKR/Fruition-document/blob/main/src/main/java/fruition/shared/logging/HttpRequestLoggingFilter.java) | frontend는 Fargate 내장 로그 라우터로 CloudWatch application 로그 그룹에 들어간다. HTTP 요청 ID는 일부 준비됐지만 브라우저→ALB→업무 API→Kafka→worker의 일관된 추적 계약과 오류 연결 검증이 없다 |
 
 ### 목표 운영 구성
 
@@ -359,10 +363,10 @@ flowchart LR
   CW --> Alarm[CloudWatch Alarm · SNS]
   Alarm --> Operator[당번 · 대체 담당자]
   Operator --> RB[장애별 Runbook]
-  Front[Vercel frontend 로그] -. 요청 ID로 연결 .-> Logs
+  Front[frontend · Fargate 로그 라우터] -->|application 로그 그룹| Logs
 ```
 
-점선은 요청 ID를 통한 조사 연결을 뜻한다. Vercel 로그가 CloudWatch로 자동 수집된다는 의미가 아니다. Vercel 로그 조회 권한·보존 기간을 실제 사용 플랜에서 확인하고, Log Drain 등 중앙 수집은 별도 비용·지원 검토 후 결정한다.
+Fargate에는 DaemonSet 수집기(Fluent Bit)가 돌지 않으므로 frontend 로그는 EKS 내장 로그 라우터(`k8s/platform/aws/fargate-logging.yaml`)가 같은 `/aws/containerinsights/fruition-eks/application` 로그 그룹에 `fargate-` 접두사 stream으로 보낸다. Container Insights 노드/Pod 지표는 Fargate Pod에 적용되지 않는다.
 
 ### 작업 묶음·우선순위·의존성
 
@@ -379,7 +383,7 @@ P0는 외부 피드백 배포 전 필수, P1은 다중 인스턴스·상시 가�
 | 6 / P0, 로그 조사 가능 후 | Document / OPS-06 | 변환 큐의 원자 선점·lease/소유자 검증·만료 복구, 편집 outbox의 DB 잠금/ack 경계, 긴 변환 I/O와 예약 작업 실행 분리 | 두 인스턴스 동시 실행·롤링 재시작·ack 직후 종료·lease 만료 시험. 중복 전달을 허용해도 최종 변경은 멱등, 진행 중 다른 소유자의 작업을 초기화하지 않음 |
 | 7 / P0, 5·6 이후 | 각 서비스 + platform / OPS-08 | 서비스별 ECR 게시 CI·저장소별 OIDC, 명시적 image digest/source SHA release manifest, `aws_deploy.py`·테스트·업무 smoke | 일부 이미지만 변경한 배포/복구에서 다른 이미지가 바뀌지 않음. 이전 성공 release를 재현. 스키마 불일치 복구는 계속 거부하고 실제 업무 흐름으로 완료 판정 |
 | 8 / P1, 3·6·7 이후 | platform + 서비스 소유자 / OPS-07 | API별 HPA·metrics-server, 최소 2 Pod와 topology spread·PDB, 노드 용량 검토, Kafka/Redis/RDS 이중화 설계 | 부하 증가→Pod 확장→필요 시 노드 확장→축소를 검증. 단일 Pod에 PDB만 추가하지 않음. 장애·노드 drain 중 데이터 정합성 및 합의한 오류/지연 목표 확인 |
-| 9 / P2 | platform + 서비스 소유자 / OPS-09 | OpenTelemetry/Application Signals 선택적 적용, Vercel 로그 연동, trace 기반 조사 | Kafka·HTTP 추적 연결, 샘플링·저장 비용·성능 오버헤드 검증 후 서비스별 활성화 |
+| 9 / P2 | platform + 서비스 소유자 / OPS-09 | OpenTelemetry/Application Signals 선택적 적용, frontend 요청 ID 연결, trace 기반 조사 | Kafka·HTTP 추적 연결, 샘플링·저장 비용·성능 오버헤드 검증 후 서비스별 활성화 |
 
 순서 6은 HPA를 켜지 않아도 롤링 배포에서 인스턴스가 겹칠 수 있어 P0다. 현재 General 2~3대·Spot 0~2대 한도 안에서 수집기·exporter·API 복제본이 들어가는지 requests/limits와 가용 IP를 다시 계산한다. P1에서 요청량에 맞는 노드 한도를 결정하며 현재 상한을 처리량 보장으로 간주하지 않는다. Kafka partition 수·LLM rate limit·DB connection pool도 worker 확장 한도를 함께 제한한다.
 

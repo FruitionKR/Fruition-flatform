@@ -595,9 +595,9 @@ bash scripts/tests/test-service-migrations.sh
 |---|---|
 | account_id | 배포 AWS 계정 ID |
 | access_rds_endpoint, core_rds_endpoint, redis_endpoint, s3_bucket | 같은 이름의 Terraform output |
-| app_domain | Vercel 공개 앱 호스트 |
+| app_domain | 화면(EKS Fargate)과 같은 출처 API를 ALB 경로로 나누는 공개 앱 호스트(예: fruitiontest.accesscam.org). Terraform `app_domain`과 같은 값 |
 | domain | api. 및 access.를 붙일 공개 도메인 |
-| acm_cert_arn | 두 API 호스트를 포함하는 발급 완료 인증서 ARN |
+| acm_cert_arn | 두 API 호스트와 `app_domain`을 모두 포함하는 발급 완료 인증서 ARN |
 | document_storage_role_arn, pipeline_storage_role_arn | `storage_role_arns` output의 각 서비스 ARN |
 | waf_acl_arn | Terraform `waf_acl_arn` output. 같은 계정·서울 regional ACL 필수 |
 | vpc_cidr, alb_subnet_cidr_1, alb_subnet_cidr_2, smtp_port | `network_deploy_inputs` output의 문자열 값 |
@@ -617,15 +617,15 @@ terraform output -json의 각 output은 value 필드로 제공된다. 스토리�
 2. AWS 인증 계정·EKS ARN/버전/상태와 현재 kubeconfig endpoint를 대조하고, 플랫폼의 fruition namespace·gp3 StorageClass 존재와 aws-secrets-manager ClusterSecretStore Ready를 읽기 전용으로 확인한다. ServiceAccount·ConfigMap·ExternalSecret·앱 NetworkPolicy만 적용하고 모든 ExternalSecret Ready를 확인한다. 제한 정책 적용 후 기존 `internal-only-ingress` 정책을 이름으로 삭제한다. `kubectl apply`만으로는 과거 정책이 제거되지 않으며 삭제 실패 시 DB gate와 rollout을 진행하지 않는다.
 3. access-db-preflight, document-db-preflight, ai-db-preflight Job이 실제 runtime/migration 로그인, DB·public 스키마·테이블 소유권, 관리자 권한/membership 부재, runtime DML·DDL/교차 CONNECT 경계를 검사한다. 서비스별 runtime/migration 키 두 개만 참조하며 관리자 키는 받지 않는다. app.kubernetes.io/component=db-preflight, app=<서비스>-db-preflight Pod label을 네트워크 정책의 대상으로 사용한다.
 4. 세 migration Job Complete를 확인한다. 실패하면 runtime 적용을 중단한다. 이후 동일 사전검증으로 실제 변경된 public schema의 pg_dump --schema-only SHA256을 수집한다.
-5. Kafka와 모든 KafkaTopic Ready를 확인한 뒤 runtime을 적용한다. 렌더된 모든 Deployment의 rollout 완료와 모든 KEDA ScaledObject Ready를 확인한다.
-6. https://api.<domain>/v3/api-docs와 https://access.<domain>/v3/api-docs의 HTTPS 성공, JSON OpenAPI 3 버전과 비어 있지 않은 paths를 검증한다.
+5. Kafka와 모든 KafkaTopic Ready를 확인한 뒤 runtime을 적용한다. 앱 Pod 생성 전에 access-svc·document-svc·frontend의 ALB TargetGroupBinding 준비를 기다린다. 렌더된 모든 Deployment의 rollout 완료와 모든 KEDA ScaledObject Ready를 확인한다.
+6. `check_public_routes`로 공개 경로를 검증한다. api.<domain>·access.<domain>·`app_domain`의 `/v3/api-docs`와 `/internal/`이 404인지, `app_domain`의 `/healthz`와 `/`가 200인지 확인한다. 화면 확인은 `curl --connect-to`로 ALB 호스트명에 직접 연결하므로 DNS 전환 전에도 수행된다.
 7. 전체 성공에 한해 fruition-release-<SHA> immutable ConfigMap에 비밀 없는 manifest·입력·DB fingerprint를 기록한다. 동일 SHA의 기존 성공 기록은 덮어쓰지 않는다. 재시도 전에 저장된 JSON 입력·manifest와 현재 실제 DB fingerprint가 모두 같은지 확인한다. 다른 입력·manifest는 새 SHA가 필요하며, schema 불일치는 복구 검토 전까지 차단한다. 일치하는 성공 SHA 재시도는 migration을 건너뛰고 기록된 manifest를 다시 적용한다.
 
 bootstrap은 앞 절의 별도 관리자 절차다. 이 배포 스크립트는 DB나 role을 생성하지 않으며, 생성/권한/비밀번호가 잘못됐으면 실접속 gate에서 중단한다. 사전검증 Job은 PostgreSQL 16 client를 사용하고 운영 연결은 PGSSLMODE=require다. AI Secret URI는 Terraform 생성 계약인 postgresql://기대-user:password@기대-core-host:5432/ai_db 형식이어야 한다. 다른 user·host·port·DB와 모든 query(sslmode/host 재정의 포함)는 실제 연결 전에 거부한다. 비밀번호는 Terraform의 영숫자 생성값 또는 URI encoding 문자 집합을 사용한다. 이는 TLS 암호화이며 서버 인증서 검증까지 의미하지 않는다. bootstrap의 verify-full CA 검증과 구분한다. 실제 RDS TLS 및 다중 RDS 경계 검증은 AWS에서 별도 수행한다.
 
 rollback은 **실제 public schema가 이전 성공 release와 동일한 경우의 image/manifest 재배포**다. 현재 서비스 Secret으로 먼저 fingerprint를 대조하며 불일치 시 업무 ConfigMap·Secret·Deployment를 적용하지 않는다(검사용 Job만 실행). 일치하면 이전 성공 manifest를 재사용하고 migration을 건너뛴다. schema가 달라졌거나 성공 기록이 없으면 자동 복구를 거부한다. DB down-migration·데이터 복구·외부 S3 artifact 복원을 수행하지 않는다. 데이터 의미 변경까지 fingerprint가 증명하지 않으므로, 그 경우에는 별도 복구 검토/PITR 절차가 필요하다. schema 변경 migration 실패 후 구 image로 되돌리는 것도 일반적으로 보장하지 않는다.
 
-GitHub Deploy (EKS)는 platform 저장소에서 수동 실행한다. action=deploy는 명시한 release_sha를 사용하며 platform commit SHA에서 추정하지 않는다. 네 ECR 저장소에 같은 release 태그의 이미지가 모두 있어야 한다. 이미지가 없으면 실패하며 platform에서 빌드하거나 push하지 않는다. ECR tag는 Terraform에서 IMMUTABLE이다. action=rollback은 기존 성공 release의 rollback_sha를 사용한다. ECR lifecycle이 이전 SHA를 삭제했다면 복구 대상이 아니므로 필요한 release의 보존 정책을 운영자가 관리한다.
+GitHub Deploy (EKS)는 platform 저장소에서 수동 실행한다. action=deploy는 명시한 release_sha를 사용하며 platform commit SHA에서 추정하지 않는다. 다섯 ECR 저장소(frontend 포함)에 같은 release 태그의 이미지가 모두 있어야 한다. frontend 이미지가 없는 schema 1 release는 action=rollback에서만 검증을 통과한다([이미지 릴리스](aws-image-releases.md)). 이미지가 없으면 실패하며 platform에서 빌드하거나 push하지 않는다. ECR tag는 Terraform에서 IMMUTABLE이다. action=rollback은 기존 성공 release의 rollback_sha를 사용한다. ECR lifecycle이 이전 SHA를 삭제했다면 복구 대상이 아니므로 필요한 release의 보존 정책을 운영자가 관리한다.
 
 GitHub 관리자는 feedback Environment의 **required reviewers와 deployment branch 제한**을 설정해야 한다. YAML만으로 승인자를 강제하지 않는다. OIDC subject는 repo:<owner/repo>:environment:feedback이며 Terraform github_deploy_environment와 workflow Environment를 함께 맞춘다. 이 저장소는 GitHub 표준 Environment subject 형식을 사용하므로 조직에서 subject customization을 했다면 실제 token claim과 trust policy를 함께 검증한다. 환경 보호 규칙·AWS credentials·EKS/addon 설치·DNS/ACM·실제 배포와 복구는 로컬 테스트로 검증되지 않는다.
 
@@ -790,7 +790,7 @@ python3 -m venv .venv
 
 서비스 연동 검증은 형제 소스가 필요하며 platform 단독 CI와 구분한다. 기본 IaC 검증은 서비스 소스 없이 실행할 수 있다. 로컬 `dev-up.sh`·`front-up.sh`·`back-up.sh`·`ai-up.sh`는 platform의 공통 `.env`·runtime 관리와 Compose 네트워크를 사용하는 통합 도구다.
 
-독립 platform의 배포 workflow에는 `release_sha`로 ECR에 존재하는 40자리 이미지 묶음 태그를 명시한다. 플랫폼 커밋 SHA를 서비스 이미지 SHA로 사용하지 않는다. 현재 배포 스크립트는 네 이미지에 동일한 release 태그가 있는 묶음을 요구한다. 서비스마다 다른 SHA를 직접 입력하는 release manifest와 각 서비스의 이미지 게시 workflow는 아직 구현하지 않았다. 이번 정리는 실제 배포를 실행하지 않는다.
+독립 platform의 배포 workflow에는 `release_sha`로 ECR에 존재하는 40자리 이미지 묶음 태그를 명시한다. 플랫폼 커밋 SHA를 서비스 이미지 SHA로 사용하지 않는다. 현재 배포 스크립트는 다섯 이미지에 동일한 release 태그가 있는 묶음을 요구한다. 서비스마다 다른 SHA를 직접 입력하는 release manifest와 각 서비스의 이미지 게시 workflow는 아직 구현하지 않았다. 이번 정리는 실제 배포를 실행하지 않는다.
 
 ## AWS 운영 보완 실행 계획
 
@@ -803,7 +803,7 @@ python3 -m venv .venv
 | 운영 시간과 담당자 | 운영 책임자 | 대응 시간대, 주 담당·대체 담당 실명, 부재 시 인계, 업무 시간 밖 장애 처리와 사용자 안내 |
 | 알림 경로 | platform + 운영 책임자 | SNS 수신 주소·구독 확인, 실제 사용할 호출 채널, 미확인 알림의 대체 담당자 전달 방식 |
 | 데이터·복구 목표 | 서비스 책임자 | 중요 데이터 범위, 허용 중단/손실, 삭제·취소 작업의 복구 정책, DB/S3/Kafka 정합성 판정 |
-| 비용과 보존 | platform + 데이터 책임자 | 월 관측 예산, 예상 일일 로그량·metric 수, 로그/감사 보존 승인, Vercel 조회 권한과 보존 기간 |
+| 비용과 보존 | platform + 데이터 책임자 | 월 관측 예산, 예상 일일 로그량·metric 수, 로그/감사 보존 승인 |
 
 후보 목표는 장애 탐지 5분, 운영 시간 내 확인 15분, 같은 스키마의 앱 rollback 30분, 데이터 복원 후 업무 재개 4시간, 업무 데이터 RPO 15분이다. **확정 SLA나 실측 보장이 아니다.** RTO는 장애 발생부터 업무 검증 완료까지, RPO는 장애 시점과 최종 복구 가능한 정합 데이터 시점의 차이로 측정한다. RDS의 7일 백업 보존만으로 RPO 15분을 충족했다고 판정하지 않는다. 담당자와 복구 시험 결과에 따라 목표를 확정하거나 구성을 보완한다.
 

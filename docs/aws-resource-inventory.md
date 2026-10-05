@@ -8,6 +8,15 @@
 
 이후 보안·유지보수 설정과 배포 실패 알림 IAM 정책이 추가됐습니다. 이 표는 당시 plan의 기록이며, 현재 생성 개수는 새 plan으로 확인해야 합니다. [현재 유지보수 설정](aws-maintenance.md)
 
+화면을 Vercel에서 EKS Fargate로 옮기면서 아래 준비물도 더해졌습니다. 번호 목록에는 아직 없으므로 새 plan에서 확인합니다. [화면 운영 안내](aws-frontend-hosting.md)
+
+| 쉬운 설명 | 설정에서 찾을 이름 (운영자용) |
+|---|---|
+| 노드 그룹 밖에서 화면 일꾼만 돌리는 Fargate 자리와 그 출입증이에요. `fruition` 구역의 `app=frontend` 일꾼만 들어가요. | `module.eks.module.fargate_profile["frontend"]` |
+| 화면 일꾼의 일기를 기존 앱 일기장(`application` 로그 그룹)에만 쓸 수 있게 해요. | `aws_iam_policy.fargate_logs` |
+| 화면 프로그램 상자 보관함과 최근 10개 보관 규칙이에요. | `aws_ecr_repository.services["frontend"]`, `aws_ecr_lifecycle_policy.services["frontend"]` |
+| 문지기에 화면 주소 API의 접근 코드 확인 규칙이 더해졌어요. 새 준비물이 아니라 185번 설정이 바뀌는 것이에요. | `aws_wafv2_web_acl.cost_guard` (`frontend-access-code`) |
+
 ## 어려운 이름은 이렇게 읽어요
 
 | 이름 | 쉽게 떠올릴 모습 |
@@ -313,7 +322,7 @@
 | 앱 일꾼·Kafka·KEDA·비밀 전달·출입 규칙 | Kubernetes 설정 파일과 Helm으로 따로 설치해요 |
 | Kafka 저장 디스크 | 저장 공간 요청(PVC)을 보고 EBS CSI가 만들어요 |
 | ALB용 CloudWatch 경보 3개 | 아직 ALB 이름표를 입력하지 않아 빠졌어요. 입력하면 추가돼요 |
-| Vercel·ACM 인증서·인터넷 주소·외부 AI 계정 | 이 Terraform 폴더에서 만드는 대상이 아니에요 |
+| ACM 인증서·인터넷 주소·외부 AI 계정 | 이 Terraform 폴더에서 만드는 대상이 아니에요 |
 
 긴급 문닫기 스위치는 꺼져 있습니다. 자동으로 문을 닫는 연결은 아직 없습니다. 운영자가 Discord 비밀 주소와 사용할 AI 제공자의 키도 넣어야 합니다.
 

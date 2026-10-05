@@ -2,9 +2,9 @@
 
 ## 처리 경로
 
-Vercel은 화면·로그인·접근 코드 확인을 담당한다. `BACKEND_URL`이 설정된 빌드에서는 문서 API 요청이 해당 AWS origin으로 직접 전달되고, 인증 갱신은 기존 동일 출처 `/api/auth/refresh`를 사용한다. `/api/document-transport`는 접근 코드 middleware 뒤에서 연결 설정만 제공한다. 문서 서버는 Bearer 토큰과 workspace 권한을 계속 검증한다.
+AWS에서는 화면(EKS Fargate)과 API가 같은 화면 호스트(`app_domain`)를 쓰고 ALB가 경로로 나눈다([aws-frontend-hosting.md](aws-frontend-hosting.md)). `SAME_ORIGIN_API=true`로 빌드한 화면은 문서 API를 같은 출처 `/api/...`로 직접 부르며, 인증 갱신도 같은 출처 `/api/auth/refresh`를 사용한다. `/api/document-transport`는 ALB가 계속 화면으로 보내는 경로이며 WAF `frontend-access-code` 규칙(화면 middleware와 같은 접근 코드 확인) 뒤에서 연결 설정만 제공한다. 문서 서버는 Bearer 토큰과 workspace 권한을 계속 검증한다. 별도 API origin으로 직접 부르는 기존 `BACKEND_URL` 빌드도 아래와 같이 동작한다.
 
-`BACKEND_URL`이 설정된 빌드에서는 직접 업로드가 기본 활성화되며, `DOCUMENT_DIRECT_UPLOAD_ENABLED=false`를 명시한 경우에만 비활성화된다. 활성화 상태에서 PDF는 시작 → 조각 URL 발급 → S3 multipart PUT → 완료 확인 순서로 업로드한다. 기본 64MiB 조각을 동시에 최대 3개 전송한다. 큰 파일은 10,000개 파트 이내가 되도록 조각 크기를 늘린다. Java `long`과 브라우저 Blob.slice를 사용하며 SDK 호환 상한은 파일당 5TiB다. 이는 저장 경로의 상한이며 그 크기의 모든 PDF를 OCR 처리할 수 있다는 보장은 아니다.
+`SAME_ORIGIN_API=true` 또는 `BACKEND_URL`이 설정된 빌드에서는 직접 업로드가 기본 활성화되며, `DOCUMENT_DIRECT_UPLOAD_ENABLED=false`를 명시한 경우에만 비활성화된다. 활성화 상태에서 PDF는 시작 → 조각 URL 발급 → S3 multipart PUT → 완료 확인 순서로 업로드한다. 기본 64MiB 조각을 동시에 최대 3개 전송한다. 큰 파일은 10,000개 파트 이내가 되도록 조각 크기를 늘린다. Java `long`과 브라우저 Blob.slice를 사용하며 SDK 호환 상한은 파일당 5TiB다. 이는 저장 경로의 상한이며 그 크기의 모든 PDF를 OCR 처리할 수 있다는 보장은 아니다.
 
 각 조각은 최대 3회 시도하며 재시도 시 URL을 갱신한다. 업로드 티켓은 24시간, 조각 URL은 15분 유효하다. 탭 새로고침 후 업로드 재개는 아직 지원하지 않는다. 완료 요청은 같은 멱등 키를 재사용한다. 서버는 파트 번호·크기, 최종 크기·MIME·PDF 헤더, 사용자·workspace를 검증하고 특정 객체 버전/ETag를 고정해 S3 내부에서 원본 경로로 복사한다. PDF 식별값은 multipart ETag와 크기의 SHA-256이며 원본 바이트 전체 SHA-256은 아니다. 편집 Markdown의 본문 SHA-256 계약은 유지한다.
 
@@ -25,7 +25,7 @@ V50 migration의 `document_convert_queue`에 완료 페이지, 전체 페이지,
 1. S3 CORS에 실제 프런트엔드 HTTPS origin을 `document_upload_allowed_origins`로 등록한다. PUT/GET/HEAD 및 Range를 허용한다. 문서 IRSA에 임시 prefix 읽기/쓰기와 GetObjectVersion을 추가한다. 공개 버킷으로 변경하지 않는다.
 2. converter에 pypdf 의존성과 새 API를 배포한다. `CONVERTER_SOURCE_HOSTS`는 현재 리전 S3 endpoint와 해당 버킷 hostname만 등록한다.
 3. 문서 DB V50 migration을 적용한 후 document-svc를 배포한다. 기존 converter보다 먼저 새 문서 서버를 배포하지 않는다.
-4. 프런트엔드에서 `BACKEND_URL=https://api.example.com`(실제 API origin)으로 빌드/배포한다. 직접 업로드는 기본 활성화이므로 `DOCUMENT_DIRECT_UPLOAD_ENABLED=true`를 별도로 지정할 필요가 없다. API CORS에 프런트엔드 origin이 포함되어 있어야 한다.
+4. 프런트엔드는 `SAME_ORIGIN_API=true` 이미지로 배포한다(release 이미지 `frontend`). 같은 출처이므로 API CORS 설정은 필요 없다. 별도 API origin을 쓰는 빌드라면 `BACKEND_URL=https://api.example.com`(실제 API origin)으로 빌드하고 API CORS에 프런트엔드 origin을 포함한다. 직접 업로드는 기본 활성화이므로 `DOCUMENT_DIRECT_UPLOAD_ENABLED=true`를 별도로 지정할 필요가 없다.
 5. deploy workflow는 `deploy` 액션에서만 배포 성공 후 `scripts/aws_pdf_smoke.py`를 실행한다. 검증 계정으로 65MiB 합성 PDF의 multipart 업로드·완료 재호출·Range 읽기·11페이지 분할 변환·AI 완료를 확인하고 테스트 문서만 정리한다. 실제 계정의 편집 충돌 확인은 별도로 수행한다.
 
 임시 객체/미완료 multipart는 7일 lifecycle로 회수한다. 버전 관리 버킷의 임시 이전 버전도 만료한다. 새 경로를 중지할 때는 frontend에 `DOCUMENT_DIRECT_UPLOAD_ENABLED=false`를 명시하고 재배포한다. 이는 기존 경로의 크기 제한도 다시 적용한다. V50은 추가 컬럼 migration이므로 롤백 시 데이터를 제거할 필요가 없다.

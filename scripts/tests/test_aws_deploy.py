@@ -38,12 +38,14 @@ CONFIG = {
 
 
 class FakeCluster:
-    def __init__(self, fail=None, record=None, fingerprint="b" * 64, smoke=None):
+    def __init__(self, fail=None, record=None, fingerprint="b" * 64, statuses=None, bindings=("access-svc", "document-svc", "frontend")):
         self.events = []
         self.fail = fail
         self.record = record
         self.fingerprint = fingerprint
-        self.smoke = smoke or {"openapi": "3.0.1", "paths": {"/test": {}}}
+        # 공개 차단 경로는 404, 화면 헬스체크·첫 화면은 200이 정상이다.
+        self.statuses = {"/v3/api-docs": "404", "/internal/": "404", "/healthz": "200", "/": "200", **(statuses or {})}
+        self.bindings = bindings
         self.policies = {"internal-only-ingress"}
 
     def run(self, args, *, input=None):
@@ -63,13 +65,16 @@ class FakeCluster:
             if document["kind"] == "NetworkPolicy":
                 self.policies.add(document["metadata"]["name"])
         if args[0] == "curl":
-            return json.dumps(self.smoke)
+            path = "/" + args[-1].split("/", 3)[3]
+            return self.statuses[path]
         if "logs" in args:
             return self.fingerprint
         if "get" in args and "namespace" in args:
             return json.dumps({"metadata": {"labels": {"elbv2.k8s.aws/pod-readiness-gate-inject": "enabled", "pod-security.kubernetes.io/enforce": "baseline"}}})
         if "get" in args and "targetgroupbindings" in args:
-            return json.dumps({"items": [{"spec": {"targetType": "ip", "targetGroupARN": "fixture", "serviceRef": {"name": name}}} for name in ("access-svc", "document-svc")]})
+            return json.dumps({"items": [{"spec": {"targetType": "ip", "targetGroupARN": "fixture", "serviceRef": {"name": name}}} for name in self.bindings]})
+        if "get" in args and "ingress" in args:
+            return json.dumps({"status": {"loadBalancer": {"ingress": [{"hostname": "k8s-fruition-fixture.ap-northeast-2.elb.amazonaws.com"}]}}})
         if "get" in args and "configmaps" in args:
             return json.dumps({"items": []})
         if "get" in args:
@@ -112,7 +117,7 @@ class DeploymentTests(unittest.TestCase):
         documents = deploy.render(CONFIG, SHA)
         self.assertEqual(before, {p: hashlib.sha256(p.read_bytes()).digest() for p in paths})
         self.assertFalse(deploy.PLACEHOLDER.search(json.dumps(documents)))
-        self.assertEqual(10, sum(d["kind"] == "Deployment" for d in documents))
+        self.assertEqual(11, sum(d["kind"] == "Deployment" for d in documents))
 
     def test_invalid_inputs_fail_without_cluster_mutation(self):
         for key in CONFIG:
@@ -193,7 +198,14 @@ class DeploymentTests(unittest.TestCase):
         users = [i for i, (args, _) in enumerate(fake.events) if any(a.startswith("KafkaUser/") for a in args)]
         self.assertTrue(routes and routes[0] < bindings < first_runtime)
         self.assertTrue(users and all(i < first_runtime for i in users))
-        self.assertEqual(2, sum(args[0] == "curl" for args in events))
+        curls = [args for args in events if args[0] == "curl"]
+        for host in ("api.fruition.test", "access.fruition.test", "app.fruition.test"):
+            for path in ("/v3/api-docs", "/internal/"):
+                self.assertTrue(any(args[-1] == f"https://{host}{path}" for args in curls), (host, path))
+        for path in ("/healthz", "/", "/v3/api-docs", "/internal/"):
+            # 화면 주소의 DNS 전환 전에도 같은 ALB로 확인한다.
+            call = next(args for args in curls if args[-1] == "https://app.fruition.test" + path)
+            self.assertIn("app.fruition.test:443:k8s-fruition-fixture.ap-northeast-2.elb.amazonaws.com:443", call)
         self.assertTrue(any(d["metadata"]["name"] == deploy.release_name(SHA) for d in fake.applied("ConfigMap")))
 
     def test_converter_rolls_out_and_is_ready_before_other_workloads(self):
@@ -234,9 +246,36 @@ class DeploymentTests(unittest.TestCase):
             with self.subTest(failure=failure), patch.object(deploy, "run", fake.run), self.assertRaises(subprocess.CalledProcessError):
                 deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
             self.assertFalse(any(d["metadata"]["name"] == deploy.release_name(SHA) for d in fake.applied("ConfigMap")))
-        fake = FakeCluster(smoke={"status": "ok"})
-        with patch.object(deploy, "run", fake.run), self.assertRaises(ValueError):
-            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+        for statuses in ({"/v3/api-docs": "200"}, {"/internal/": "401"}, {"/healthz": "503"}, {"/": "502"}):
+            fake = FakeCluster(statuses=statuses)
+            with self.subTest(statuses=statuses), patch.object(deploy, "run", fake.run), \
+                 patch.object(deploy.time, "sleep"), self.assertRaises(ValueError):
+                deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+            self.assertFalse(any(d["metadata"]["name"] == deploy.release_name(SHA) for d in fake.applied("ConfigMap")))
+
+    def test_frontend_check_waits_for_alb_rules_to_propagate(self):
+        # 규칙이 퍼지기 전 ALB 기본 404는 재시도하고, 끝내 200이 아니면 실패한다.
+        answers = iter(["404", "404", "200"])
+        with patch.object(deploy, "run", lambda args, **_: next(answers)), patch.object(deploy.time, "sleep"):
+            deploy.wait_status("https://app.fruition.test/healthz", "200")
+        with patch.object(deploy, "run", lambda args, **_: "404"), patch.object(deploy.time, "sleep"), self.assertRaises(ValueError):
+            deploy.wait_status("https://app.fruition.test/healthz", "200")
+
+    def test_rollback_to_release_without_frontend_leaves_frontend_running(self):
+        saved = [d for d in self.documents if d["metadata"].get("name") != "frontend" and d["kind"] != "HorizontalPodAutoscaler"]
+        record = {"data": {"safety_contract_version": "2", "fingerprints": json.dumps({"x": "b" * 64}),
+                           "config": json.dumps(CONFIG), "manifest": yaml.safe_dump_all(saved, sort_keys=False)}}
+        fake = FakeCluster(record=record)
+        with patch.object(deploy, "run", fake.run), patch.object(deploy, "fingerprints", return_value={"x": "b" * 64}):
+            deploy.deploy(CONFIG, SHA, self.documents, rollback=True)
+        self.assertNotIn("frontend", {d["metadata"]["name"] for d in fake.applied("Deployment")})
+
+    def test_frontend_target_group_binding_is_required_before_pods(self):
+        fake = FakeCluster(bindings=("access-svc", "document-svc"))
+        clock = iter([0, 0, 601])
+        with patch.object(deploy, "run", fake.run), patch.object(deploy.time, "monotonic", lambda: next(clock)), \
+             patch.object(deploy.time, "sleep"), self.assertRaises(ValueError):
+            deploy.wait_alb_bindings()
 
     def test_scaling_policy_changes_without_new_release_sha(self):
         """HPA는 release 기록에 고정하지 않는다. 기존 성공 release에 HPA를 더하거나
@@ -352,7 +391,7 @@ class DeploymentTests(unittest.TestCase):
                     self.assertFalse(fake.applied("Deployment"))
                 else:
                     deploy.deploy(config, SHA, documents, review=REVIEW)
-                    self.assertEqual(10, len(fake.applied("Deployment")))
+                    self.assertEqual(11, len(fake.applied("Deployment")))
                 self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in fake.applied("Job")))
                 self.assertFalse(any(d["metadata"]["name"] == deploy.release_name(SHA) for d in fake.applied("ConfigMap")))
 

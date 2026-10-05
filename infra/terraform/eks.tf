@@ -118,6 +118,18 @@ module "eks" {
     }
   }
 
+  # 화면은 절전(노드 그룹 0대) 중에도 떠 있어야 하므로 노드 그룹 밖 Fargate에서 실행한다.
+  # 로그는 DaemonSet 수집기가 없는 Fargate 내장 라우터가 기존 application log group으로 보낸다.
+  fargate_profiles = {
+    frontend = {
+      name      = "frontend"
+      selectors = [{ namespace = "fruition", labels = { app = "frontend" } }]
+      iam_role_additional_policies = {
+        logs = aws_iam_policy.fargate_logs.arn
+      }
+    }
+  }
+
   # 실제 권한은 플랫폼 관리자가 설치하는 fruition namespace RoleBinding으로 제한한다.
   access_entries = merge(
     {
@@ -326,4 +338,17 @@ resource "aws_iam_role_policy" "alb_controller" {
   name   = "controller-v3-5-0"
   role   = module.alb_controller_irsa.iam_role_name
   policy = file("${path.module}/policies/aws-load-balancer-controller-v3.5.0.json")
+}
+
+# Fargate 로그 라우터(k8s/platform/aws/fargate-logging.yaml)가 쓰는 권한. application log group 하나로 제한한다.
+resource "aws_iam_policy" "fargate_logs" {
+  name = "${var.project}-fargate-logs"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["logs:CreateLogStream", "logs:DescribeLogStreams", "logs:PutLogEvents"]
+      Resource = ["${aws_cloudwatch_log_group.containers["application"].arn}:*"]
+    }]
+  })
 }

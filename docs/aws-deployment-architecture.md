@@ -1,6 +1,6 @@
 # AWS에 배포하면 어떤 모습일까요?
 
-현재 Terraform과 Kubernetes 설정을 기준으로 그린 **배포 후 목표 구조**입니다. 실제 AWS에 모두 설치됐다는 뜻은 아닙니다. 프론트 화면은 Vercel에서, 백엔드와 AI 작업은 AWS 서울 리전에서 실행합니다.
+현재 Terraform과 Kubernetes 설정을 기준으로 그린 **배포 후 목표 구조**입니다. 실제 AWS에 모두 설치됐다는 뜻은 아닙니다. 프론트 화면·백엔드·AI 작업 모두 AWS 서울 리전에서 실행합니다. 프론트 화면은 같은 EKS의 Fargate에서 돌아갑니다. 자세한 내용은 [화면 운영 문서](aws-frontend-hosting.md)를 참고하세요.
 
 서버는 일을 하는 컴퓨터, Pod는 그 안에서 일하는 작은 프로그램입니다. 아래 그림은 컴퓨터 한 대 한 대의 정확한 위치가 아니라 각 서비스의 역할과 연결을 보여줍니다. 두 가용 영역(AZ)에 모든 서비스가 똑같이 하나씩 생기는 구조는 아닙니다.
 
@@ -20,22 +20,24 @@ AWS 서비스 아이콘 스타일로 만든 개념도입니다. 공식 AWS 아�
 
 ```mermaid
 flowchart TB
-    USER["사용자"] --> WEB["Vercel<br/>프론트엔드 화면"]
-    WEB --> ALB
-    USER -->|"API 직접 요청"| ALB
+    USER["사용자 브라우저"] -->|"화면·API 모두"| ALB
 
     subgraph AWS["AWS 서울 리전"]
-        WAF["WAF · 너무 많은 요청 제한"] -.->|"입구 보호"| ALB
+        WAF["WAF · 너무 많은 요청 제한<br/>화면 주소 API 접근 코드 확인"] -.->|"입구 보호"| ALB
         ACM["ACM · HTTPS 인증서"] -.-> ALB
 
         subgraph VPC["VPC · 우리 서비스 전용 네트워크 · 2개 가용 영역"]
             subgraph PUBLIC["Public subnet 2개 · 외부 연결 구역"]
-                ALB["ALB · 요청 안내원<br/>api 주소 / access 주소"]
+                ALB["ALB · 요청 안내원<br/>app 주소 / api 주소 / access 주소"]
                 NAT["NAT Gateway 1개<br/>내부에서 외부로 나가는 길"]
             end
 
             subgraph PRIVATE["Private subnet 2개 · 내부 작업 구역"]
                 subgraph EKS["EKS에서 실행하는 앱"]
+                    subgraph FARGATE["Fargate · 노드 그룹 밖"]
+                        WEB["frontend<br/>프론트엔드 화면 2개"]
+                    end
+
                     subgraph GENERAL["일반 노드 · t3.large 2~3대"]
                         ACCESS["access-svc<br/>로그인·인증"]
                         DOC["document-svc<br/>문서 처리"]
@@ -59,12 +61,13 @@ flowchart TB
 
         S3[("S3<br/>문서·AI 파일")]
         SECRET["Secrets Manager<br/>비밀번호·API 키"]
-        ECR["ECR<br/>서비스 이미지 4종"]
+        ECR["ECR<br/>서비스 이미지 5종"]
         CONTROL["AWS가 관리하는 EKS 제어 영역<br/>앱 배치·실행 관리"]
     end
 
-    ALB -->|"access 주소"| ACCESS
-    ALB -->|"api 주소"| DOC
+    ALB -->|"app 주소 화면 경로"| WEB
+    ALB -->|"access 주소 · app 주소 인증 API"| ACCESS
+    ALB -->|"api 주소 · app 주소 그 밖의 API"| DOC
     ACCESS --> DB1
     DOC --> DB2
     DOC --> API
@@ -93,9 +96,9 @@ EKS 관리 부분은 AWS가 운영합니다. 우리 VPC 안에는 앱을 실행�
 
 ## 사용자가 요청하면
 
-1. **화면을 엽니다.** Vercel에서 프론트엔드를 받습니다.
-2. **서버에 요청합니다.** 공개 API 요청은 WAF가 연결된 ALB로 들어옵니다. 화면을 거치지 않고 직접 API를 호출할 수도 있습니다.
-3. **알맞은 담당자에게 갑니다.** `access` 주소는 인증 서비스로, `api` 주소는 문서 서비스로 갑니다.
+1. **화면을 엽니다.** 화면 주소(app)로 ALB에 들어와 Fargate의 프론트엔드를 받습니다.
+2. **서버에 요청합니다.** 화면도 같은 app 주소의 `/api/...`로 요청하며, WAF가 연결된 ALB로 들어옵니다. 중간 서버를 거치지 않으므로 서버가 실제 사용자 IP를 봅니다. `api`·`access` 주소로 직접 API를 호출할 수도 있습니다.
+3. **알맞은 담당자에게 갑니다.** app 주소는 경로에 따라 화면·인증·문서 서비스로 나뉘고, `access` 주소는 인증 서비스로, `api` 주소는 문서 서비스로 갑니다.
 4. **오래 걸리는 일은 줄을 섭니다.** Kafka에 들어간 작업은 AI 일꾼이 차례로 처리합니다. 모든 요청이 Kafka를 거치는 것은 아닙니다.
 5. **결과를 보관합니다.** 중요한 기록은 RDS에, 문서·AI 파일은 S3에 저장합니다. Redis는 빨리 확인할 상태와 캐시에 사용합니다.
 
@@ -132,7 +135,7 @@ CloudWatch는 컴퓨터의 일기와 사용량을 모읍니다. 문제가 생기
 
 | 구성 | 현재 설정 | 알아둘 점 |
 |---|---|---|
-| 프론트 | Vercel | AWS 밖에서 운영 |
+| 프론트 | EKS Fargate Pod 2개, 각각 0.25 vCPU·512Mi 요청 | 노드 그룹이 0대인 절전 중에도 화면 유지 |
 | 일반 EKS 노드 | t3.large, 처음/최소 2대·최대 3대 | 앱·Kafka·플랫폼 도구 실행 |
 | AI EKS 노드 | m5.xlarge 또는 m6i.xlarge Spot, 처음/최소 0대·최대 2대 | GPU 없음. 앱 설치 후 상시 일꾼 때문에 노드가 필요 |
 | 인증·문서·AI API Pod | 각각 2개 | 순차 교체·PDB·노드 분산 적용, HPA 미설정 |
@@ -141,10 +144,10 @@ CloudWatch는 컴퓨터의 일기와 사용량을 모읍니다. 문제가 생기
 | RDS | db.t4g.small 2대, 각각 암호화 gp3 30GB | PostgreSQL 16, 각각 Single-AZ, 백업 7일 |
 | Redis | cache.t4g.micro 1대 | 전송·저장 암호화, 예비 복제본 없음 |
 | Kafka | broker/controller 1대, gp3 5Gi | EKS 안에서 실행 |
-| ALB | 앱 Ingress로 생성 | HTTPS, 두 API 주소로 요청 분기 |
+| ALB | 앱 Ingress로 생성 | HTTPS, app 주소는 경로로·두 API 주소는 주소로 요청 분기 |
 | NAT Gateway | 1개 | 내부 서비스의 외부 통신 경로 |
 | S3 | 앱 파일용과 Terraform 상태용 분리 | 파일용은 S3 전용 연결 사용 |
-| ECR | access-svc·document-svc·pipeline·converter 4개 | pipeline 이미지를 여러 AI 일꾼이 함께 사용 |
+| ECR | access-svc·document-svc·pipeline·converter·frontend 5개 | pipeline 이미지를 여러 AI 일꾼이 함께 사용 |
 | CloudWatch | 로그·사용량·대시보드·경보 | 주요 로그 14일 보관, ALB 경보는 생성 후 이름표 등록 필요 |
 
 ## 보호 설정과 남은 한계
