@@ -3,7 +3,7 @@
 # Source IP is the TCP peer, not an untrusted X-Forwarded-For header.
 variable "waf_requests_per_ip_5m" {
   type    = number
-  default = 600
+  default = 3000
   validation {
     condition     = var.waf_requests_per_ip_5m >= 10 && var.waf_requests_per_ip_5m <= 2000000000 && floor(var.waf_requests_per_ip_5m) == var.waf_requests_per_ip_5m
     error_message = "WAF limit must be an integer between 10 and 2000000000."
@@ -12,7 +12,7 @@ variable "waf_requests_per_ip_5m" {
 
 variable "waf_requests_total_5m" {
   type    = number
-  default = 3000
+  default = 6000
   validation {
     condition     = var.waf_requests_total_5m >= 10 && var.waf_requests_total_5m <= 2000000000 && floor(var.waf_requests_total_5m) == var.waf_requests_total_5m
     error_message = "WAF limit must be an integer between 10 and 2000000000."

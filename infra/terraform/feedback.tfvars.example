@@ -17,8 +17,8 @@ eks_addon_versions = {
 }
 
 # 소규모 피드백 환경 WAF 초기값. 프록시 공유 IP/정상 부하 검증 후 조정.
-waf_requests_per_ip_5m = 600
-waf_requests_total_5m  = 3000
+waf_requests_per_ip_5m = 3000
+waf_requests_total_5m  = 6000
 waf_emergency_block    = false
 
 # 서울 EKS 1.35에서 조회한 관측 addon. ALB suffix는 앱 Ingress 생성 후 입력.
