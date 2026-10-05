@@ -1,5 +1,5 @@
 {
-  "release_sha": "c67146568f3e47f02b486d96e1929609909d7987",
+  "release_sha": "d8d7326d6641ae40871dc37cdcf8f41c21d639b3",
   "migration_mode": "expand-only",
   "compatibility_test_url": "https://github.com/FruitionKR/Fruition-document/pull/21",
   "restore_test_url": "https://github.com/FruitionKR/Fruition-document/pull/24"
