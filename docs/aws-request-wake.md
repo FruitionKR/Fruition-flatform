@@ -48,7 +48,7 @@ bash scripts/aws-frontend-wake-check.sh --send   # 기동 이벤트까지 실제
 
 노드가 0대이면 Cluster Autoscaler 자체도 멈추므로 외부 Lambda가 기동을 담당합니다. 절전 도중 기존 Autoscaler가 노드를 다시 만들지 못하도록 두 노드 그룹의 ASG `Launch` 프로세스만 잠시 중단합니다. 다른 ASG 프로세스는 변경하지 않습니다. 기동 시 중단을 해제합니다. 기존에 운영자가 Launch를 중단해 둔 그룹은 절전을 거부합니다.
 
-DynamoDB에 `sleeping → asleep → waking → awake` 상태를 기록하고 Lambda 동시 실행을 1개로 제한합니다. 요청 감지는 `asleep`이 된 시각부터 시작합니다. `sleeping` 동안 Pod 축출로 생기는 502·504는 감지 대상이 아니므로 모니터링·봇 요청이 있어도 절전이 완료됩니다. 노드 그룹 축소는 PDB와 무관하게 노드당 최대 15분 뒤 강제 종료됩니다. EKS의 노드 그룹 `desiredSize`는 ASG 값을 주기적으로만 동기화하므로, 완료 판정과 기동 용량은 ASG의 실제 `DesiredCapacity`를 함께 봅니다. AWS API 호출 중 일부가 실패해도 다음 1분 실행에서 재개합니다. `awake`는 일반 노드 2대 이상이 EC2 `InService`이고 EKS 노드 그룹이 ACTIVE라는 뜻이며, 앱의 정상 응답까지 보장하지 않습니다.
+DynamoDB에 `sleeping → asleep → waking → awake` 상태를 기록하고 Lambda 동시 실행을 1개로 제한합니다. 요청 감지는 `asleep`이 된 시각부터 시작합니다. `sleeping` 동안 Pod 축출로 생기는 502·504는 감지 대상이 아니므로 모니터링·봇 요청이 있어도 절전이 완료됩니다. 노드 그룹 축소는 PDB와 무관하게 노드당 최대 15분 뒤 강제 종료됩니다. EKS의 노드 그룹 `desiredSize`는 ASG 값을 주기적으로만 동기화하므로, 완료 판정과 기동 용량은 ASG의 실제 `DesiredCapacity`를 함께 봅니다. AWS API 호출 중 일부가 실패해도 다음 1분 실행에서 재개합니다. `awake`는 일반 노드 2대 이상이 EC2 `InService`이고 EKS 노드 그룹이 ACTIVE이며 AI 노드 그룹의 희망 수 1대가 반영됐다는 뜻입니다. 앱의 정상 응답까지 보장하지 않습니다. AI 노드 그룹 갱신이 충돌하면 일반 노드 기동은 계속하고, AI 쪽은 다음 1분 실행에서 다시 시도합니다.
 
 ## 설치
 

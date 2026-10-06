@@ -107,11 +107,45 @@ class WakeTests(unittest.TestCase):
         self.sleep()
         self.finish_updates()
         self.tick()
+        self.assertEqual(0, self.nodes["ai_worker"]["scalingConfig"]["desiredSize"])
         self.controller.run({"action": "wake"})
+        self.assertEqual(2, self.nodes["general"]["scalingConfig"]["desiredSize"])
+        self.assertEqual(2, self.nodes["general"]["scalingConfig"]["minSize"])
         # AI 작업자는 최소 1개라 깨어나면 어차피 AI 노드가 뜬다. 일반 노드를 기다리지 않고 함께 띄운다.
         self.assertEqual(1, self.nodes["ai_worker"]["scalingConfig"]["desiredSize"])
         # 최소값은 0으로 둬서 이후 축소는 Cluster Autoscaler가 결정한다.
         self.assertEqual(0, self.nodes["ai_worker"]["scalingConfig"]["minSize"])
+
+    def test_ai_update_conflict_does_not_block_general_wake(self):
+        self.sleep()
+        self.finish_updates()
+        self.tick()
+        update = self.eks.update_nodegroup_config.side_effect
+
+        def conflict(**kwargs):
+            if kwargs["nodegroupName"] == "ai_worker":
+                raise RuntimeError("ResourceInUseException")
+            update(**kwargs)
+
+        self.eks.update_nodegroup_config.side_effect = conflict
+        self.assertEqual("waking", self.controller.run({"action": "wake"})["phase"])
+        self.assertEqual(2, self.nodes["general"]["scalingConfig"]["desiredSize"])
+        self.finish_updates()
+        # 일반 노드가 준비돼도 AI 미리 기동이 반영될 때까지 waking으로 남아 다음 실행에서 재시도한다.
+        self.assertEqual("waking", self.tick()["phase"])
+        self.eks.update_nodegroup_config.side_effect = update
+        self.tick()
+        self.assertEqual(1, self.nodes["ai_worker"]["scalingConfig"]["desiredSize"])
+        self.finish_updates()
+        self.assertEqual("awake", self.tick()["phase"])
+
+    def test_request_while_waking_resumes_wake(self):
+        self.sleep()
+        self.finish_updates()
+        self.tick()
+        self.controller.run({"action": "wake"})
+        self.finish_updates()
+        self.assertEqual("awake", self.controller.run({"action": "request"})["phase"])
 
     def test_frontend_request_wakes_only_from_asleep(self):
         request = {"action": "request"}
@@ -178,8 +212,11 @@ class WakeTests(unittest.TestCase):
             self.sleep()
         self.assertEqual("sleeping", self.item["phase"])
         self.controller.run({"action": "wake"})
-        self.assertEqual("awake", self.item["phase"])
         self.assertEqual(2, self.scaling.resume_processes.call_count)
+        # AI 미리 기동 설정이 반영되면 awake가 된다.
+        self.finish_updates()
+        self.tick()
+        self.assertEqual("awake", self.item["phase"])
 
     def test_failed_wake_retries_without_losing_intent(self):
         self.sleep()

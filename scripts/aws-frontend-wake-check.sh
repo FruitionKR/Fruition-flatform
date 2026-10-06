@@ -76,10 +76,14 @@ spec:
       aws dynamodb get-item --table-name fruition-request-wake \
         --key '{"id":{"S":"controller"}}' --query 'Item.phase.S' --output text || exit 12
       echo "== 허용되지 않은 이벤트는 거부되어야 한다"
-      if aws events put-events --entries '[{"Source":"fruition.check","DetailType":"wake-requested","Detail":"{}"}]' >/dev/null 2>&1; then
+      # 권한 거부(AccessDenied)만 통과로 본다. 네트워크·제한 오류를 거부로 오인하지 않는다.
+      if OUT=\$(aws events put-events --entries '[{"Source":"fruition.check","DetailType":"wake-requested","Detail":"{}"}]' 2>&1); then
         echo "다른 source 발행이 허용됨" >&2; exit 13
       fi
-      echo "거부됨"
+      case "\$OUT" in
+        *AccessDenied*) echo "거부됨" ;;
+        *) echo "예상과 다른 오류: \$OUT" >&2; exit 15 ;;
+      esac
       if [ "\$SEND" = true ]; then
         echo "== 기동 요청 이벤트 발행"
         aws events put-events --entries '[{"Source":"fruition.frontend","DetailType":"wake-requested","Detail":"{}"}]' \
@@ -104,6 +108,7 @@ kubectl -n "$NS" logs "$POD" || true
 echo "dnsPolicy=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.spec.dnsPolicy}') node=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.spec.nodeName}')"
 if [ "$PHASE" != "Succeeded" ]; then
   echo "pod phase: $PHASE" >&2
-  kubectl -n "$NS" describe pod "$POD" | tail -15 >&2
+  # 운영자 Role에는 events 조회 권한이 없어 describe 대신 Pod 상태만 출력한다.
+  kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.conditions}{"\n"}{.status.containerStatuses}{"\n"}' >&2
   exit 1
 fi

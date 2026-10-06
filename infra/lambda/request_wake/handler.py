@@ -148,14 +148,20 @@ class Controller:
                 self.scaling.resume_processes(
                     AutoScalingGroupName=name, ScalingProcesses=["Launch"]
                 )
+            ready = self.resize("general", nodes["general"], groups["general"], 2, 2)
             # AI workers keep one replica, so an AI node follows every wake anyway. Start it with
             # the general nodes instead of after them; minimum 0 leaves scale-down to the autoscaler.
-            self.resize("ai_worker", nodes["ai_worker"], groups["ai_worker"], 1, 0)
-            ready = self.resize("general", nodes["general"], groups["general"], 2, 2)
+            # Best effort: an AI update conflict must not delay the general wake, so retry it on
+            # the next tick and stay waking until it is applied.
+            try:
+                prewarmed = self.resize("ai_worker", nodes["ai_worker"], groups["ai_worker"], 1, 0)
+            except Exception as error:  # noqa: BLE001 - retried next tick, logged for the alarm trail
+                print(json.dumps({"ai_prewarm_error": type(error).__name__, "detail": str(error)}))
+                prewarmed = False
             running = sum(
                 i["LifecycleState"] == "InService" for i in groups["general"]["Instances"]
             )
-            if ready and running >= 2:
+            if ready and prewarmed and running >= 2:
                 self.save(state, "awake")
         return state
 
