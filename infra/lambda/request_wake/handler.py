@@ -66,7 +66,7 @@ class Controller:
         )
         return any(point.get("Sum", 0) > 0 for point in result["Datapoints"])
 
-    def resize(self, key, node, group, desired):
+    def resize(self, key, node, group, desired, minimum):
         if node["status"] != "ACTIVE":
             return False
         config = node["scalingConfig"]
@@ -75,7 +75,6 @@ class Controller:
         actual = group["DesiredCapacity"]
         # During wake retain any larger operator/autoscaler capacity.
         wanted = max(desired, config["desiredSize"], actual) if desired else 0
-        minimum = 2 if desired else 0
         if config["desiredSize"] == wanted == actual and config["minSize"] == minimum:
             return True
         self.eks.update_nodegroup_config(
@@ -87,8 +86,8 @@ class Controller:
 
     def run(self, event):
         action = event.get("action", "")
-        if action not in {"sleep", "wake", "tick", "status"}:
-            raise ValueError("Expected sleep, wake, tick, or status")
+        if action not in {"sleep", "wake", "request", "tick", "status"}:
+            raise ValueError("Expected sleep, wake, request, tick, or status")
         state = self.read()
         if action == "status":
             return state
@@ -110,6 +109,9 @@ class Controller:
                 state = {"id": "controller", "since": self.now, "owned_asgs": owned}
                 self.save(state, "sleeping")
         if action == "wake" and state["phase"] != "awake":
+            self.save(state, "waking")
+        # A frontend visit only wakes a sleeping cluster; it never cancels an operator sleep.
+        if action == "request" and state["phase"] == "asleep":
             self.save(state, "waking")
         if state["phase"] == "asleep" and action == "tick":
             if self.has_request(state):
@@ -133,7 +135,7 @@ class Controller:
                 )
             complete = True
             for key, node in nodes.items():
-                if not self.resize(key, node, groups[key], 0) or groups[key]["Instances"]:
+                if not self.resize(key, node, groups[key], 0, 0) or groups[key]["Instances"]:
                     complete = False
             if complete and state["phase"] != "asleep":
                 # Request detection starts here, not at the sleep command.
@@ -146,11 +148,20 @@ class Controller:
                 self.scaling.resume_processes(
                     AutoScalingGroupName=name, ScalingProcesses=["Launch"]
                 )
-            ready = self.resize("general", nodes["general"], groups["general"], 2)
+            ready = self.resize("general", nodes["general"], groups["general"], 2, 2)
+            # AI workers keep one replica, so an AI node follows every wake anyway. Start it with
+            # the general nodes instead of after them; minimum 0 leaves scale-down to the autoscaler.
+            # Best effort: an AI update conflict must not delay the general wake, so retry it on
+            # the next tick and stay waking until it is applied.
+            try:
+                prewarmed = self.resize("ai_worker", nodes["ai_worker"], groups["ai_worker"], 1, 0)
+            except Exception as error:  # noqa: BLE001 - retried next tick, logged for the alarm trail
+                print(json.dumps({"ai_prewarm_error": type(error).__name__, "detail": str(error)}))
+                prewarmed = False
             running = sum(
                 i["LifecycleState"] == "InService" for i in groups["general"]["Instances"]
             )
-            if ready and running >= 2:
+            if ready and prewarmed and running >= 2:
                 self.save(state, "awake")
         return state
 

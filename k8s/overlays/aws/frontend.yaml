@@ -25,6 +25,9 @@ spec:
     spec:
       serviceAccountName: fruition-frontend
       automountServiceAccountToken: false
+      # CoreDNS는 general 노드에 있어 절전 중에는 없다. 클러스터 내부 이름을 쓰지 않으므로
+      # VPC DNS로 AWS API 주소를 찾아 절전 중에도 기동 요청을 보낸다.
+      dnsPolicy: Default
       terminationGracePeriodSeconds: 30
       containers:
         - name: frontend
@@ -39,6 +42,15 @@ spec:
                 secretKeyRef:
                   name: fruition-frontend
                   key: ACCESS_CODE
+            # 로그인 전 노드 기동 요청(infra/terraform/request-wake.tf). 이벤트 발행·상태 조회만 허용된다.
+            - name: AWS_REGION
+              value: ap-northeast-2
+            - name: REQUEST_WAKE_EVENT_SOURCE
+              value: fruition.frontend
+            - name: REQUEST_WAKE_DETAIL_TYPE
+              value: wake-requested
+            - name: REQUEST_WAKE_STATE_TABLE
+              value: fruition-request-wake
           # Fargate는 requests에 관리 여유분 256Mi를 더해 크기를 고른다. 768Mi면 0.25 vCPU / 1GiB 조합이다.
           resources:
             requests:
@@ -83,12 +95,16 @@ spec:
           emptyDir:
             sizeLimit: 64Mi
 ---
-# AWS 권한(IRSA)이 없는 전용 계정. 다른 서비스 계정을 빌려 쓰지 않는다.
+# 전용 계정. 기동 요청 이벤트 발행과 절전 상태 조회만 하는 role(request_wake_enabled일 때 생성)을 쓴다.
+# 다른 서비스 계정을 빌려 쓰지 않는다.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: fruition-frontend
   namespace: fruition
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE_ME_ACCOUNT_ID:role/fruition-frontend-wake
+    eks.amazonaws.com/sts-regional-endpoints: 'true'
 automountServiceAccountToken: false
 ---
 apiVersion: v1

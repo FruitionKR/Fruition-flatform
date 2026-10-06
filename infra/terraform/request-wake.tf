@@ -136,6 +136,81 @@ resource "aws_cloudwatch_event_target" "request_wake" {
   depends_on = [aws_lambda_permission.request_wake]
 }
 
+# 화면(Fargate)이 로그인 전에 보내는 기동 요청. 1분 주기 5XX 감지보다 먼저 깨우고, 5XX 감지는 예비로 남는다.
+# 화면 권한으로는 고정 source/detail-type 이벤트만 보낼 수 있고 Lambda 입력은 이 규칙이 정한다.
+# 그래서 화면이 탈취돼도 sleep이나 wake(절전 취소)는 부를 수 없다.
+resource "aws_cloudwatch_event_rule" "request_wake_frontend" {
+  count = var.request_wake_enabled ? 1 : 0
+  name  = "${var.project}-request-wake-frontend"
+  event_pattern = jsonencode({
+    source        = ["fruition.frontend"]
+    "detail-type" = ["wake-requested"]
+  })
+}
+
+resource "aws_lambda_permission" "request_wake_frontend" {
+  count          = var.request_wake_enabled ? 1 : 0
+  statement_id   = "RequestWakeFrontendEventOnly"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.request_wake[0].function_name
+  principal      = "events.amazonaws.com"
+  source_arn     = aws_cloudwatch_event_rule.request_wake_frontend[0].arn
+  source_account = data.aws_caller_identity.budget.account_id
+}
+
+resource "aws_cloudwatch_event_target" "request_wake_frontend" {
+  count = var.request_wake_enabled ? 1 : 0
+  rule  = aws_cloudwatch_event_rule.request_wake_frontend[0].name
+  arn   = aws_lambda_function.request_wake[0].arn
+  input = jsonencode({ action = "request" })
+  retry_policy {
+    maximum_event_age_in_seconds = 60
+    maximum_retry_attempts       = 0
+  }
+  depends_on = [aws_lambda_permission.request_wake_frontend]
+}
+
+resource "aws_iam_policy" "frontend_wake" {
+  count = var.request_wake_enabled ? 1 : 0
+  name  = "${var.project}-frontend-wake"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow", Action = "events:PutEvents"
+        Resource = "arn:aws:events:${var.region}:${data.aws_caller_identity.budget.account_id}:event-bus/default"
+        Condition = {
+          StringEquals = {
+            "events:source"      = "fruition.frontend"
+            "events:detail-type" = "wake-requested"
+          }
+        }
+      },
+      {
+        # 준비 중 안내에 쓸 절전 상태 조회. 쓰기 권한은 없다.
+        Effect = "Allow", Action = "dynamodb:GetItem", Resource = aws_dynamodb_table.request_wake[0].arn
+      }
+    ]
+  })
+}
+
+# k8s/overlays/aws/frontend.yaml의 ServiceAccount annotation이 이 role 이름을 가리킨다.
+module "frontend_wake_irsa" {
+  count   = var.request_wake_enabled ? 1 : 0
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "5.60.0"
+
+  role_name        = "${var.project}-frontend-wake"
+  role_policy_arns = { wake = aws_iam_policy.frontend_wake[0].arn }
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["fruition:fruition-frontend"]
+    }
+  }
+}
+
 resource "aws_lambda_function_event_invoke_config" "request_wake" {
   count                        = var.request_wake_enabled ? 1 : 0
   function_name                = aws_lambda_function.request_wake[0].function_name

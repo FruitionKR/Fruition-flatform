@@ -91,8 +91,11 @@ class BoundaryTests(unittest.TestCase):
         accounts={d["metadata"]["name"]:d for d in self.docs if d["kind"]=="ServiceAccount"}
         for service in ("document","pipeline"):
             self.assertEqual(CONFIG[f"{service}_storage_role_arn"],accounts[f"fruition-{service}"]["metadata"]["annotations"]["eks.amazonaws.com/role-arn"])
+        # 화면은 기동 요청 이벤트 발행·상태 조회만 하는 전용 role을 쓴다.
+        self.assertEqual(f"arn:aws:iam::{CONFIG['account_id']}:role/fruition-frontend-wake",
+                         accounts["fruition-frontend"]["metadata"]["annotations"]["eks.amazonaws.com/role-arn"])
         for name,account in accounts.items():
-            if name not in {"fruition-document","fruition-pipeline"}:self.assertNotIn("eks.amazonaws.com/role-arn",account["metadata"].get("annotations",{}))
+            if name not in {"fruition-document","fruition-pipeline","fruition-frontend"}:self.assertNotIn("eks.amazonaws.com/role-arn",account["metadata"].get("annotations",{}))
         secrets=[d for d in self.docs if d["kind"]=="ExternalSecret"]
         self.assertNotIn("S3_ACCESS_KEY",json.dumps(secrets));self.assertNotIn("S3_SECRET_KEY",json.dumps(secrets))
         self.assertNotIn("SPRING_MAIL_PORT",json.dumps(secrets))

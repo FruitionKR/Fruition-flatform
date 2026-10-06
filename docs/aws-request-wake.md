@@ -1,10 +1,43 @@
 # 요청으로 EKS 노드 깨우기
 
-`request_wake_enabled = true`이면 EKS 밖의 Lambda가 1분마다 절전 상태를 확인합니다. 노드가 모두 종료된 `asleep` 상태에서 기존 ALB에 HTTPS 요청이 들어와 `HTTPCode_ELB_5XX_Count`가 발생하면 일반 노드의 최소·희망 수를 2대로 복구합니다. AI 노드의 Launch 중단도 해제하므로 KEDA와 Cluster Autoscaler가 작업에 맞춰 다시 확장할 수 있습니다. ALB의 라우팅·도메인·WAF는 그대로 사용합니다.
+`request_wake_enabled = true`이면 EKS 밖의 Lambda가 1분마다 절전 상태를 확인합니다. 노드가 모두 종료된 `asleep` 상태에서 기존 ALB에 HTTPS 요청이 들어와 `HTTPCode_ELB_5XX_Count`가 발생하면 일반 노드의 최소·희망 수를 2대로 복구합니다. 같은 때에 AI 노드 그룹의 희망 수를 1대로 올립니다(최소 0 유지). AI 작업자는 최소 1개라 깨어나면 어차피 AI 노드가 필요하므로, 일반 노드가 뜬 뒤 Cluster Autoscaler를 기다리지 않고 함께 띄웁니다. 두 그룹의 Launch 중단도 해제하므로 이후 확장·축소는 KEDA와 Cluster Autoscaler가 맡습니다. ALB의 라우팅·도메인·WAF는 그대로 사용합니다.
 
 **첫 요청은 보관하거나 재실행하지 않습니다.** ALB가 502·503·504 등을 반환할 수 있으며 지표 전달과 노드·Kafka·API 기동에 수분이 걸립니다. 기동 후 요청을 다시 보내야 합니다. 업로드·결제·문서 수정 등의 요청을 무조건 자동 재시도하면 안 됩니다. 이 변경에는 로딩 화면이나 프런트엔드 재시도가 포함되지 않습니다.
 
-프런트엔드는 노드 그룹 밖 EKS Fargate에서 실행하므로 절전 중에도 화면 주소의 화면은 계속 응답합니다([aws-frontend-hosting.md](aws-frontend-hosting.md)). 화면 요청 자체는 정상 응답이라 깨우지 않으며, 화면이 부르는 `/api/...` 요청이 ALB 503을 받으면서 기동이 시작됩니다. 접근 코드가 없어 WAF `frontend-access-code`에 막힌 요청은 깨우지 않습니다. 절전 중 한계는 다음과 같습니다.
+프런트엔드는 노드 그룹 밖 EKS Fargate에서 실행하므로 절전 중에도 화면 주소의 화면은 계속 응답합니다([aws-frontend-hosting.md](aws-frontend-hosting.md)). 화면 요청 자체는 정상 응답이라 5XX 감지로는 깨우지 않으며, 화면이 부르는 `/api/...` 요청이 ALB 503을 받으면서 기동이 시작됩니다. 접근 코드가 없어 WAF `frontend-access-code`에 막힌 요청은 깨우지 않습니다.
+
+## 화면의 기동 요청
+
+5XX 감지는 지표 도착과 1분 주기 때문에 늦고, 사용자가 먼저 오류를 봅니다. 그래서 화면이 로그인 전에 직접 기동을 요청할 수 있게 합니다. 5XX 감지는 예비 경로로 그대로 둡니다.
+
+- 화면 서버는 기본 EventBridge 버스에 `source=fruition.frontend`, `detail-type=wake-requested` 이벤트를 보냅니다. 규칙이 Lambda를 `{"action":"request"}`로 부릅니다.
+- `request`는 `asleep`일 때만 기동을 시작합니다. 깨어 있거나 운영자가 재우는 중(`sleeping`)이면 아무것도 바꾸지 않습니다.
+- 화면 role(`fruition-frontend-wake`)은 위 고정 이벤트 발행과 상태 테이블 `GetItem`만 허용합니다. Lambda를 직접 부를 수 없어 `sleep`·`wake`를 보낼 수 없습니다.
+- 준비 중 안내는 상태 테이블의 `controller` 항목 `phase`(`asleep`·`waking`·`awake`)로 판단합니다. `awake`도 앱의 정상 응답까지는 보장하지 않으므로 화면은 API health를 함께 확인합니다.
+- 화면 Pod는 `dnsPolicy: Default`로 VPC DNS를 씁니다. CoreDNS가 general 노드에 있어 절전 중에는 없기 때문입니다.
+- 이벤트는 누구나 화면에 들어오기만 해도 보낼 수 있으면 봇이 비용을 만들 수 있습니다. 화면은 접근 코드 통과 뒤에만 보내야 합니다. 화면 쪽 구현은 frontend 저장소 이슈에서 관리합니다.
+- 기능을 끄면(`request_wake_enabled = false`) role이 없어 화면의 이벤트 발행이 실패합니다. 화면은 실패를 무시하고 정상 동작해야 합니다.
+
+### 실제 Fargate에서 확인
+
+플랫폼 배포 뒤, 노드가 깨어 있을 때 runner(세션 관리자)에서 실행합니다. 절전 중에는 ALB controller webhook 때문에 Pod를 새로 만들 수 없습니다.
+
+```bash
+bash scripts/aws-frontend-wake-check.sh          # DNS·IRSA·상태 조회·권한 경계
+bash scripts/aws-frontend-wake-check.sh --send   # 기동 이벤트까지 실제 발행
+```
+
+화면과 같은 조건(Fargate, `fruition-frontend` 계정, `dnsPolicy: Default`)의 일회성 Pod가 아래를 확인하고 지워집니다. Ready가 되지 않게 만들어 화면 Service로 사용자 요청이 가지 않습니다.
+
+- `resolv.conf`의 nameserver가 클러스터 DNS(`kube-dns` Service IP)가 아니라 VPC DNS입니다. 그래서 CoreDNS가 없는 절전 중에도 같은 조회가 됩니다.
+- `sts get-caller-identity`가 `fruition-frontend-wake` role을 돌려줍니다.
+- 상태 테이블에서 `phase`를 읽습니다.
+- `fruition.frontend`가 아닌 source의 이벤트 발행은 거부됩니다.
+- `--send`일 때 이벤트가 발행되고(`FailedEntryCount` 0), `/aws/lambda/fruition-request-wake` 로그에 `"action": "request"` 실행이 남습니다. 깨어 있으면 상태는 바뀌지 않습니다.
+
+절전 상태에서 화면이 실제로 깨우는지는 화면 구현 뒤 확인합니다. 절전(`asleep`) → 접근 코드 통과 후 로그인 화면 진입 → `status`가 `waking`을 거쳐 `awake`로 바뀌는지 봅니다.
+
+## 절전 중 한계
 
 - ALB Controller webhook(`failurePolicy=Fail`)과 CoreDNS가 일반 노드에서 돌기 때문에, 절전 중에는 frontend Pod를 새로 만들거나 재배포할 수 없습니다. 이미 떠 있는 frontend Pod만 계속 응답합니다. frontend 배포는 기동 후에 합니다.
 - frontend는 클러스터 내부 호출을 하지 않으므로 CoreDNS가 없어도 응답에는 영향이 없습니다. NetworkPolicy와 DaemonSet은 Fargate Pod에 적용되지 않습니다.
@@ -15,7 +48,7 @@
 
 노드가 0대이면 Cluster Autoscaler 자체도 멈추므로 외부 Lambda가 기동을 담당합니다. 절전 도중 기존 Autoscaler가 노드를 다시 만들지 못하도록 두 노드 그룹의 ASG `Launch` 프로세스만 잠시 중단합니다. 다른 ASG 프로세스는 변경하지 않습니다. 기동 시 중단을 해제합니다. 기존에 운영자가 Launch를 중단해 둔 그룹은 절전을 거부합니다.
 
-DynamoDB에 `sleeping → asleep → waking → awake` 상태를 기록하고 Lambda 동시 실행을 1개로 제한합니다. 요청 감지는 `asleep`이 된 시각부터 시작합니다. `sleeping` 동안 Pod 축출로 생기는 502·504는 감지 대상이 아니므로 모니터링·봇 요청이 있어도 절전이 완료됩니다. 노드 그룹 축소는 PDB와 무관하게 노드당 최대 15분 뒤 강제 종료됩니다. EKS의 노드 그룹 `desiredSize`는 ASG 값을 주기적으로만 동기화하므로, 완료 판정과 기동 용량은 ASG의 실제 `DesiredCapacity`를 함께 봅니다. AWS API 호출 중 일부가 실패해도 다음 1분 실행에서 재개합니다. `awake`는 일반 노드 2대 이상이 EC2 `InService`이고 EKS 노드 그룹이 ACTIVE라는 뜻이며, 앱의 정상 응답까지 보장하지 않습니다.
+DynamoDB에 `sleeping → asleep → waking → awake` 상태를 기록하고 Lambda 동시 실행을 1개로 제한합니다. 요청 감지는 `asleep`이 된 시각부터 시작합니다. `sleeping` 동안 Pod 축출로 생기는 502·504는 감지 대상이 아니므로 모니터링·봇 요청이 있어도 절전이 완료됩니다. 노드 그룹 축소는 PDB와 무관하게 노드당 최대 15분 뒤 강제 종료됩니다. EKS의 노드 그룹 `desiredSize`는 ASG 값을 주기적으로만 동기화하므로, 완료 판정과 기동 용량은 ASG의 실제 `DesiredCapacity`를 함께 봅니다. AWS API 호출 중 일부가 실패해도 다음 1분 실행에서 재개합니다. `awake`는 일반 노드 2대 이상이 EC2 `InService`이고 EKS 노드 그룹이 ACTIVE이며 AI 노드 그룹의 희망 수 1대가 반영됐다는 뜻입니다. 앱의 정상 응답까지 보장하지 않습니다. AI 노드 그룹 갱신이 충돌하면 일반 노드 기동은 계속하고, AI 쪽은 다음 1분 실행에서 다시 시도합니다.
 
 ## 설치
 
@@ -75,6 +108,6 @@ cat /tmp/fruition-wake.json
 
 ## 비용
 
-절전 중 워커 EC2 실행 요금과 해당 컨테이너 관측량이 줄어듭니다. EKS 관리비, ALB, NAT, EBS, RDS, Redis, 배포 runner 비용 등은 계속 발생합니다. 추가 리소스는 Lambda의 분당 짧은 실행, DynamoDB의 작은 상태 항목, EventBridge 예약 실행, CloudWatch API 조회·로그·경보입니다. 클러스터나 DB를 없애는 기능이 아닙니다.
+절전 중 워커 EC2 실행 요금과 해당 컨테이너 관측량이 줄어듭니다. EKS 관리비, ALB, NAT, EBS, RDS, Redis, 배포 runner 비용 등은 계속 발생합니다. 추가 리소스는 Lambda의 분당 짧은 실행, DynamoDB의 작은 상태 항목, EventBridge 예약 실행·화면 기동 이벤트, CloudWatch API 조회·로그·경보입니다. 기동 때 AI 노드를 일반 노드와 함께 띄우지만, AI 작업자가 최소 1개라 이전에도 깨어나면 AI 노드가 떴으므로 비용은 같고 시점만 앞당겨집니다. 클러스터나 DB를 없애는 기능이 아닙니다.
 
 근거: [ALB 지표](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-cloudwatch-metrics.html), [EKS scaling config](https://docs.aws.amazon.com/eks/latest/APIReference/API_NodegroupScalingConfig.html), [ASG 프로세스 중단](https://docs.aws.amazon.com/autoscaling/ec2/userguide/as-suspend-resume-processes.html).
