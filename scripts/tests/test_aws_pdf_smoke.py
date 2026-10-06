@@ -3,7 +3,7 @@ import re
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from pathlib import Path
 
@@ -78,6 +78,52 @@ class PdfSmokeTests(unittest.TestCase):
         self.assertTrue(all(url.endswith(created) for _, url, _ in calls))
         self.assertEqual(calls[1][2], {'base_version': 7})
 
+
+    PARENT = 'doc_' + 'b' * 32
+
+    def _run_conversion(self, documents):
+        bucket = 'example-storage'
+        probe = smoke.Probe({'domain': 'example.test', 's3_bucket': bucket}, {'AWS_SMOKE_WORKSPACE_ID': 'ws_' + '0' * 32})
+        probe.login = lambda: None
+        signed = f'https://{bucket}.s3.ap-northeast-2.amazonaws.com/object?signature=secret'
+        responses = {'/uploads': {'ticket': 't', 'part_count': 2, 'part_size': 1024},
+                     '/uploads/parts': {'parts': [{'url': signed}]},
+                     '/uploads/complete': {'id': 'doc_' + 'a' * 32},
+                     '/original-url': {'url': signed},
+                     '/convert-markdown': {'id': self.PARENT},
+                     '': {'documents': documents}}
+        def api(method, url, payload=None, **kwargs):
+            path = url[len(probe.base):]
+            return next(body for suffix, body in responses.items() if path.endswith(suffix))
+        probe.api = api
+        def storage(req, timeout):
+            response = Mock(status=200 if req.get_method() == 'PUT' else 206)
+            response.read.return_value = b'%PDF-'
+            context = Mock()
+            context.__enter__ = Mock(return_value=response)
+            context.__exit__ = Mock(return_value=False)
+            return context
+        probe.opener = Mock()
+        probe.opener.open.side_effect = storage
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'probe.pdf'
+            path.write_bytes(b'%PDF-' + b'0' * 2048)
+            return probe, probe.run(path, timeout=1)
+
+    def test_small_pdf_conversion_passes_as_single_document_after_ai(self):
+        _, report = self._run_conversion([{'id': self.PARENT, 'status': 'completed', 'pipeline_run_id': 'run_1'}])
+        self.assertEqual(report['converted_documents'], 1)
+        self.assertEqual(report['ai_processing'], 'completed')
+
+    def test_small_pdf_conversion_rejects_split_documents(self):
+        part = 'doc_' + 'c' * 32
+        with self.assertRaisesRegex(ValueError, 'split documents'):
+            self._run_conversion([{'id': self.PARENT, 'status': 'completed', 'pipeline_run_id': 'run_1'},
+                                  {'id': part, 'source_document_id': self.PARENT}])
+
+    def test_conversion_waits_until_ai_replaces_convert_run(self):
+        with self.assertRaisesRegex(ValueError, 'timed out'), patch.object(smoke.time, 'sleep'):
+            self._run_conversion([{'id': self.PARENT, 'status': 'completed', 'pipeline_run_id': 'convert:q1'}])
 
 if __name__ == '__main__':
     unittest.main()
