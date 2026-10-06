@@ -22,10 +22,11 @@ JSON은 선택적인 charset 파라미터를 허용한다. 잘못된 ID·다른 
 ## 평가 순서
 
 1. 긴급 차단이 활성화됐으면 먼저 차단한다.
-2. 정확한 요청 조건에 일치하면 Count로 `fruition:document-content` 라벨만 붙인다.
+2. 정확한 요청 조건에 일치하면 Count로 `fruition:document-content` 라벨만 붙인다. 이어서 `not-public-paths`가 디코딩한 `/internal`·`/swagger-ui`·`/v3/api-docs` 경로를 404로 차단한다.
 3. 기존 관리형 규칙 4개를 평가한다. CommonRuleSet의 `SizeRestrictions_BODY`, `GenericLFI_BODY`, `CrossSiteScripting_BODY`와 SQLiRuleSet의 `SQLi_BODY`만 Count로 전환한다.
 4. 위 네 규칙의 라벨이 있지만 문서 요청 라벨이 없으면 `document-content-body-guard`가 차단한다. 같은 WebACL의 라벨은 `fruition:document-content`라는 로컬 이름으로 참조한다.
-5. 기존 IP별·전체 요청량 제한을 평가한다.
+5. `app_domain`이 설정되고 접근 코드가 있으면 `frontend-access-code`가 해당 호스트의 `/api/` 요청 중 코드 없이 열리는 경로가 아니고 `fruition_access` 쿠키 해시가 맞지 않는 요청을 403으로 차단한다.
+6. IP별 제한 `per-source-ip`(5분 3,000건, `/_next/static/` 제외)와 전체 제한 `all-api-requests`(5분 6,000건, `/api/`만 계산)를 평가한다. 초과 시 429다. 값은 `cost-guards.tf`의 `waf_requests_per_ip_5m`·`waf_requests_total_5m` 기본값이다.
 
 종료 동작인 Allow를 추가하지 않는다. URI·쿼리·쿠키·헤더 검사, IP 평판, KnownBadInputs와 기타 본문 규칙, 서버 인증·인가 및 파일 검증은 계속 적용된다. 예외는 요청 전체의 모든 공격 검사를 끄는 기능이 아니다. 검색 API의 쿼리 검사도 유지한다.
 

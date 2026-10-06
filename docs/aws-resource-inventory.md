@@ -1,4 +1,4 @@
-# 우리 서비스를 만들 준비물 185개
+# 우리 서비스를 만들 준비물 185개 (2026-09-16 plan 기준)
 
 작은 가게를 만든다고 생각해 보세요. 가게만 있으면 끝일까요? 문, 열쇠, 보관함, 안내판도 필요합니다. 우리 서비스도 비슷합니다.
 
@@ -6,16 +6,27 @@
 
 이 목록은 2026-09-16의 `feedback-observability.tfplan`을 보고 만들었습니다. 새로 만들 항목 185개이고, 바꾸거나 지울 항목은 0개입니다. **이미 모두 만들어졌다는 뜻은 아닙니다.** 비밀번호와 API 키의 실제 값은 이 글에 적지 않았습니다.
 
-이후 보안·유지보수 설정과 배포 실패 알림 IAM 정책이 추가됐습니다. 이 표는 당시 plan의 기록이며, 현재 생성 개수는 새 plan으로 확인해야 합니다. [현재 유지보수 설정](aws-maintenance.md)
+**아래 1~185번 표는 그 plan 당시의 기록입니다.** 2026-10-06에 읽기 전용 `terraform state list`로 확인한 현재 Terraform 관리 항목은 `data.*`를 빼고 **226개**입니다. 이 개수는 `feedback.tfvars` 값(요청 깨우기 켜기, ALB 이름표 입력, 업로드 CORS 주소)에 따라 달라집니다. 정확한 다음 변경은 새 plan으로 확인합니다. [현재 유지보수 설정](aws-maintenance.md), [화면 운영 안내](aws-frontend-hosting.md)
 
-화면을 Vercel에서 EKS Fargate로 옮기면서 아래 준비물도 더해졌습니다. 번호 목록에는 아직 없으므로 새 plan에서 확인합니다. [화면 운영 안내](aws-frontend-hosting.md)
+plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현재 state에 있습니다.
 
 | 쉬운 설명 | 설정에서 찾을 이름 (운영자용) |
 |---|---|
-| 노드 그룹 밖에서 화면 일꾼만 돌리는 Fargate 자리와 그 출입증이에요. `fruition` 구역의 `app=frontend` 일꾼만 들어가요. | `module.eks.module.fargate_profile["frontend"]` |
+| 노드 그룹 밖에서 화면 일꾼만 돌리는 Fargate 자리와 그 출입증·허가 규칙 연결이에요. `fruition` 구역의 `app=frontend` 일꾼만 들어가요. | `module.eks.module.fargate_profile["frontend"]` (`aws_eks_fargate_profile.this[0]`, `aws_iam_role.this[0]`, `aws_iam_role_policy_attachment` 3개) |
 | 화면 일꾼의 일기를 기존 앱 일기장(`application` 로그 그룹)에만 쓸 수 있게 해요. | `aws_iam_policy.fargate_logs` |
 | 화면 프로그램 상자 보관함과 최근 10개 보관 규칙이에요. | `aws_ecr_repository.services["frontend"]`, `aws_ecr_lifecycle_policy.services["frontend"]` |
-| 문지기에 화면 주소 API의 접근 코드 확인 규칙이 더해졌어요. 새 준비물이 아니라 185번 설정이 바뀌는 것이에요. | `aws_wafv2_web_acl.cost_guard` (`frontend-access-code`) |
+| 마을 안 통신 기록(Flow Logs)을 14일 남겨요. 사고를 조사할 때 써요. | `module.vpc.aws_flow_log.this[0]`, `module.vpc.aws_cloudwatch_log_group.flow_log[0]`, `module.vpc.aws_iam_role.vpc_flow_log_cloudwatch[0]`, `module.vpc.aws_iam_policy.vpc_flow_log_cloudwatch[0]`, `module.vpc.aws_iam_role_policy_attachment.vpc_flow_log_cloudwatch[0]` |
+| API 일꾼 수를 CPU로 조절(HPA)하려면 필요한 사용량 도구와, 관리실이 그 도구에 닿는 문(10251)이에요. | `aws_eks_addon.core["metrics-server"]`, `module.eks.aws_security_group_rule.node["metrics_server"]` |
+| runner에서 운영자가 일회성 조회 일꾼을 띄울 수 있게 등록하고, EKS 위치를 확인하게 해요. | `module.eks.aws_eks_access_entry.this["runner_operations"]`, `aws_iam_role_policy.runner_host_eks_describe` |
+| main 브랜치에서만 프로그램 상자를 올리는 GitHub 출입증과 규칙이에요. | `aws_iam_role.github_image_publish`, `aws_iam_role_policy.github_image_publish` |
+| 배포가 실패하면 운영 소식 길로 알릴 수 있게 해요. | `aws_iam_role_policy.github_deploy_alerts` |
+| 파일 보관함 전용 잠금 열쇠, 암호화 설정, 암호화 안 된 연결 거절, 화면 업로드용 CORS예요. | `aws_kms_key.storage`, `aws_kms_alias.storage`, `aws_s3_bucket_server_side_encryption_configuration.storage`, `aws_s3_bucket_policy.storage_tls`, `aws_s3_bucket_cors_configuration.document_upload[0]` |
+| 앱 비밀정보 보관함 전용 잠금 열쇠예요. | `aws_kms_key.secrets`, `aws_kms_alias.secrets` |
+| DB에 암호화 연결(TLS)만 받게 하는 설정이에요. | `aws_db_parameter_group.postgres16` (`rds.force_ssl=1`) |
+| 문지기가 본 요청 일기를 14일 남겨요. 비밀 헤더와 query는 가려요. | `aws_cloudwatch_log_group.waf`, `aws_wafv2_web_acl_logging_configuration.cost_guard` |
+| ALB 이름표를 넣은 뒤 생긴 입구 경보 3개예요. | `aws_cloudwatch_metric_alarm.operations["alb_5xx"]`, `["alb_latency"]`, `["alb_requests"]` |
+| 절전 중 요청이 오면 컴퓨터를 다시 깨우는 장치예요(1분마다 확인). | `aws_dynamodb_table.request_wake[0]`, `aws_iam_role.request_wake[0]`, `aws_iam_role_policy.request_wake[0]`, `aws_cloudwatch_log_group.request_wake[0]`, `aws_lambda_function.request_wake[0]`, `aws_lambda_function_event_invoke_config.request_wake[0]`, `aws_lambda_permission.request_wake[0]`, `aws_cloudwatch_event_rule.request_wake[0]`, `aws_cloudwatch_event_target.request_wake[0]`, `aws_cloudwatch_metric_alarm.request_wake_errors[0]` |
+| 문지기에 화면 주소 API의 접근 코드 확인 규칙과 AWS 관리 규칙이 더해졌어요. 새 준비물이 아니라 185번 설정이 바뀌는 것이에요. | `aws_wafv2_web_acl.cost_guard` (`frontend-access-code`, AWS 관리 규칙 4종) |
 
 ## 어려운 이름은 이렇게 읽어요
 
@@ -38,6 +49,8 @@
 | WAF | 너무 많은 요청이 들어오면 막는 문지기 |
 
 ## 분야별 개수
+
+2026-09-16 plan 기준 개수입니다. 위에서 더해진 준비물은 들어 있지 않습니다.
 
 | 분야 | 개수 |
 |---|---:|
@@ -141,18 +154,18 @@
 | 58 | AI 컴퓨터에 들어갈 수 있는 일꾼 조건을 미리 알려줘요. | `aws_autoscaling_group_tag.discovery["ai_worker/k8s.io/cluster-autoscaler/node-template/taint/fruition.io/ai-worker"]` | AI node group scale-from-zero용 AI 노드 taint 정보 |
 | 59 | 일반 컴퓨터 묶음을 자동 확장 담당자가 찾게 표시해요. | `aws_autoscaling_group_tag.discovery["general/k8s.io/cluster-autoscaler/enabled"]` | 일반 node group Autoscaler 검색 활성화 태그 |
 | 60 | 일반 컴퓨터가 우리 서비스 소속임을 표시해요. | `aws_autoscaling_group_tag.discovery["general/k8s.io/cluster-autoscaler/fruition-eks"]` | 일반 node group 대상 클러스터 소유권 태그 |
-| 61 | AI 컴퓨터 묶음이에요. 처음 0대, 많아도 2대예요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_eks_node_group.this[0]` | CPU Spot m5/m6i.xlarge, 초기 0·최대 2대 |
+| 61 | AI 컴퓨터 묶음이에요. 처음 0대, 많아도 2대예요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_eks_node_group.this[0]` | CPU Spot m5/m5d/m6i/m7i.xlarge, 초기 0·최대 2대 |
 | 62 | AI 컴퓨터가 사용할 출입증이에요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role.this[0]` | AI 노드의 AWS 실행 역할 |
 | 63 | 설치할 프로그램 상자를 가져올 수 있게 해요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role_policy_attachment.this["AmazonEC2ContainerRegistryReadOnly"]` | ECR 이미지 읽기 |
 | 64 | 컴퓨터가 EKS에서 일할 기본 권한을 줘요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role_policy_attachment.this["AmazonEKSWorkerNodePolicy"]` | EKS worker 기본 API 권한 |
 | 65 | 일꾼의 통신 길을 만들 권한을 줘요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role_policy_attachment.this["AmazonEKS_CNI_Policy"]` | VPC CNI 네트워크 권한 |
-| 66 | 컴퓨터를 어떻게 켤지 적은 설명서예요. 안전한 신분 확인(IMDSv2)을 써요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_launch_template.this[0]` | AI 노드 EC2 실행 설정(IMDSv2) |
-| 67 | 일반 컴퓨터 묶음이에요. 최소 2대, 필요하면 4대까지 늘어나요. | `module.eks.module.eks_managed_node_group["general"].aws_eks_node_group.this[0]` | t3.large On-Demand, 최소/초기 2·최대 4대 |
+| 66 | 컴퓨터를 어떻게 켤지 적은 설명서예요. 안전한 신분 확인(IMDSv2)을 써요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_launch_template.this[0]` | AI 노드 EC2 실행 설정(IMDSv2, 루트 gp3 30GiB 암호화) |
+| 67 | 일반 컴퓨터 묶음이에요. 최소 2대, 평소 4대까지 쓰고, 교체 중 자리가 모자라면 잠깐 5대까지 늘어나요. | `module.eks.module.eks_managed_node_group["general"].aws_eks_node_group.this[0]` | t3.large On-Demand, 최소/초기 2·최대 5대 (5번째는 Pending Pod가 있을 때만 Cluster Autoscaler가 추가) |
 | 68 | 일반 컴퓨터가 사용할 출입증이에요. | `module.eks.module.eks_managed_node_group["general"].aws_iam_role.this[0]` | 일반 노드의 AWS 실행 역할 |
 | 69 | 설치할 프로그램 상자를 가져올 수 있게 해요. | `module.eks.module.eks_managed_node_group["general"].aws_iam_role_policy_attachment.this["AmazonEC2ContainerRegistryReadOnly"]` | ECR 이미지 읽기 |
 | 70 | 컴퓨터가 EKS에서 일할 기본 권한을 줘요. | `module.eks.module.eks_managed_node_group["general"].aws_iam_role_policy_attachment.this["AmazonEKSWorkerNodePolicy"]` | EKS worker 기본 API 권한 |
 | 71 | 일꾼의 통신 길을 만들 권한을 줘요. | `module.eks.module.eks_managed_node_group["general"].aws_iam_role_policy_attachment.this["AmazonEKS_CNI_Policy"]` | VPC CNI 네트워크 권한 |
-| 72 | 컴퓨터를 어떻게 켤지 적은 설명서예요. 안전한 신분 확인(IMDSv2)을 써요. 추가 CPU 요금 대신 속도를 제한해요. | `module.eks.module.eks_managed_node_group["general"].aws_launch_template.this[0]` | 일반 노드 EC2 실행 설정(IMDSv2, Standard CPU credit) |
+| 72 | 컴퓨터를 어떻게 켤지 적은 설명서예요. 안전한 신분 확인(IMDSv2)을 써요. 추가 CPU 요금 대신 속도를 제한해요. | `module.eks.module.eks_managed_node_group["general"].aws_launch_template.this[0]` | 일반 노드 EC2 실행 설정(IMDSv2, Standard CPU credit, 루트 gp3 30GiB 암호화) |
 | 73 | 컴퓨터를 켜기 전에 내부 주소 설정을 검사해요. 새 서버는 만들지 않아요. | `module.eks.module.eks_managed_node_group["ai_worker"].module.user_data.null_resource.validate_cluster_service_cidr` | 부팅 설정의 cluster service CIDR 검증; AWS 서버를 만들지 않음 |
 | 74 | 컴퓨터를 켜기 전에 내부 주소 설정을 검사해요. 새 서버는 만들지 않아요. | `module.eks.module.eks_managed_node_group["general"].module.user_data.null_resource.validate_cluster_service_cidr` | 부팅 설정의 cluster service CIDR 검증; AWS 서버를 만들지 않음 |
 
@@ -181,8 +194,8 @@
 
 | 번호 | 쉬운 설명 | 설정에서 찾을 이름 (운영자용) | 정확한 설정 (운영자용) |
 |---:|---|---|---|
-| 91 | 로그인 쪽 중요한 기록을 보관할 DB예요. | `aws_db_instance.access` | Access 전용 PostgreSQL 16, db.t4g.small, 암호화 gp3 30GB, private Single-AZ, 백업 7일 |
-| 92 | 문서와 AI 쪽 중요한 기록을 보관할 DB예요. | `aws_db_instance.core` | Core·AI DB용 PostgreSQL 16, db.t4g.small, 암호화 gp3 30GB, private Single-AZ, 백업 7일 |
+| 91 | 로그인 쪽 중요한 기록을 보관할 DB예요. | `aws_db_instance.access` | Access 전용 PostgreSQL 16, db.t4g.small, 암호화 gp3 30GB, private Multi-AZ, TLS 강제, 백업 7일 |
+| 92 | 문서와 AI 쪽 중요한 기록을 보관할 DB예요. | `aws_db_instance.core` | Core·AI DB용 PostgreSQL 16, db.t4g.small, 암호화 gp3 30GB, private Single-AZ, TLS 강제, 백업 7일 |
 | 93 | DB를 둘 안쪽 구역을 정해요. | `aws_db_subnet_group.main` | DB 배치용 private subnet 집합 |
 | 94 | EKS 컴퓨터만 DB의 정해진 문으로 오게 해요. | `aws_security_group.rds` | EKS 노드에서 PostgreSQL 5432 접근만 허용 |
 
@@ -190,7 +203,7 @@
 
 | 번호 | 쉬운 설명 | 설정에서 찾을 이름 (운영자용) | 정확한 설정 (운영자용) |
 |---:|---|---|---|
-| 95 | 자주 쓰는 정보를 빨리 찾는 Redis 메모장이에요. | `aws_elasticache_replication_group.main` | Redis 7.1 cache.t4g.micro 1대, TLS·저장 암호화 |
+| 95 | 자주 쓰는 정보를 빨리 찾는 Redis 메모장이에요. 예비 메모장이 하나 더 있어요. | `aws_elasticache_replication_group.main` | Redis 7.1 cache.t4g.micro 2대(primary+replica), 자동 장애 조치·Multi-AZ, TLS·저장 암호화 |
 | 96 | Redis를 둘 안쪽 구역을 정해요. | `aws_elasticache_subnet_group.main` | Redis 배치용 private subnet 집합 |
 | 97 | 기본 Redis 계정은 쓰지 못하게 해요. | `aws_elasticache_user.disabled_default` | default 사용자 비활성화 |
 | 98 | access 서비스가 Redis에서 쓸 자기 계정이에요. | `aws_elasticache_user.service["access"]` | access 서비스 전용 Redis ACL 사용자 |
@@ -213,7 +226,7 @@
 | 110 | pipeline의 프로그램 상자 보관함이에요. 같은 이름표로 덮어쓰지 못하고 넣을 때 검사해요. | `aws_ecr_repository.services["pipeline"]` | pipeline 이미지 저장소, immutable tag·push scan |
 | 111 | document 서비스가 S3의 정해진 이름 범위에서 읽고 쓰고 지우게 해요. | `aws_iam_policy.storage["document"]` | document 서비스별 S3 prefix 읽기·쓰기·삭제 권한 |
 | 112 | pipeline 서비스가 S3의 정해진 이름 범위에서 읽고 쓰고 지우게 해요. | `aws_iam_policy.storage["pipeline"]` | pipeline 서비스별 S3 prefix 읽기·쓰기·삭제 권한 |
-| 113 | 문서와 AI 파일을 넣을 보관함이에요. | `aws_s3_bucket.storage` | 문서·AI 파일 저장용 버킷 |
+| 113 | 문서와 AI 파일을 넣을 보관함이에요. | `aws_s3_bucket.storage` | 문서·AI 파일 저장용 버킷, 전용 KMS 키(SSE-KMS)로 암호화 |
 | 114 | 임시 파일과 끝내지 못한 업로드를 7일 기준으로 정리해요. 예전 파일은 남을 수 있어요. | `aws_s3_bucket_lifecycle_configuration.storage` | tmp/ 현재 버전 7일 만료·미완료 multipart 7일 정리 |
 | 115 | 파일 보관함을 누구나 열지 못하게 해요. | `aws_s3_bucket_public_access_block.storage` | 앱 버킷 public access 모두 차단 |
 | 116 | 파일을 고쳐도 예전 모습을 남겨요. | `aws_s3_bucket_versioning.storage` | 파일 이전 버전 보존 활성화 |
@@ -222,7 +235,7 @@
 
 | 번호 | 쉬운 설명 | 설정에서 찾을 이름 (운영자용) | 정확한 설정 (운영자용) |
 |---:|---|---|---|
-| 117 | 앱 비밀정보를 넣을 잠긴 보관함을 만들어요. | `aws_secretsmanager_secret.app` | 앱 Secret 컨테이너 |
+| 117 | 앱 비밀정보를 넣을 잠긴 보관함을 만들어요. | `aws_secretsmanager_secret.app` | 앱 Secret 컨테이너, 전용 KMS 키로 암호화 |
 | 118 | Discord 비밀 주소를 넣을 빈 보관함이에요. 주소는 나중에 넣어요. | `aws_secretsmanager_secret.budget_discord` | Discord webhook용 빈 Secret; URL 별도 입력 |
 | 119 | 앱의 처음 비밀값들을 보관해요. 나중에 운영자가 고친 값은 덮어쓰지 않아요. | `aws_secretsmanager_secret_version.app` | 앱 초기 DB·Redis·SMTP·인증값 JSON 저장, 이후 Terraform 덮어쓰기 방지 |
 | 120 | 다른 파일 보관함과 이름이 겹치지 않게 꼬리표를 만들어요. | `random_id.bucket` | 버킷 이름 충돌 방지 suffix 생성 |
@@ -310,7 +323,7 @@
 
 | 번호 | 쉬운 설명 | 설정에서 찾을 이름 (운영자용) | 정확한 설정 (운영자용) |
 |---:|---|---|---|
-| 185 | 너무 많은 요청을 거절하는 문지기예요. 긴급 문닫기는 처음에는 꺼져 있어요. | `aws_wafv2_web_acl.cost_guard` | 서울 regional WAF: IP별 3000/5분·전체 `/api/` 6000/5분 초과 429, 수동 긴급 차단 기본 꺼짐 |
+| 185 | 너무 많은 요청을 거절하는 문지기예요. 긴급 문닫기는 처음에는 꺼져 있어요. | `aws_wafv2_web_acl.cost_guard` | 서울 regional WAF: IP별 3000/5분·전체 `/api/` 6000/5분 초과 429, AWS 관리 규칙 4종(IP 평판·Common·KnownBadInputs·SQLi), 수동 긴급 차단 기본 꺼짐 |
 
 ## 이 목록에 따로 넣지 않은 것도 있어요
 
@@ -321,7 +334,7 @@
 | ALB와 안내 규칙 | 앱의 입구 설정(Ingress)을 설치한 뒤 관리 도구가 만들어요 |
 | 앱 일꾼·Kafka·KEDA·비밀 전달·출입 규칙 | Kubernetes 설정 파일과 Helm으로 따로 설치해요 |
 | Kafka 저장 디스크 | 저장 공간 요청(PVC)을 보고 EBS CSI가 만들어요 |
-| ALB용 CloudWatch 경보 3개 | 아직 ALB 이름표를 입력하지 않아 빠졌어요. 입력하면 추가돼요 |
+| ALB용 CloudWatch 경보 3개 | plan 당시에는 ALB 이름표가 없어 빠졌어요. 지금은 입력되어 state에 있어요(위 추가 표) |
 | ACM 인증서·인터넷 주소·외부 AI 계정 | 이 Terraform 폴더에서 만드는 대상이 아니에요 |
 
 긴급 문닫기 스위치는 꺼져 있습니다. 자동으로 문을 닫는 연결은 아직 없습니다. 운영자가 Discord 비밀 주소와 사용할 AI 제공자의 키도 넣어야 합니다.

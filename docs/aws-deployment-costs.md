@@ -1,6 +1,6 @@
 # 우리 서비스는 어디에서 일하고, 돈은 얼마나 들까요?
 
-2026-09-16에 준비한 설정을 설명하는 글입니다. **설정 파일을 만들었다고 AWS에서 모두 켜진 것은 아닙니다.** 실제로 설치하고 시험하는 일이 남아 있습니다.
+2026-09-16에 준비한 설정을 설명하는 글입니다. 크기·개수 표는 2026-10-06 코드 기준으로 고쳤습니다. **설정 파일을 만들었다고 AWS에서 모두 켜진 것은 아닙니다.** 실제로 설치하고 시험하는 일이 남아 있습니다.
 
 우리 서비스를 작은 가게라고 생각해 보세요. 손님이 보는 화면은 가게 앞이고, 서버는 뒤에서 일을 하는 컴퓨터입니다. AWS는 이 컴퓨터와 물건을 보관할 곳을 빌려줍니다.
 
@@ -47,12 +47,12 @@ flowchart LR
 |---|---|---|
 | 컴퓨터를 둘 곳 | AWS 서울, 서로 다른 두 구역(AZ), 바깥/안쪽 공간(subnet) 각각 2개 | 두 구역을 쓴다고 모든 장비에 예비 장비가 있는 것은 아니에요 |
 | 일꾼 관리자 EKS | Kubernetes 1.35 | 컴퓨터를 관리하는 부분도 돈이 들어요 |
-| 보통 일을 하는 컴퓨터 | t3.large, 처음 2대·최소 2대·최대 3대 | 오래 바쁘면 추가 CPU 요금 대신 속도를 제한하는 Standard 설정이에요 |
+| 보통 일을 하는 컴퓨터 | t3.large, 처음 2대·최소 2대·최대 5대 | 평소에는 2~4대예요. 5번째는 프로그램 교체(rollout) 중 자리가 없어 기다리는(Pending) 일꾼이 생길 때만 Cluster Autoscaler가 켜고, 끝나면 약 10분 쉬었다가 줄여요. 오래 바쁘면 추가 CPU 요금 대신 속도를 제한하는 Standard 설정이에요 |
 | 화면 Fargate | 화면 Pod 2개, 각각 0.25 vCPU·768Mi 요청 | 컴퓨터를 빌리지 않고 Pod 크기만큼 시간당 내요. 추가 몫까지 합쳐 Pod 하나를 0.25 vCPU·1GB로 계산해요 |
-| AI 일을 하는 컴퓨터 | m5.xlarge 또는 m6i.xlarge Spot, 처음 0대·최대 2대 | GPU는 없어요. Spot은 AWS 사정에 따라 중단될 수 있어요 |
+| AI 일을 하는 컴퓨터 | m5·m5d·m6i·m7i.xlarge 중 Spot, 처음 0대·최대 2대 | GPU는 없어요. Spot은 AWS 사정에 따라 중단될 수 있어요 |
 | 설치 담당 runner | t3.small 1대, 잠긴 gp3 저장 공간 30GB | 외부 공개 IP가 없고 Standard 설정을 써요 |
-| 중요한 기록장 RDS | PostgreSQL 16, db.t4g.small 2대, 각각 gp3 30GB | 외부에 열지 않고 암호화해요. 각 DB는 한 구역(Single-AZ)에 있고 백업은 7일 보관해요 |
-| 빠른 메모장 Redis | cache.t4g.micro 1대 | 보낼 때와 저장할 때 잠가요. 예비 복사본이나 자동 크기 확대는 없어요 |
+| 중요한 기록장 RDS | PostgreSQL 16, db.t4g.small 2대, 각각 gp3 30GB | 외부에 열지 않고 암호화해요. 로그인 DB(access)는 두 구역(Multi-AZ)에 예비 DB가 있어 그만큼 요금이 더 들고, 문서·AI DB(core)는 한 구역(Single-AZ)이에요. 백업은 7일 보관해요 |
+| 빠른 메모장 Redis | cache.t4g.micro 2대(본체 1·예비 복사본 1) | 보낼 때와 저장할 때 잠가요. 본체가 고장 나면 예비가 자동으로 이어받아요. 자동 크기 확대는 없어요 |
 | 할 일 대기줄 Kafka | 1대, gp3 저장 공간 5Gi | 할 일이 너무 쌓이면 공간이 모자랄 수 있어요 |
 | 요청 안내원 ALB | 앱 입구 설정(Ingress) 1개로 준비 | 앱을 설치할 때 만들어요. 화면 주소는 경로로, 두 API 주소는 주소로 요청을 나누고 HTTPS를 써요 |
 | 밖으로 나가는 길 NAT | 1개, 고정 공인 IP 1개 | 길을 빌리는 돈과 자료를 옮기는 돈이 들어요 |
@@ -61,7 +61,7 @@ flowchart LR
 | Terraform 기록장 | 별도 S3에 보관, 암호화·이전 기록 보관·동시 수정 잠금 | 사용자가 올리는 파일 보관함과 달라요 |
 | 돈 알림 | 계정 전체 월 사용료 $400 / $550 / $650 초과 | Discord에 알리는 설정이에요. 돈을 자동으로 멈추지는 않아요 |
 
-일반 컴퓨터 3대와 AI 컴퓨터 2대는 보통의 자동 확장 한도입니다. runner 1대는 따로 있습니다. 컴퓨터를 교체하는 동안 잠깐 더 생기는 것까지 막는 계정 전체의 절대 제한은 아닙니다.
+일반 컴퓨터 5대와 AI 컴퓨터 2대는 보통의 자동 확장 한도입니다. 일반 컴퓨터 5번째는 교체 중처럼 잠깐 필요할 때만 켜집니다. runner 1대는 따로 있습니다. 컴퓨터를 교체하는 동안 잠깐 더 생기는 것까지 막는 계정 전체의 절대 제한은 아닙니다.
 
 ## Kubernetes 확장 범위
 
@@ -69,15 +69,15 @@ flowchart LR
 
 | 일꾼 이름 | 준비한 수 | 어디에서 일하나요? |
 |---|---|---|
-| access-svc / document-svc / pipeline-api | 각각 2개 고정, 교체 중 임시 1개 추가 | 일반 컴퓨터 |
+| access-svc / document-svc / pipeline-api | 각각 2~4개(CPU 70% 기준 HPA), 교체 중 임시 1개 추가 | 일반 컴퓨터 |
 | ingest-worker / query-task-worker / agent-task-worker | 각각 1~4개 | AI 컴퓨터 |
 | maintenance-task-worker | 1~2개 | AI 컴퓨터 |
 | converter / edit-event-consumer / pipeline-agent-worker / embedding-server | 각각 1개 고정 | AI 컴퓨터 |
 | frontend | 2개 고정 | Fargate(컴퓨터 대신 Pod 단위로 빌림) |
 
-**KEDA**는 대기줄에 일이 쌓였는지 보고 일꾼을 늘립니다. **Cluster Autoscaler**는 일꾼이 들어갈 자리가 부족할 때 컴퓨터를 늘립니다. 둘 다 설치하고 정상 동작을 확인해야 합니다.
+**KEDA**는 대기줄에 일이 쌓였는지 보고 일꾼을 늘립니다. **HPA**는 API 일꾼의 CPU 사용량을 보고 늘립니다. **Cluster Autoscaler**는 일꾼이 들어갈 자리가 부족할 때 컴퓨터를 늘립니다. 모두 설치하고 정상 동작을 확인해야 합니다.
 
-AI 컴퓨터는 처음에 0대로 시작하지만, 앱을 설치하면 항상 자리가 필요한 일꾼들이 생깁니다. 따라서 **손님이 없어도 AI 컴퓨터가 계속 켜져 있을 수 있습니다.** 일부 일꾼만 0개로 바꿔도 나머지 일꾼이 있으면 컴퓨터가 필요합니다.
+AI 컴퓨터는 처음에 0대로 시작하지만, 앱을 설치하면 항상 자리가 필요한 일꾼들이 생깁니다. 따라서 **손님이 없어도 AI 컴퓨터가 계속 켜져 있을 수 있습니다.** 항상 켜 두는 AI 일꾼 8개(embedding-server 포함)의 요청 합계가 CPU 3.25개·메모리 약 13GiB라 AI 컴퓨터 1대(CPU 4개·16GiB) 용량에 가깝습니다. 기록 수집 일꾼까지 더하면 평소에도 2대가 켜질 수 있으니 실제 대수로 비용을 계산합니다. 일부 일꾼만 0개로 바꿔도 나머지 일꾼이 있으면 컴퓨터가 필요합니다.
 
 일꾼이 쓸 메모리에는 제한이 있습니다. 앱별 CPU 제한과 전체 작업 공간의 공통 제한(ResourceQuota/LimitRange)은 아직 없습니다. 자리가 다 차면 새 일이 기다리거나 실패할 수 있습니다. 일꾼 수를 제한해도 외부 AI에게 묻는 횟수나 글자 처리 비용까지 제한되지는 않습니다.
 
@@ -89,6 +89,8 @@ AI 컴퓨터는 처음에 0대로 시작하지만, 앱을 설치하면 항상 �
 | AI에게 계속 일을 시킴 | AI를 빌려 쓰는 회사가 요청·토큰 사용량에 따라 청구해요. 토큰은 글을 세는 작은 단위예요 |
 | 큰 파일을 자주 옮김 | NAT 길과 인터넷을 쓰는 양이 늘어요 |
 | DB가 오래 바쁘게 일함 | 현재 RDS T4g 상품은 추가 CPU 사용료가 생길 수 있어요 |
+| 프로그램 교체 중 일반 컴퓨터 5번째가 켜짐 | t3.large 1대가 켜져 있는 시간만큼 On-Demand 요금이 더해져요. 서울 기준 시간당 약 $0.1이라 보통 교체 몇십 분이면 몇십 센트예요. 줄어들지 않고 한 달 내내 켜져 있으면 월 약 $75가 더해지므로 끝난 뒤 4대 이하로 돌아왔는지 확인해요 |
+| 예비 DB·예비 Redis | access DB Multi-AZ와 Redis 예비 복사본은 쓰지 않아도 계속 켜져 있어 해당 부분 요금이 약 2배예요 |
 | 파일을 계속 올리거나 고침 | 새 파일뿐 아니라 예전 파일도 보관하므로 공간이 늘어요 |
 | 컴퓨터가 일기를 아주 많이 씀 | 로그를 모으고 저장하고 찾아보는 데도 돈이 들어요 |
 | 대기줄·DB 공간이 꽉 참 | 서비스가 멈출 수 있어요. 실패한 일을 계속 다시 시도하면 다른 비용도 늘 수 있어요 |
@@ -157,7 +159,7 @@ WAF가 살펴본 개별 요청을 표본으로 저장하는 기능은 껐습니�
 3. **알림 시험:** Discord 웹훅을 넣고 진짜로 알림이 오는지 확인해야 합니다. Kafka 대기줄·디스크, AI 호출량, CPU credit 등 아직 연결하지 않은 기록도 보완해야 합니다.
 4. **요금 다시 계산:** 평소와 아주 바쁠 때를 나눠 계산해야 합니다. AI 컴퓨터가 계속 켜지는 시간도 넣습니다. 월 730시간 같은 계산 기준과 세금·환율·Spot 가격 변화를 따로 표시합니다.
 
-기존 **월 $500~650은 예상치이며 최대 금액 보장이 아닙니다.** 외부 AI API 사용료는 별도입니다. 화면을 Vercel에서 Fargate로 옮기면서 Vercel 요금은 없어지고 Fargate 요금이 더해집니다. 서울 기준 대략 vCPU 시간당 약 $0.05, GB 시간당 약 $0.0055로 보면 Pod 하나(0.25 vCPU·1GB × 730시간)는 월 약 $13~15, 2개는 **월 약 $30 이하**입니다. 이 값은 추정이므로 [AWS 요금 계산기](https://calculator.aws/)와 [Fargate 요금](https://aws.amazon.com/fargate/pricing/)으로 확인해야 합니다. CloudWatch 수집 비용도 함께 다시 계산해야 합니다.
+기존 **월 $500~650은 예상치이며 최대 금액 보장이 아닙니다.** 이 값은 access DB Multi-AZ·Redis 예비 복사본·일반 컴퓨터 최대 5대로 바꾸기 전에 계산했으므로 다시 계산해야 합니다. 외부 AI API 사용료는 별도입니다. 화면을 Vercel에서 Fargate로 옮기면서 Vercel 요금은 없어지고 Fargate 요금이 더해집니다. 서울 기준 대략 vCPU 시간당 약 $0.05, GB 시간당 약 $0.0055로 보면 Pod 하나(0.25 vCPU·1GB × 730시간)는 월 약 $13~15, 2개는 **월 약 $30 이하**입니다. 이 값은 추정이므로 [AWS 요금 계산기](https://calculator.aws/)와 [Fargate 요금](https://aws.amazon.com/fargate/pricing/)으로 확인해야 합니다. CloudWatch 수집 비용도 함께 다시 계산해야 합니다.
 
 ## 갑자기 바빠지면 어떻게 하나요?
 
@@ -167,13 +169,8 @@ WAF가 살펴본 개별 요청을 표본으로 저장하는 기능은 껐습니�
 
 문을 닫아도 컴퓨터·DB·NAT·저장소를 빌린 기본 비용은 남습니다. 돈이 넘었다고 모든 자원을 자동 삭제하면 중요한 자료를 잃을 수 있습니다. 해결 후에는 남아 있는 대기줄과 중복 실행을 살피며 천천히 다시 엽니다.
 
-## 지금 어디까지 했나요?
+## 더 볼 곳
 
-- Terraform 상태 기록용 S3와 연결은 완료를 확인했습니다.
-- 비용 보호만 담았던 계획은 157개였습니다. 이후 CloudWatch를 넣은 계획은 **185개**입니다. 둘 다 개수가 곧 요금은 아닙니다.
-- RDS 암호화와 보호 설정은 최신 계획에 들어 있는지 확인한 뒤 적용해야 합니다.
-- 실제 서비스 설치·많은 요청 시험·Discord 수신 확인은 별도 단계입니다. 자동 긴급 차단은 아직 연결하지 않았습니다.
-
-더 볼 곳: [전체 185개 목록](aws-resource-inventory.md), [CloudWatch 안내](aws-observability.md), [runner 설치 순서](../infra/runner/README.md), [운영 설계 기록](adr/0021-aws-observability-and-operations.md).
+[전체 준비물 목록](aws-resource-inventory.md), [CloudWatch 안내](aws-observability.md), [runner 설치 순서](../infra/runner/README.md), [운영 설계 기록](adr/0021-aws-observability-and-operations.md).
 
 설정 파일: [EKS](../infra/terraform/eks.tf), [runner](../infra/terraform/runner.tf), [RDS](../infra/terraform/rds.tf), [Redis](../infra/terraform/elasticache.tf), [길 설정](../infra/terraform/vpc.tf), [앱 입구](../k8s/overlays/aws/ingress.yaml), [S3](../infra/terraform/s3.tf), [ECR](../infra/terraform/ecr.tf), [예산](../infra/terraform/budgets.tf), [비용 보호](../infra/terraform/cost-guards.tf), [배포 검사](../scripts/aws_deploy.py), [일꾼 수 조절](../k8s/base/keda-scaledobject.yaml), [AWS 앱 설정](../k8s/overlays/aws/kustomization.yaml), [대기줄](../k8s/base/kafka.yaml).

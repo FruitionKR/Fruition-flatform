@@ -8,7 +8,7 @@ postgres → RDS, redis → ElastiCache, minio → S3, secret.yaml → Secrets M
 
 ## 렌더 입력 출처
 
-입력 예시는 [deploy-config.example.json](./deploy-config.example.json)이다. 배포 시 저장소 밖으로 복사해 채우며, placeholder가 남아 있으면 렌더가 실패한다. 준비 단계에서는 [로컬 검증과 입력 준비](../../../docs/script.md#배포-준비까지만-수행하는-경우)까지만 수행한다.
+입력 예시는 [deploy-config.example.json](./deploy-config.example.json)이다. 배포 시 저장소 밖으로 복사해 채우며, placeholder가 남아 있으면 렌더가 실패한다. 예시 파일 목록은 [배포 입력 예시](../../../docs/script.md#배포-입력-예시)를 따른다.
 
 실제 환경값은 Git에 커밋하지 않는다. 로컬 준비 파일 `k8s/overlays/aws/deploy-config.feedback.json`은 `.gitignore`로 제외하며, 저장소에는 `deploy-config.example.json`만 추적한다. 새 checkout에서는 예시를 로컬 준비 파일 또는 저장소 밖 파일로 복사한다. 로컬 파일은 Git으로 백업되지 않으므로 필요한 경우 접근 제한된 별도 위치에 보관한다. ARN 기록만으로 인증서 `Issued` 상태나 ALB 연결이 확인된 것은 아니다.
 
@@ -64,7 +64,7 @@ kubectl kustomize k8s/overlays/aws   # 렌더 확인
 ## 알려진 제약
 
 - 실행 로그는 S3 `pipeline-runs/{run_id}/pipeline.log`, 상태와 manifest는 ai_db에 저장한다. API·ingest는 독립 `emptyDir` scratch를 사용하며 공유 PVC·same-node affinity가 없다.
-- AI worker와 converter는 AI Worker Spot node group의 label/taint에 맞춰 배치한다. node group은 0대에서 Cluster Autoscaler로 확장하며 실제 scale-from-zero·Spot 중단 복구는 AWS에서 검증해야 한다.
+- AI worker·converter·edit-event-consumer·embedding-server는 AI Worker Spot node group의 label/taint에 맞춰 배치한다. node group은 0대에서 Cluster Autoscaler로 확장하며 실제 scale-from-zero·Spot 중단 복구는 AWS에서 검증해야 한다.
 - Strimzi broker 1대 — AZ 장애 시 중단 허용, 복구는 operation 재발행 절차(§8.3).
 
 

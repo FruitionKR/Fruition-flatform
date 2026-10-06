@@ -1,6 +1,6 @@
 # ADR-0022: 음성 기능의 서비스 책임과 실시간 전사 연결
 
-상태: 제안. 구현 전이며 Vercel·ALB에서의 WebSocket 동작은 검증 대기.
+상태: 승인됨. 회의 실시간 전사 WebSocket 경로와 ALB idle timeout 120초를 적용해 운영 중이다. 화면은 Vercel이 아니라 EKS Fargate에서 ALB를 직접 거친다.
 
 ## 맥락
 

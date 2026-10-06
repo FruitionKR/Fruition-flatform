@@ -7,13 +7,13 @@
 | 대상 | 현재 동작 | 상한 |
 |---|---|---|
 | ALB | 요청을 준비된 Pod에 나누어 전달 | 앱 서버 수를 직접 늘리지 않음 |
-| 인증·문서·Pipeline API | 각각 2개 Pod, 롤링 배포 중 임시 1개 추가 | HPA 미설정 |
+| 인증·문서·Pipeline API | 평소 각각 2개 Pod, 롤링 배포 중 임시 1개 추가. HPA가 CPU 평균 70% 기준으로 조절 | 각각 2~4개 Pod |
 | 수집·질의·에이전트 작업자 | KEDA가 Kafka의 미처리 메시지 수를 보고 조절 | 각각 1~4개 Pod |
 | 유지보수 작업자 | KEDA가 Kafka 대기 작업을 보고 조절 | 1~2개 Pod |
-| EC2 일반 노드 | Cluster Autoscaler가 자원 부족으로 배치되지 못한 Pod를 보고 조절 | 최소 2대, 최대 4대 |
+| EC2 일반 노드 | Cluster Autoscaler가 자원 부족으로 배치되지 못한 Pod를 보고 조절 | 최소 2대, 최대 5대 |
 | EC2 AI 노드 | 같은 방식, CPU Spot 사용 | 최소 0대, 최대 2대 |
 
-트래픽 증가만으로 일반 API의 Pod 수가 늘어나지는 않습니다. AI 작업 Pod가 늘어나도 EC2 최대치에 도달하면 대기할 수 있습니다. CloudWatch는 관측·알림용이며 현재 API HPA와 연결되지 않습니다. Pod 2개를 실행할 여유가 없으면 일반 노드가 상한인 4대까지 늘어나 비용이 증가할 수 있습니다.
+API HPA(`k8s/overlays/aws/api-autoscaling.yaml`)는 metrics-server의 CPU 사용률만 보며, 요청 수나 응답 시간으로는 늘어나지 않습니다. 실제 확장 동작은 부하 시험으로 확인해야 합니다. AI 작업 Pod가 늘어나도 EC2 최대치에 도달하면 대기할 수 있습니다. CloudWatch는 관측·알림용이며 HPA와 연결되지 않습니다. 일반 노드는 평소 2~4대이고, 롤아웃 중 Pending Pod가 생기면 상한인 5대까지 늘어나 비용이 증가할 수 있습니다. 유휴 노드는 Cluster Autoscaler가 다시 줄입니다.
 
 ## 처음 적용할 순서
 
@@ -91,11 +91,11 @@ bootstrap 준비 완료 이후 Google·Naver·Kakao OAuth Secret 연결 6개가 
 
 ## 의미 검색(BGE-M3) 켜기와 기존 위키 임베딩
 
-질의·에이전트·유지보수 작업자만 `QUERY_EMBEDDING_MODE=bge-m3`로 실행합니다. 나머지 AI Pod는 `fruition-config`의 `text-only`를 유지합니다. 모델(약 2.1GB)은 `fruition-pipeline` 이미지에 들어 있고(`HF_HOME=/opt/huggingface`, `HF_HUB_OFFLINE=1`) Pod가 뜰 때 Hugging Face에서 받지 않습니다. 같은 이미지를 쓰는 AI Pod들이 이미지 레이어를 공유하므로 노드 디스크에는 한 번만 저장됩니다. AI 노드 디스크(20GiB)는 늘리지 않습니다.
+질의·에이전트·유지보수 작업자만 `QUERY_EMBEDDING_MODE=bge-m3`로 실행합니다. 나머지 AI Pod는 `fruition-config`의 `text-only`를 유지합니다. 모델(약 2.1GB)은 `fruition-pipeline` 이미지에 들어 있고(`HF_HOME=/opt/huggingface`, `HF_HUB_OFFLINE=1`) Pod가 뜰 때 Hugging Face에서 받지 않습니다. 같은 이미지를 쓰는 AI Pod들이 이미지 레이어를 공유하므로 노드 디스크에는 한 번만 저장됩니다. 롤아웃 중 구·신 이미지가 함께 있는 순간을 버티도록 노드 루트 디스크는 30GiB(gp3)로 지정합니다(`infra/terraform/eks.tf`의 `block_device_mappings`).
 
 세 작업자는 메모리를 2.5Gi 요청하고 3.5Gi까지 씁니다. BGE-M3를 배치 1로 계산하면(Fruition-ai #22) 최고치가 약 2.5GB입니다. 모델을 넣은 이미지(Fruition-ai #23)와 배치 1 코드가 먼저 배포돼야 합니다. 배치 16이던 이전 코드는 긴 문서에서 5GB를 넘습니다.
 
-최소 구성(세 작업자 각 1개)은 AI 노드 1대에 들어갑니다. KEDA가 질의·에이전트 작업자를 늘리면 AI 노드 상한(2대)에 닿아 Pod가 대기할 수 있습니다.
+AI 노드의 상시 Pod(질의·에이전트·유지보수·수집 작업자 각 1개, embedding-server, converter, edit-event-consumer, pipeline-agent-worker)는 요청 합계가 CPU 3.25 vCPU·메모리 약 13.1GiB입니다. xlarge 1대(4 vCPU/16GiB)의 할당 가능량에 가까워 DaemonSet 요청까지 더하면 1대에 다 들어가지 않을 수 있고, 그러면 평소에도 AI 노드 2대가 켜집니다. 실제 배치는 `kubectl describe node`의 Allocated resources로 확인합니다. KEDA가 질의·에이전트 작업자를 늘리면 AI 노드 상한(2대)에 닿아 Pod가 대기할 수 있습니다.
 
 ### 임베딩 서버(embedding-server)
 
@@ -142,7 +142,7 @@ AI는 Agent 라우팅·질의 근거 선택·ingest 개념 병합을 TypeSafe Je
 
 ## 노드·EKS 버전 점검
 
-API는 각 2개 Pod이며 `maxUnavailable: 0`, `maxSurge: 1`로 교체합니다. 노드 점검은 PDB가 최소 1개 Pod를 보호합니다. ALB Service/Ingress와 TargetGroupBinding을 먼저 만들고 Pod를 생성해 readiness gate가 주입되게 합니다. ALB Pod webhook 실패 시 새 Pod 생성을 막아 gate 없이 배포가 진행되지 않도록 합니다. 이미 있는 Pod에는 자동 주입되지 않으므로 최초 전환의 재배포 후 실제 Pod의 gate와 ALB target 상태를 확인하세요.
+API는 평소 각 2개 Pod(HPA 2~4개)이며 `maxUnavailable: 0`, `maxSurge: 1`로 교체합니다. 노드 점검은 PDB가 최소 1개 Pod를 보호합니다. ALB Service/Ingress와 TargetGroupBinding을 먼저 만들고 Pod를 생성해 readiness gate가 주입되게 합니다. ALB Pod webhook 실패 시 새 Pod 생성을 막아 gate 없이 배포가 진행되지 않도록 합니다. 이미 있는 Pod에는 자동 주입되지 않으므로 최초 전환의 재배포 후 실제 Pod의 gate와 ALB target 상태를 확인하세요.
 
 종료유예 60초에는 신규 요청 차단을 기다리는 10초와 Spring 종료 대기 40초가 포함됩니다. 긴 SSE/AI 작업의 완주를 보장하지 않습니다. 클라이언트 재연결, 작업 재시도·중복 방지와 Spot 회수 처리를 실제 서비스에서 시험하세요.
 

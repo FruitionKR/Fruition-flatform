@@ -10,7 +10,9 @@
 
 ## 변경
 
-AL2023 nodeadm NodeConfig를 통해 kubelet high=70%, low=60%, maximum age=24h를 설정한다. 최소 보관 시간·실행 컨테이너 참조 판단은 kubelet에 맡긴다. 외부 prune cron/privileged DaemonSet은 추가하지 않는다. 80GiB 증설 초안은 제거했고 디스크 용량은 유지한다.
+AL2023 nodeadm NodeConfig를 통해 kubelet high=70%, low=60%, maximum age=24h를 설정한다. 최소 보관 시간·실행 컨테이너 참조 판단은 kubelet에 맡긴다. 외부 prune cron/privileged DaemonSet은 추가하지 않는다. 80GiB 증설 초안은 제거했다.
+
+이후 2026-10-04 배포에서 AI 노드 image filesystem이 19.9GiB의 100%까지 차 pipeline-agent-worker가 Evicted 되어, 루트 볼륨을 gp3 30GiB로 늘렸다. 모듈이 커스텀 launch template을 쓰므로 `disk_size`가 아니라 `block_device_mappings`로 지정한다(`infra/terraform/eks.tf`).
 
 24시간은 kubelet이 추적한 미사용 시간이며 kubelet 재시작 시 추적 시간이 초기화된다. GC는 주기적으로 실행되므로 다운로드 순간의 공간 부족을 완전히 막지는 못한다. 적용 후 configz와 디스크 가용 공간, ImageGCFailed/FreeDiskSpaceFailed/DiskPressure를 확인하고 부족하면 이미지 크기와 디스크 증설을 추가 검토한다.
 

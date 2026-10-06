@@ -52,7 +52,7 @@ python3 -m venv .venv
 
 이 저장소의 `.github/workflows/`는 서비스 소스 없이 IaC와 격리 계약을 검증합니다. 서비스 연동 검증과 전체 로컬 스택 실행에는 위 형제 checkout이 필요합니다.
 
-배포 workflow는 ECR의 기존 이미지 묶음 `release_sha`를 입력받습니다. 서비스별 이미지 게시 CI와 OIDC는 실제 원격 저장소에 맞춰 연결해야 합니다. 현재 배포기는 같은 태그의 네 이미지를 요구하며 서비스별 SHA 입력은 후속 작업입니다. 실제 AWS 배포는 실행하지 않았습니다.
+`Publish image release` workflow가 CI를 통과한 서비스 main 커밋으로 이미지 5개(`access-svc`·`document-svc`·`pipeline`·`converter`·`frontend`)를 빌드해 같은 릴리스 ID 태그로 ECR에 게시합니다(GitHub OIDC). 배포 workflow는 이 릴리스 ID(`release_sha`, 플랫폼 커밋 SHA 아님)를 입력받아 승인 후 EKS에 배포하며, 배포 검토 기록은 `docs/releases/`에 남깁니다. 자세한 절차는 [이미지 게시와 승인 배포](docs/aws-image-releases.md)를 참고하세요.
 
 [문서 안내](docs/README.md) · [아키텍처](docs/architecture.md) · [운영 절차](docs/script.md)
 
@@ -104,7 +104,7 @@ python3 -m venv .venv
 
 Workflows in `.github/workflows/` validate IaC and isolation contracts without service source code. Service integration checks and full local stack execution require sibling checkouts.
 
-The deployment workflow takes `release_sha`, identifying an existing set of ECR images. Service image publishing CI and OIDC must still be configured for the actual repositories. The current deployment script requires four images with the same tag; separate service SHA inputs remain future work. AWS deployment has not been performed.
+The `Publish image release` workflow builds five images (`access-svc`, `document-svc`, `pipeline`, `converter`, `frontend`) from CI-passing service main commits and pushes them to ECR under one release ID tag using GitHub OIDC. The deployment workflow takes that release ID (`release_sha`, not a platform commit SHA) and deploys it to EKS after approval; deployment reviews are recorded in `docs/releases/`. See [image releases and approved deployment](docs/aws-image-releases.md).
 
 [Documentation index](docs/README.md) · [Architecture](docs/architecture.md) · [Operations](docs/script.md)
 

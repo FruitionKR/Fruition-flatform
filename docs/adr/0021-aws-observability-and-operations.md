@@ -1,6 +1,6 @@
 # ADR-0021: AWS 관측과 운영 준비
 
-상태: 기본 수집·대시보드·Discord 경보 코드 구현, AWS 적용·실제 검증 대기. [설정·시험 절차](../aws-observability.md).
+상태: 승인됨. 기본 수집·대시보드·Discord 경보를 AWS에 적용해 운영 중이다. [설정·시험 절차](../aws-observability.md).
 
 ## 맥락
 
@@ -17,7 +17,7 @@
 5. 외부 배포 전 로그 검색, 실제 실패 알림 수신, 조회/긴급 역할 분리, 장애 Runbook, 격리 환경의 데이터 복원 시험을 완료한다. RTO/RPO는 후보 목표와 실측 결과를 구분한다. 복구 시험은 운영 트래픽을 연결하지 않은 격리 환경에서 시작한다. [복원 시험 원칙](https://docs.aws.amazon.com/wellarchitected/2023-10-03/framework/rel_backing_up_data_periodic_recovery_testing_data.html)
 6. Document 변환 큐·편집 outbox의 동시 실행 안전성을 롤링 배포 전에 보완한다. 서비스별 image digest release manifest와 업무 smoke를 준비한 뒤 HPA·복제본 확대를 진행한다.
 
-구체적인 작업 순서·파일·담당 역할은 [아키텍처 보완 계획](../architecture.md#aws-운영-보완-계획), 알림 초안·Runbook·증적 기준은 [실행 계획](../script.md#aws-운영-보완-실행-계획)을 따른다.
+구체적인 작업 순서·파일·담당 역할은 [아키텍처 보완 계획](../backlog/aws-operations-improvement-plan.md#aws-운영-보완-계획), 알림 초안·Runbook·증적 기준은 [실행 계획](../backlog/aws-operations-improvement-plan.md#aws-운영-보완-실행-계획)을 따른다.
 
 ## 대안과 기각 사유
 

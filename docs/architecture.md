@@ -46,7 +46,7 @@ flowchart LR
   AI --> ID[(ai_db)]
 ```
 
-platform은 다섯 번째 독립 저장소 경계다. 각 서비스는 코드·빌드·API·migration을 소유하고 platform은 Terraform·Kubernetes·관측·통합 실행을 소유한다. platform 배포 workflow는 소스를 빌드하지 않고 ECR에 존재하는 release 태그를 명시적으로 받아 이미지 존재를 확인한다. 현재 배포기는 네 이미지에 같은 태그를 요구한다. 서비스별 SHA를 담는 release manifest·이미지 게시 CI·실제 저장소 OIDC 연결은 후속 작업이며 원격 게시·배포는 실행하지 않았다.
+platform은 다섯 번째 독립 저장소 경계다. 각 서비스는 코드·빌드·API·migration을 소유하고 platform은 Terraform·Kubernetes·관측·통합 실행을 소유한다. platform 배포 workflow는 소스를 빌드하지 않고 ECR에 존재하는 release 태그를 명시적으로 받아 이미지 존재를 확인한다. 현재 배포기는 다섯 이미지(access-svc·document-svc·pipeline·converter·frontend)에 같은 release ID 태그를 요구한다. 이미지 게시는 platform의 `Publish image release` workflow(`.github/workflows/publish-images.yml`)가 서비스 main CI 성공 커밋을 빌드해 ECR에 올리고, 소스 커밋·이미지 digest를 담은 `release.json`을 GitHub Release로 남긴다. 게시 role은 platform main OIDC 전용이다(`infra/terraform/github-image-publish.tf`). 상세: [aws-image-releases.md](aws-image-releases.md).
 
 ## 2. 서비스 간 통신
 
@@ -105,7 +105,7 @@ projection 적재는 document-svc가 miss 시 내부 API 판정 결과를 캐시
 
 AI command publisher는 `ai_command_outbox`를 `created_at, id` 순서로 최대 100건 `FOR UPDATE SKIP LOCKED` 조회하고, Kafka ACK와 행 삭제 커밋까지 같은 트랜잭션에서 잠근다. rolling update 중 다른 publisher는 잠긴 행을 건너뛴다. ACK 후 DB 커밋 전에 실패하면 재전달되므로 소비자 멱등성은 계속 필요하다. PostgreSQL 통합 테스트는 동시 publisher·broker 실패 재시도·ACK 후 DB 롤백을 검증한다. 이 변경은 별도 `document_edit_outbox` publisher나 전체 서비스의 다중 replica 안전성을 보장하지 않는다.
 
-본문 저장은 PostgreSQL transaction에서 본문·편집 revision·write receipt·content version·asset/reference·Agent 적용 감사와 `document_edit_outbox`를 함께 기록한 뒤 outbox publisher가 Kafka `document.edit.event`(key=document_id)를 발행한다. event JSON은 `event_id`, `event_type`, `schema_version`, `document_id`, `workspace_id`, `revision`, `content_hash`, `created_at` 필드를 유지한다. publisher는 `created_at, event_id` 순으로 최대 100건을 처리하고 첫 실패에서 해당 cycle을 중단한다. Kafka 전송 후 표시 전에 장애가 나면 중복될 수 있어 at-least-once이며, consumer는 더 큰 revision만 반영해 중복·역순 event를 흡수한다. 현재 document-svc와 edit-event-consumer는 각각 1 replica 전제다. 결정 근거: [adr/0016](https://github.com/FruitionKR/Fruition-document/blob/main/docs/adr/0016-consolidate-document-body-into-postgres.md). AI 작업은 Spring이 `run_id`와 필요 시 `operation_id`를 먼저 만들고 domain 상태와 `ai_command_outbox`를 같은 core DB 트랜잭션에 저장한 뒤 발행한다. Query·ingest·lint command에는 적용할 `provider`와 `model` snapshot도 포함한다. Query worker는 pipeline의 단계 이벤트를 `status=progress`인 Kafka `ai.task.event`로 즉시 발행하고, document-svc는 Redis에서 `event_id`를 선점해 중복을 제거한 뒤 `query.log` SSE로 중계한다. 단계 이벤트와 최종 결과는 같은 `run_id` Kafka key를 사용해 순서를 유지한다. 단계 이벤트는 화면 피드백 용도라 양쪽 모두 유실을 허용한다. worker는 발행이 실패해도 질의를 계속하고, document-svc는 중계 실패를 로그만 남긴다 — 여기서 예외를 올리면 무한 재시도가 같은 파티션의 최종 결과까지 막기 때문이다. Agent 결과는 `markdown_edit`·`markdown_create`의 canonical Markdown을 검증하고, `chat_answer`·`clarify`·`reject`는 Markdown이 없는 정상 비수정 결과로 반영한다. `folder_organize`·`workspace_workflow` 자율 action도 허용하며 그 밖의 action은 거절한다. AI worker는 최종 결과도 전달받은 `run_id`로 `ai.task.event`에 보낸다. `log_callback_url`은 Wiki 생성 `pipeline.log` 진행 로그 전송에만 사용하며 Query와 HTTP result callback에는 사용하지 않는다. document-svc는 `ai_task_result_receipts`로 최종 결과를 멱등 반영하며 ingest는 AI run 폴링으로 event 유실도 복구한다. 기존 AI 작업 로그 조회/결과 경로는 LLM 설정을 받지 않는다.
+본문 저장은 PostgreSQL transaction에서 본문·편집 revision·write receipt·content version·asset/reference·Agent 적용 감사와 `document_edit_outbox`를 함께 기록한 뒤 outbox publisher가 Kafka `document.edit.event`(key=document_id)를 발행한다. event JSON은 `event_id`, `event_type`, `schema_version`, `document_id`, `workspace_id`, `revision`, `content_hash`, `created_at` 필드를 유지한다. publisher는 `created_at, event_id` 순으로 최대 100건을 처리하고 첫 실패에서 해당 cycle을 중단한다. Kafka 전송 후 표시 전에 장애가 나면 중복될 수 있어 at-least-once이며, consumer는 더 큰 revision만 반영해 중복·역순 event를 흡수한다. edit-event-consumer는 1 replica 전제다. AWS overlay는 document-svc를 2 replica(HPA 2~4)로 실행한다. `document_edit_outbox` publisher는 행을 잠그지 않아 Pod마다 같은 event를 한 번씩 더 보낼 수 있지만, edit-event-consumer의 upsert가 `last_edit_revision < EXCLUDED.last_edit_revision`일 때만 갱신해 결과는 같다(2026-10-06 Document main `ef8a5f8`·AI main `3ad5878` 확인). Document ADR-0016은 아직 1 replica를 전제로 적혀 있다. 결정 근거: [adr/0016](https://github.com/FruitionKR/Fruition-document/blob/main/docs/adr/0016-consolidate-document-body-into-postgres.md). AI 작업은 Spring이 `run_id`와 필요 시 `operation_id`를 먼저 만들고 domain 상태와 `ai_command_outbox`를 같은 core DB 트랜잭션에 저장한 뒤 발행한다. Query·ingest·lint command에는 적용할 `provider`와 `model` snapshot도 포함한다. Query worker는 pipeline의 단계 이벤트를 `status=progress`인 Kafka `ai.task.event`로 즉시 발행하고, document-svc는 Redis에서 `event_id`를 선점해 중복을 제거한 뒤 `query.log` SSE로 중계한다. 단계 이벤트와 최종 결과는 같은 `run_id` Kafka key를 사용해 순서를 유지한다. 단계 이벤트는 화면 피드백 용도라 양쪽 모두 유실을 허용한다. worker는 발행이 실패해도 질의를 계속하고, document-svc는 중계 실패를 로그만 남긴다 — 여기서 예외를 올리면 무한 재시도가 같은 파티션의 최종 결과까지 막기 때문이다. Agent 결과는 `markdown_edit`·`markdown_create`의 canonical Markdown을 검증하고, `chat_answer`·`clarify`·`reject`는 Markdown이 없는 정상 비수정 결과로 반영한다. `folder_organize`·`workspace_workflow` 자율 action도 허용하며 그 밖의 action은 거절한다. AI worker는 최종 결과도 전달받은 `run_id`로 `ai.task.event`에 보낸다. `log_callback_url`은 Wiki 생성 `pipeline.log` 진행 로그 전송에만 사용하며 Query와 HTTP result callback에는 사용하지 않는다. document-svc는 `ai_task_result_receipts`로 최종 결과를 멱등 반영하며 ingest는 AI run 폴링으로 event 유실도 복구한다. 기존 AI 작업 로그 조회/결과 경로는 LLM 설정을 받지 않는다.
 
 document-svc는 ingest 결과를 반영하기 전에 Markdown과 기여 object key가 등록된 workspace·page·operation prefix와 일치하는지 검증한다. 다른 작업의 key를 현재 기여로 연결하는 callback은 계약 오류로 거부한다.
 
@@ -126,17 +126,17 @@ ingest Kafka key는 `document_id`라 같은 문서의 순서는 유지하면서 
 | Secret(YAML) | Secrets Manager + external-secrets |
 | frontend | EKS Fargate profile `frontend` (노드 그룹 밖) |
 
-- 매니페스트: `k8s/base` + `k8s/overlays/aws` (ingress·external-secrets·KEDA)
-- IaC: `infra/terraform` (EKS·RDS·ElastiCache·S3·ECR·OIDC·Secrets·budgets) — apply는 AWS 계정 준비 후
+- 매니페스트: `k8s/base` + `k8s/overlays/aws` (ingress·frontend·external-secrets·API HPA/PDB·Kafka TLS 사용자)
+- IaC: `infra/terraform` (EKS·RDS·ElastiCache·S3·ECR·OIDC·Secrets·budgets·관측(`observability.tf`)·WAF(`cost-guards.tf`)·요청 기반 기동(`request-wake.tf`)·배포 runner)
 - 실제 배포 단위 검증은 `compose.infra.yml` + `compose.ai.yml` + `compose.converter.yml` + `compose.containerized.yml`을 함께 구성한다. document-svc가 `core_db` Flyway를 먼저 적용한 뒤 access-svc와 pipeline API/worker를 기동하며, AI 저장소 maintenance cutover는 [script.md](script.md) 절차를 따른다. `JWT_SECRET`·`INTERNAL_CALLBACK_TOKEN`은 두 앱 동일 값 필수.
 - ALB는 `api.<domain>`을 document-svc, `access.<domain>`을 access-svc로 host 라우팅한다.
   화면 호스트(`app_domain`)는 같은 ALB가 경로로 나눈다: `/api/**`는 access-svc·document-svc, 나머지는 frontend. 기존 Vercel `next.config.mjs` rewrite를 대체하며, 브라우저가 ALB를 직접 부르므로 access-svc가 `X-Forwarded-For` 오른쪽 값으로 실제 클라이언트 IP를 얻는다. 상세: [aws-frontend-hosting.md](aws-frontend-hosting.md).
-- actuator는 업무 포트가 아니라 관리 포트로 분리한다(로컬 8082·8083, k8s는 configmap `MANAGEMENT_PORT`로 8082 통일).
+- actuator는 업무 포트가 아니라 관리 포트로 분리한다(로컬 8082·8083, k8s는 Deployment env `MANAGEMENT_PORT`로 8082 통일).
   ALB는 업무 포트만 라우팅하므로 `/actuator/prometheus`가 인터넷에 열리지 않는다. probe와 ALB healthcheck만 관리 포트를 본다.
 
 ### 7.1 AWS 배치 구조
 
-아래는 **2026-09-11 기준 저장소의 Terraform·Kubernetes·배포 스크립트가 정의하는 구조**다. 실제 AWS 계정에 배포되어 있다는 뜻은 아니다. 서울 리전의 feedback 환경을 대상으로 하며, 실제 AWS 검증은 수행하지 않았다.
+아래는 **2026-10-06 기준 저장소의 Terraform·Kubernetes·배포 스크립트가 정의하는 구조**다. 서울 리전의 feedback 환경을 대상으로 하며, 실제 배포 이력과 release별 검토는 `docs/releases/`, 초기 DB 구성 기록은 `docs/backlog/deployment-checks/`에 있다. 이 문서는 코드 정의를 설명하며 현재 계정 상태를 직접 조회한 결과는 아니다.
 
 쉽게 말하면 frontend(Fargate)는 손님이 보는 화면, ALB는 안내 데스크, EKS는 여러 담당자가 일하는 건물이다. Access는 회원·권한 담당, Document는 문서·업무 담당, AI는 분석 담당이다. Kafka는 오래 걸리는 일을 맡겨 두는 작업함이며, DB와 S3는 담당자별 열쇠로 여는 보관함이다.
 
@@ -163,6 +163,7 @@ flowchart TB
                     subgraph spot["AI · Spot 노드"]
                         workers["AI worker들"]
                         converter["Converter"]
+                        embedding["embedding-server · BGE-M3"]
                     end
                 end
                 accessdb["Access RDS · access_db"]
@@ -183,6 +184,7 @@ flowchart TB
     document -->|"작업 요청"| kafka
     kafka --> workers
     workers -->|"결과 이벤트"| kafka
+    workers -->|"질의 임베딩"| embedding
     kafka -->|"결과 반영"| document
     access --> accessdb
     document -->|"core_db"| coredb
@@ -201,10 +203,10 @@ flowchart TB
 |---|---|
 | 공개 진입점 | 인터넷용 ALB가 host별로 Access 8081·Document 8080에 전달하고, 화면 호스트는 경로별로 frontend 3000·Access·Document에 나눈다. `target-type: ip`로 Pod IP를 대상으로 삼는다. 관리 포트 8082는 probe·healthcheck용이다. AI·Converter·DB는 공개 Ingress 대상이 아니다. |
 | Fargate | `fruition` namespace의 `app=frontend` Pod만 실행한다. 노드 그룹이 0대인 절전 중에도 화면이 유지된다. |
-| General 노드 | `t3.large` On-Demand, 최소·초기 2대, 최대 3대. API와 Kafka를 배치한다. |
-| AI 노드 | `m5.xlarge`/`m6i.xlarge` Spot, 최소·초기 0대, 최대 2대. nodeSelector와 taint/toleration으로 AI worker·Converter를 배치한다. |
-| PostgreSQL | RDS 2개다. Access 인스턴스는 `access_db`, Core 인스턴스는 `core_db`와 `ai_db`를 가진다. **AI와 Document는 물리 인스턴스를 공유하지만 DB와 접속 권한은 분리한다.** runtime DML 계정과 migration DDL 계정도 분리한다. |
-| Redis | ElastiCache를 공유하되 서비스별 ACL로 key 값 접근을 제한한다. 업무 원장의 대체물이 아니라 캐시·일시 상태·권한 projection 저장소다. |
+| General 노드 | `t3.large` On-Demand, 최소·초기 2대, 최대 5대. API와 Kafka를 배치한다. 평소 2~4대이며, 5번째 노드는 rollout 등으로 Pending Pod가 생길 때만 Cluster Autoscaler가 띄우고 유휴 후 축소한다. |
+| AI 노드 | `m5.xlarge`/`m5d.xlarge`/`m6i.xlarge`/`m7i.xlarge` Spot, 최소·초기 0대, 최대 2대. nodeSelector와 taint/toleration으로 AI worker·Converter·embedding-server를 배치한다. |
+| PostgreSQL | RDS 2개(`db.t4g.small`)다. Access 인스턴스는 `access_db`(Multi-AZ), Core 인스턴스는 `core_db`와 `ai_db`(Single-AZ)를 가진다. **AI와 Document는 물리 인스턴스를 공유하지만 DB와 접속 권한은 분리한다.** runtime DML 계정과 migration DDL 계정도 분리한다. |
+| Redis | ElastiCache(`cache.t4g.micro` primary + replica 1, 자동 장애 조치·Multi-AZ)를 공유하되 서비스별 ACL로 key 값 접근을 제한한다. 업무 원장의 대체물이 아니라 캐시·일시 상태·권한 projection 저장소다. |
 | 파일·이벤트 저장 | 파일과 실행 로그는 S3, Kafka 데이터는 EBS gp3에 저장한다. Kafka는 EKS 안의 Strimzi 단일 broker 구성이다. |
 | 배포 이미지 | Access·Document·Pipeline·Converter·frontend의 ECR 이미지 5개다. Pipeline 이미지로 API와 여러 worker Deployment를 실행한다. worker는 독립 확장 단위지만 별도 DB를 소유하는 새로운 업무 서비스는 아니다. |
 
@@ -226,12 +228,12 @@ flowchart TB
 
 ### 7.3 요청 처리와 자동 확장
 
-1. 사용자가 화면에서 요청하면 Next.js rewrite가 인증·워크스페이스 자체 CRUD·복구·아이콘·멤버·초대 관리 경로를 Access 도메인으로 보낸다. 워크스페이스 하위 문서·폴더·채팅 등 나머지 업무 경로는 Document 도메인으로 보낸다. ALB가 해당 서비스에 전달한다.
+1. 사용자가 화면에서 요청하면 브라우저가 같은 화면 호스트의 `/api/*`를 ALB로 보낸다. ALB 경로 규칙이 인증·워크스페이스 자체 CRUD·복구·아이콘·멤버·초대 관리 경로를 Access로, 워크스페이스 하위 문서·폴더·채팅 등 나머지 업무 경로를 Document로 전달한다([ALB Ingress](../k8s/overlays/aws/ingress.yaml)). 로컬은 Next.js rewrite가 같은 분기를 맡는다.
 2. Document가 권한을 확인할 때 캐시에 없으면 Access 내부 API를 호출한다. 권한 확인에 실패하면 접근을 거부한다. 다른 서비스의 DB를 직접 읽어 권한을 판단하지 않는다.
 3. AI 작업은 Document가 요청을 기록하고 Kafka로 전달한다. worker는 자기 `ai_db`와 허용된 S3 경로를 사용하며, Document 소유 업무 변경은 내부 API 또는 결과 이벤트로 요청한다.
 4. Document는 결과를 자기 DB에 반영하고 사용자에게 작업 상태를 전달한다. 중복 메시지가 와도 이미 처리한 결과를 다시 적용하지 않도록 검사한다.
 
-KEDA는 Kafka에 밀린 작업량을 보고 ingest·query·agent worker를 각각 1~4개, maintenance worker를 1~2개로 조절한다. Pod를 배치할 자리가 부족하면 Cluster Autoscaler가 노드 수를 조절한다. **KEDA는 작업자 수, Cluster Autoscaler는 작업자가 앉을 서버 수를 조절한다.** 모든 API·worker가 KEDA 대상인 것은 아니다. [KEDA 설정](../k8s/base/keda-scaledobject.yaml)
+KEDA는 Kafka에 밀린 작업량을 보고 ingest·query·agent worker를 각각 1~4개, maintenance worker를 1~2개로 조절한다. Pod를 배치할 자리가 부족하면 Cluster Autoscaler가 노드 수를 조절한다. **KEDA는 작업자 수, Cluster Autoscaler는 작업자가 앉을 서버 수를 조절한다.** 모든 API·worker가 KEDA 대상인 것은 아니다. AWS의 access-svc·document-svc·pipeline-api는 KEDA 대신 CPU 70% 기준 HPA로 2~4개를 조절하고 각각 PDB(`minAvailable: 1`)를 둔다. [KEDA 설정](../k8s/base/keda-scaledobject.yaml), [API HPA](../k8s/overlays/aws/api-autoscaling.yaml)
 
 AI 노드 그룹의 초기·최소값은 0이지만 worker의 최소 replica는 1이고 다른 상시 Pod도 있다. 따라서 이 설정을 “일이 없으면 AI 서버가 항상 0대로 줄어든다”는 뜻으로 해석하면 안 된다. 실제 용량 확보와 Spot 중단 복구는 AWS에서 별도로 확인해야 한다.
 
@@ -239,15 +241,15 @@ AI 노드 그룹의 초기·최소값은 0이지만 worker의 최소 replica는 
 
 플랫폼 관리자는 Terraform state용 S3 bootstrap → VPC·EKS·RDS·Redis·S3·ECR·IAM 등 인프라 → ALB controller·External Secrets·Strimzi·KEDA·Cluster Autoscaler와 공통 Kubernetes 자원 순으로 준비한다. Terraform state는 S3의 버전 관리·암호화·잠금으로 관리한다.
 
-앱 배포는 GitHub Actions의 전용 runner에서 실행한다. GitHub OIDC로 배포 role을 받아 장기 AWS access key 없이 ECR 이미지를 올리고 EKS에 접근한다. 반면 실행 중인 Document·AI가 S3에 접근할 때는 각 Kubernetes ServiceAccount에 연결한 **IRSA** role을 사용한다. 두 경로는 서로 다른 신원과 권한이다. 비밀번호 등 앱 설정은 Secrets Manager → External Secrets → 서비스별 Kubernetes Secret으로 공급한다. [IRSA 공식 설명](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
+이미지 게시는 GitHub hosted runner에서 게시 전용 role(OIDC)로 ECR에 올린다. 앱 배포는 GitHub Actions의 전용 runner에서 실행하며, GitHub OIDC로 배포 role을 받아 장기 AWS access key 없이 게시된 ECR 이미지를 확인하고 EKS에 접근한다. 반면 실행 중인 Document·AI가 S3에 접근할 때는 각 Kubernetes ServiceAccount에 연결한 **IRSA** role을 사용한다. 두 경로는 서로 다른 신원과 권한이다. 비밀번호 등 앱 설정은 Secrets Manager → External Secrets → 서비스별 Kubernetes Secret으로 공급한다. [IRSA 공식 설명](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
 
-workflow가 입력 검증·임시 manifest 렌더와 commit SHA 이미지 준비를 수행한다. 배포 스크립트는 실제 계정·클러스터를 대조하고, 새 release에 대해 서비스별 Secret 준비 → DB 소유권·접속 사전검증 → 세 migration Job 완료 → Kafka/topic 준비 → Deployment rollout → KEDA 준비 → 공개 OpenAPI smoke를 확인한다. 성공 시 manifest·설정·DB schema fingerprint를 release 기록으로 남긴다. 기존 성공 SHA 재배포·복구는 현재 schema와 설정 조건을 검사한 뒤 저장된 manifest를 사용하며 migration을 다시 실행하거나 자동으로 되돌리지 않는다. 현재 방식은 Deployment rollout이며 별도 blue/green·canary 전환은 구현하지 않았다.
+workflow가 입력 검증·임시 manifest 렌더와 게시된 release ID 이미지 검증을 수행한다. 배포 스크립트는 실제 계정·클러스터를 대조하고, 새 release에 대해 서비스별 Secret 준비 → DB 소유권·접속 사전검증 → 세 migration Job 완료(`docs/releases/<ID>.json`의 `migration_mode`가 `expand-only`일 때) → Kafka/topic/KafkaUser 준비 → Service·Ingress와 ALB 연결 → converter 우선 rollout 후 나머지 Deployment rollout → KEDA 준비 → API HPA 적용 → 공개 경로 검사(화면 `/healthz`·`/` 200, `/v3/api-docs`·`/internal/` 404) → 검증 계정 로그인·문서 조회 smoke를 확인하고, workflow가 이어서 대용량 PDF 업로드·변환 smoke(`scripts/aws_pdf_smoke.py`)를 실행한다. 성공 시 manifest·설정·DB schema fingerprint를 release 기록으로 남긴다. 기존 성공 SHA 재배포·복구는 현재 schema와 설정 조건을 검사한 뒤 저장된 manifest를 사용하며 migration을 다시 실행하거나 자동으로 되돌리지 않는다. 현재 방식은 Deployment rollout이며 별도 blue/green·canary 전환은 구현하지 않았다.
 
 정확한 명령·필수 입력·복구 조건은 [AWS 순차 배포 절차](script.md#aws-순차-배포와-동일-스키마-sha-복구), 관리자의 준비 작업은 [IaC·플랫폼 운영 절차](script.md#aws-iac플랫폼-운영-절차)를 따른다.
 
 ### 7.5 배포 준비 수준과 가용성의 한계
 
-현재 구성은 서비스 경계와 AWS 배포 절차를 갖춘 **feedback 환경 구성**으로 판단한다. 2개 가용 영역에 네트워크와 노드를 둘 수 있지만 RDS는 Single-AZ, Redis는 단일 primary, Kafka는 단일 broker, NAT Gateway는 1개이며 주요 앱도 기본 replica 1 구성이다. 따라서 가용 영역 하나가 고장 나도 서비스 전체가 계속 운영되는 고가용성 구성이 완성됐다고 볼 수 없다. 물리 Core RDS 공유로 Document와 AI의 자원 경합·인스턴스 장애 영향도 공유한다.
+현재 구성은 서비스 경계와 AWS 배포 절차를 갖춘 **feedback 환경 구성**으로 판단한다. 2개 가용 영역에 네트워크와 노드를 둘 수 있다. Access RDS는 Multi-AZ, Redis는 replica 1개와 자동 장애 조치를 갖고, AWS의 API 3종(access·document·pipeline-api)과 frontend는 2 replica로 실행한다. 그러나 Core RDS는 Single-AZ, Kafka는 단일 broker, NAT Gateway는 1개이며 AI worker·converter·edit-event-consumer는 replica 1(또는 KEDA 최소 1) 구성이다. 따라서 가용 영역 하나가 고장 나도 서비스 전체가 계속 운영되는 고가용성 구성이 완성됐다고 볼 수 없다. 물리 Core RDS 공유로 Document와 AI의 자원 경합·인스턴스 장애 영향도 공유한다.
 
 기존 로컬 검증은 서비스 간 DB 권한 거부, migration/runtime 역할 분리, 내부 API 계약, Redis ACL, Terraform validate, Kubernetes 렌더·스키마 검사, 배포 스크립트의 실패·복구 조건을 확인했다. 이는 코드와 로컬 실행의 근거이며 실제 AWS의 IAM·CNI·ALB·인증서·addon 호환·Spot 용량·복구 동작을 보장하지 않는다. 이번 문서 추가에서도 AWS 배포나 실제 AWS 검증은 실행하지 않았다. 검증 이력과 미실행 항목은 [배포 준비 계획](backlog/aws-msa-deployment-readiness-plan.md)에 보관한다.
 
@@ -256,7 +258,7 @@ workflow가 입력 검증·임시 manifest 렌더와 commit SHA 이미지 준비
 | 항목 | 상태 · 트리거 |
 |---|---|
 | JWT HS256 공유 시크릿 | 외부 공개·시크릿 유출 리스크 대두 시 RS256+JWKS 전환 |
-| AI 실행 로그·임시 파일 | 로그는 S3 `pipeline-runs/{run_id}/pipeline.log`, 상태·manifest는 ai_db. Pod의 `/app/runs`는 독립 `emptyDir`이며 worker·converter는 Spot node group에 배치 |
+| AI 실행 로그·임시 파일 | 로그는 S3 `pipeline-runs/{run_id}/pipeline.log`, 상태·manifest는 ai_db. Pod의 `/app/runs`는 독립 `emptyDir`이며 worker·converter·embedding-server는 Spot node group에 배치 |
 
 
 ## AI 작업 취소
@@ -280,7 +282,7 @@ DB bootstrap 이후 `access-migration`, `document-migration`, `ai-migration` Job
 로컬 Compose/kind는 자기 서비스의 startup migration을 유지한다. kind도 Secret 전체 주입 대신 자기 서비스 키만 선택하며, MFA 키는 별도 `fruition-mfa` Secret으로 주입한다. 로컬 startup migration은 AWS runtime 무DDL 자격증명 계약의 개발 환경 예외다. 실제 AWS 순차 배포·Secret 동기화·회전 검증은 별도 배포 gate다.
 
 
-AWS 배포 스크립트는 임시 Kustomize 렌더 입력 검증 → 서비스별 Secret 준비 → 실제 DB 소유권·접속 사전검증 Job → 세 migration Job → Kafka/topic → 전체 Deployment/KEDA → 공개 OpenAPI smoke 순서를 강제한다. 성공 release는 manifest와 실제 public schema fingerprint를 기록하며, 자동 SHA 복구는 현재 schema가 이전 성공 기록과 동일할 때만 허용한다. DB 변경을 자동 되돌리지 않는다. GitHub feedback Environment 승인자/branch 제한은 외부 설정이며 OIDC trust는 동일 Environment subject를 사용한다. 실행 입력과 제한은 [배포 절차](script.md#aws-순차-배포와-동일-스키마-sha-복구)를 따른다.
+AWS 배포 스크립트는 임시 Kustomize 렌더 입력 검증 → 서비스별 Secret 준비 → 실제 DB 소유권·접속 사전검증 Job → 세 migration Job(`expand-only` 검토 시) → Kafka/topic/KafkaUser → Service·Ingress → converter 우선 후 전체 Deployment → KEDA → API HPA → 공개 경로 차단·화면 확인과 인증 업무 smoke 순서를 강제한다(7.4 참조). 성공 release는 manifest와 실제 public schema fingerprint를 기록하며, 자동 SHA 복구는 현재 schema가 이전 성공 기록과 동일할 때만 허용한다. DB 변경을 자동 되돌리지 않는다. GitHub feedback Environment 승인자/branch 제한은 외부 설정이며 OIDC trust는 동일 Environment subject를 사용한다. 실행 입력과 제한은 [배포 절차](script.md#aws-순차-배포와-동일-스키마-sha-복구)를 따른다.
 
 
 ### AI 실행 로그와 Pod 확장
@@ -289,18 +291,18 @@ Wiki ingestion 실행 로그는 실행 중부터 `s3://{bucket}/pipeline-runs/{r
 
 병렬 source/concept 로그는 실행별 lock 안에서 누적 후 저장한다. heartbeat·callback 실패 기록도 같은 저장 경로를 쓰며, 실행 로그는 취소에 따른 업무 object rollback journal에 포함하지 않는다. 종료된 run의 Kafka 재전달은 기존 DB 결과를 사용하고, running run의 전체 재시도는 첫 로그 저장부터 이전 시도의 로그를 대체한다. S3 저장 장애는 숨기지 않고 실행 실패로 전달한다.
 
-base의 API·ingest scratch는 개별 `emptyDir`이며 Compose도 공유 runs volume을 사용하지 않는다. AWS의 ingest·query·agent·maintenance·edit worker와 converter는 `fruition.io/node-role=ai-worker`, `fruition.io/ai-worker=true:NoSchedule` 계약으로 Spot node group을 사용한다. API와 Kafka는 이 taint를 허용하지 않아 General node에 남는다. 실제 다중 노드 재배치·Spot 중단 복구는 AWS 검증 gate다.
+base의 API·ingest scratch는 개별 `emptyDir`이며 Compose도 공유 runs volume을 사용하지 않는다. AWS의 ingest·query·agent·maintenance·edit·pipeline-agent worker, converter, embedding-server는 `fruition.io/node-role=ai-worker`, `fruition.io/ai-worker=true:NoSchedule` 계약으로 Spot node group을 사용한다. API와 Kafka는 이 taint를 허용하지 않아 General node에 남는다. 실제 다중 노드 재배치·Spot 중단 복구는 AWS 검증 gate다.
 
 
 ### AWS 저장소·통신 권한
 
-S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 `sources/documents/*`·`assets/*` 읽기/쓰기/삭제와 `wiki/*` 읽기를 갖는다. AI API·worker는 `sources/documents/*` 읽기, `wiki/*`·`agent-runs/*` 읽기/쓰기/삭제, `pipeline-runs/*` 읽기/쓰기를 갖는다. Document의 취소는 자기 문서·asset 파일만 삭제하고 AI object 복구는 내부 API로 AI에 위임한다. 로그는 취소 복구 대상이 아니므로 AI role에도 로그 삭제 권한을 주지 않는다. multipart 업로드의 중단·part 조회는 쓰기 prefix에만 허용한다.
+S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 `sources/documents/*`·`assets/*` 읽기/쓰기/삭제, 대용량 직접 업로드용 `tmp/document-uploads/*` 읽기/쓰기(`tmp/`는 7일 lifecycle 삭제)와 `wiki/*` 읽기를 갖는다. AI API·worker는 `sources/documents/*` 읽기, `wiki/*`·`agent-runs/*` 읽기/쓰기/삭제, `pipeline-runs/*` 읽기/쓰기를 갖는다. Document의 취소는 자기 문서·asset 파일만 삭제하고 AI object 복구는 내부 API로 AI에 위임한다. 로그는 취소 복구 대상이 아니므로 AI role에도 로그 삭제 권한을 주지 않는다. multipart 업로드의 중단·part 조회는 쓰기 prefix에만 허용한다.
 
 Document·AI에 해당 앱 bucket의 ListBucket은 허용한다. 없는 객체 GET을 404로 구분해야 신규 object journal/로그 조회가 동작하기 때문이다. 따라서 bucket 내부 key 이름은 공유되는 metadata 예외이며 object 값·쓰기·삭제 권한과 구분한다. 다른 bucket 권한은 없다. [S3 GET의 403/404 계약](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
 
 Redis Access는 `auth:mfa:attempts:*`·`auth:email-availability:*` rate limit, `oauth:exchange:*` 일회용 교환 코드, `authz:role:*` 삭제만 허용한다. Document는 `authz:role:*` 적재/조회와 `query:*` 상태·이벤트, `query-events` pub/sub를 소유한다. AI는 `wiki:concept-index:*`만 읽기/쓰기/삭제한다. selectors로 Access의 projection SET을 거부하고 기본 사용자는 비활성화한다. Access의 workspace 단위 무효화에 쓰는 SCAN은 다른 서비스 key 이름까지 열람 가능한 metadata 예외다. 다른 key 값 조회·변경은 계속 거부한다. Concept write lock은 Redis가 아니라 ai_db advisory lock이다.
 
-AWS NetworkPolicy는 앱 Deployment와 migration/preflight Job에만 ingress/egress 기본 거부를 적용한다. Access↔Document, Document→Pipeline/Converter, AI→Access/Document/Converter의 실제 target port만 허용한다. ALB public subnet에서 업무 포트와 8082 healthcheck를 허용하고 DNS는 kube-system CoreDNS UDP/TCP 53, DB/Redis는 VPC CIDR의 5432/6379로 제한한다. migration/preflight는 DNS·DB만 갖고 앱은 외부 HTTPS, Access는 동일 설정 SMTP port를 허용한다. private·link-local 목적지는 외부 HTTPS 허용에서 제외한다. Kafka broker는 이 앱 deny 대상에서 제외하므로 Strimzi 내부 통신과 KEDA lag 조회가 유지되며 앱→broker 9092만 허용한다. VPC CNI `enableNetworkPolicy=true`를 IaC에서 켠다.
+AWS NetworkPolicy는 앱 Deployment와 migration/preflight Job에만 ingress/egress 기본 거부를 적용한다. Access↔Document, Document→Pipeline/Converter, AI→Access/Document/Converter, query·agent worker→embedding-server(8000)의 실제 target port만 허용한다. ALB public subnet에서 업무 포트와 8082 healthcheck를 허용하고 DNS는 kube-system CoreDNS UDP/TCP 53, DB/Redis는 VPC CIDR의 5432/6379로 제한한다. migration/preflight는 DNS·DB만 갖고 앱은 외부 HTTPS, Access는 동일 설정 SMTP port를 허용한다. private·link-local 목적지는 외부 HTTPS 허용에서 제외한다. Kafka broker는 이 앱 deny 대상에서 제외하므로 Strimzi 내부 통신과 KEDA lag 조회가 유지되며 앱→broker 9093(mTLS 인증·topic/group ACL listener)만 허용한다. VPC CNI `enableNetworkPolicy=true`를 IaC에서 켠다.
 
 정책은 IP/port 계층이므로 같은 VPC RDS 간의 endpoint별·DB별 구분은 DB role이 최종 경계다. 외부 HTTPS의 provider FQDN·HTTP path까지 제한하지 않는다. L4 허용은 내부 token/JWT 인가를 대체하지 않으며 실제 CNI/ALB/IRSA 연결은 AWS 검증 gate다.
 
@@ -328,74 +330,3 @@ IaC CI는 AWS credential 없이 Terraform backend=false init/validate, 실제 Ku
 DB 서버·계정·네트워크는 platform이 제공하지만 테이블과 migration은 DB 소유 서비스가 관리한다. 문서를 여러 저장소에 복제하지 않는다. 상세 계약은 제공 서비스가 수정하고 다른 저장소는 링크로 참조한다. 저장소를 가로지르는 변경은 관련 서비스 PR과 platform 계약 변경을 함께 검토한다.
 
 로컬 통합 환경은 다섯 저장소를 형제 폴더로 checkout한다. 각 서비스 단독 빌드에는 platform이 필요하지 않다. platform의 IaC 검증·배포 렌더는 단독 실행하고 전체 Compose·E2E·서비스 계약 검증만 형제 checkout을 요구한다.
-
-## AWS 운영 보완 계획
-
-상태: **계획 수립 완료, 아래 보완 기능은 미구현·AWS 미검증**. 기존 코드와 설정을 기준으로 부족 항목을 재확인했다. 소규모 feedback 환경을 출발점으로 하며, 현재 단일 Pod·단일 AZ 구성을 상시 무중단 운영 수준으로 간주하지 않는다. 여기서 RB는 Runbook으로 정의하고 RBAC와 배포 Rollback도 별도 작업으로 포함한다.
-
-### 확인된 부족 항목
-
-| ID | 현재 근거 | 부족 사항·영향 |
-|---|---|---|
-| OPS-01 | [플랫폼 설치](../scripts/aws-platform-up.sh), [EKS 설정](../infra/terraform/eks.tf) | 애플리케이션 로그 수집기·조회용 로그 그룹·보존 정책이 없다. EKS 모듈 20.37.2 기본값의 `api/audit/authenticator`, 90일 보존은 제어 영역 로그이며 Pod 실행 로그를 포함하지 않는다 |
-| OPS-02 | [로컬 모니터링](../infra/compose.monitoring.yml), [스크레이프 설정](../infra/monitoring/prometheus.yml) | Grafana·Prometheus는 로컬용이다. AWS 수집 대상·대시보드가 없고, AI 작업 성공·실패·오래된 대기 작업을 직접 감시하는 운영 지표가 부족하다 |
-| OPS-03 | [예산 알림](../infra/terraform/budgets.tf) | 비용 알림만 있다. API 장애·큐 정체·DB 용량·수집기 중단의 알림과 수신 담당자가 없다 |
-| OPS-04 | [운영 절차](script.md), [배포 RBAC](../k8s/platform/aws/deploy-rbac.yaml) | 배포·일부 복구 절차는 있으나 장애별 판정·완화·에스컬레이션·복구 확인이 일관되지 않다. 로그 조회 전용 운영자와 긴급 변경 역할도 미정이다 |
-| OPS-05 | [RDS](../infra/terraform/rds.tf), [S3](../infra/terraform/s3.tf), [Redis](../infra/terraform/elasticache.tf) | RDS 7일 백업·삭제 방지와 S3 버전 관리는 있으나 복원·연결 전환 훈련이 없다. Access RDS와 Core RDS의 공통 복원 시점, S3·Kafka와의 정합성, Redis 소실 후 재구성 범위가 검증되지 않았다 |
-| OPS-06 | [변환 큐](https://github.com/FruitionKR/Fruition-document/blob/main/src/main/java/fruition/core/document/service/DocumentConvertWorker.java), [편집 outbox](https://github.com/FruitionKR/Fruition-document/blob/main/src/main/java/fruition/core/document/service/PostgresDocumentEditOutboxPublisher.java) | 변환 큐는 전체 `processing` 재설정과 잠금 없는 pending 선택을 사용한다. 편집 outbox도 잠금 없는 조회다. 롤링 배포·다중 Pod에서 중복 실행 위험이 있어 HPA보다 먼저 보완해야 한다. AI command outbox의 기존 잠금 보완과는 다른 경로다 |
-| OPS-07 | [AWS overlay](../k8s/overlays/aws/kustomization.yaml), [KEDA](../k8s/base/keda-scaledobject.yaml), [Kafka](../k8s/base/kafka.yaml) | API HPA·PDB가 없고 API·Kafka·Redis는 단일 인스턴스, RDS는 Single-AZ다. KEDA는 일부 worker만 확장한다. Pod 증설만으로 DB·브로커 장애를 해결할 수 없다 |
-| OPS-08 | [배포기](../scripts/aws_deploy.py), [workflow](../.github/workflows/deploy.yml) | 서비스별 SHA release manifest와 서비스 이미지 게시 CI가 없다. 현재 smoke는 OpenAPI 조회 중심이고, rollback은 같은 DB 스키마에서만 가능하다 |
-| OPS-09 | [Fargate 로그](../k8s/platform/aws/fargate-logging.yaml), [로그 필터](https://github.com/FruitionKR/Fruition-document/blob/main/src/main/java/fruition/shared/logging/HttpRequestLoggingFilter.java) | frontend는 Fargate 내장 로그 라우터로 CloudWatch application 로그 그룹에 들어간다. HTTP 요청 ID는 일부 준비됐지만 브라우저→ALB→업무 API→Kafka→worker의 일관된 추적 계약과 오류 연결 검증이 없다 |
-
-### 목표 운영 구성
-
-초기 AWS 운영 조회 화면은 CloudWatch로 통일한다. CloudWatch Observability EKS add-on으로 컨테이너 로그·노드/Pod 지표를 수집하고 Logs Insights·Dashboard·Alarm을 사용한다. 기존 Prometheus 형식의 앱 지표는 CloudWatch agent의 Prometheus 수집 설정으로 연결한다. 로컬 Prometheus·Grafana는 개발용으로 유지하며 AWS에 별도 Grafana·Loki·Elasticsearch 서버를 추가하지 않는다. 선택 근거는 [ADR-0021](adr/0021-aws-observability-and-operations.md)을 따른다.
-
-```mermaid
-flowchart LR
-  Apps[Access · Document · AI · converter] -->|stdout JSON| Fluent[Fluent Bit]
-  Fluent --> Logs[CloudWatch Logs · Logs Insights]
-  Nodes[EKS 노드 · Pod] --> CI[Container Insights]
-  Metrics[Actuator · AI metrics · Kafka exporter] --> Collector[Prometheus 수집 agent]
-  Collector --> CW[CloudWatch Metrics]
-  Native[ALB · RDS · ElastiCache 지표] --> CW
-  CI --> CW
-  CW --> Dashboard[운영 대시보드]
-  CW --> Alarm[CloudWatch Alarm · SNS]
-  Alarm --> Operator[당번 · 대체 담당자]
-  Operator --> RB[장애별 Runbook]
-  Front[frontend · Fargate 로그 라우터] -->|application 로그 그룹| Logs
-```
-
-Fargate에는 DaemonSet 수집기(Fluent Bit)가 돌지 않으므로 frontend 로그는 EKS 내장 로그 라우터(`k8s/platform/aws/fargate-logging.yaml`)가 같은 `/aws/containerinsights/fruition-eks/application` 로그 그룹에 `fargate-` 접두사 stream으로 보낸다. Container Insights 노드/Pod 지표는 Fargate Pod에 적용되지 않는다.
-
-### 작업 묶음·우선순위·의존성
-
-P0는 외부 피드백 배포 전 필수, P1은 다중 인스턴스·상시 가용성 운영 전 필수, P2는 기본 운영 검증 후 고도화다. 아래 파일 중 아직 없는 경로는 **생성 예정 산출물**이며 현재 구현 근거가 아니다. 담당자는 개인을 추정하지 않고 저장소 소유 역할로 지정한다.
-
-| 순서 / 우선순위 | 담당·범위 | 구체 산출물 | 완료 기준 |
-|---|---|---|---|
-| 0 / P0 | platform + 서비스 책임자 / OPS-03~05 | `docs/script.md`의 운영 시간·당번/대체 담당자·연락 채널·복구 목표·관측 예산 입력 확정 | 미지정 책임자·알림 미구독·비용 상한 미검토 상태에서는 외부 배포 보류 |
-| 1 / P0 | platform / OPS-01 | `infra/terraform/observability.tf`, `eks.tf`, `variables.tf`; 로그 그룹·보존 기간·수집기 전용 IAM·add-on 버전/configuration pin | EKS 1.35/AL2023·서울에서 지원 버전과 설정 schema 확인. 플랫폼 Pod를 종료·재생성한 뒤에도 이전 앱 로그를 조회하고 수집 지연 측정 |
-| 2 / P0 | Access·Document·AI·frontend / OPS-01,09 | Java 로그 설정·`fruition/shared/logging/`, AI 공통 로깅·worker, frontend 오류 표시/요청 전달; 아래 로그 계약 반영 | HTTP와 비동기 작업을 request/run ID로 연결. 주입한 가짜 비밀값·본문이 로그에 남지 않음. 재시도 attempt를 구분 |
-| 3 / P0, 1·2 이후 | platform + 서비스 소유자 / OPS-02 | `k8s/platform/observability/` 수집 설정·Kafka exporter, 앱 NetworkPolicy의 관리 포트 허용, `infra/terraform/dashboards.tf` | 수집기는 필요한 namespace·관리 포트만 접근. 각 패널의 원천 데이터·단위·집계 방법 확인, 앱/수집기 중단을 정상 0건과 구분 |
-| 4 / P0, 3 이후 | platform / OPS-03 | `infra/terraform/alarms.tf`, SNS 구독, Dashboard 링크·Runbook ID가 들어간 알림 | 통제된 실패에서 실제 알림 수신·확인·해제까지 검증. 단순 알림 상태 강제 변경만으로 검증을 끝내지 않음 |
-| 5 / P0, 0~4 이후 | platform + 서비스 소유자 / OPS-04,05 | 조회/배포/긴급 역할, `docs/script.md` 장애 절차·DB/S3/큐 복구 훈련 | 실제 역할로 허용·거부 검사. 격리 복원 환경에서 데이터·권한·연결 전환 검증, 관측 RTO/RPO와 미복구 범위 기록 |
-| 6 / P0, 로그 조사 가능 후 | Document / OPS-06 | 변환 큐의 원자 선점·lease/소유자 검증·만료 복구, 편집 outbox의 DB 잠금/ack 경계, 긴 변환 I/O와 예약 작업 실행 분리 | 두 인스턴스 동시 실행·롤링 재시작·ack 직후 종료·lease 만료 시험. 중복 전달을 허용해도 최종 변경은 멱등, 진행 중 다른 소유자의 작업을 초기화하지 않음 |
-| 7 / P0, 5·6 이후 | 각 서비스 + platform / OPS-08 | 서비스별 ECR 게시 CI·저장소별 OIDC, 명시적 image digest/source SHA release manifest, `aws_deploy.py`·테스트·업무 smoke | 일부 이미지만 변경한 배포/복구에서 다른 이미지가 바뀌지 않음. 이전 성공 release를 재현. 스키마 불일치 복구는 계속 거부하고 실제 업무 흐름으로 완료 판정 |
-| 8 / P1, 3·6·7 이후 | platform + 서비스 소유자 / OPS-07 | API별 HPA·metrics-server, 최소 2 Pod와 topology spread·PDB, 노드 용량 검토, Kafka/Redis/RDS 이중화 설계 | 부하 증가→Pod 확장→필요 시 노드 확장→축소를 검증. 단일 Pod에 PDB만 추가하지 않음. 장애·노드 drain 중 데이터 정합성 및 합의한 오류/지연 목표 확인 |
-| 9 / P2 | platform + 서비스 소유자 / OPS-09 | OpenTelemetry/Application Signals 선택적 적용, frontend 요청 ID 연결, trace 기반 조사 | Kafka·HTTP 추적 연결, 샘플링·저장 비용·성능 오버헤드 검증 후 서비스별 활성화 |
-
-순서 6은 HPA를 켜지 않아도 롤링 배포에서 인스턴스가 겹칠 수 있어 P0다. 현재 General 2~3대·Spot 0~2대 한도 안에서 수집기·exporter·API 복제본이 들어가는지 requests/limits와 가용 IP를 다시 계산한다. P1에서 요청량에 맞는 노드 한도를 결정하며 현재 상한을 처리량 보장으로 간주하지 않는다. Kafka partition 수·LLM rate limit·DB connection pool도 worker 확장 한도를 함께 제한한다.
-
-### 로그·지표·보존 계약 초안
-
-- 공통 JSON 로그 필드: `timestamp`, `level`, `service`, `environment`, `release`, `event`, `request_id`. 비동기는 `run_id`, `event_id`, `attempt`를 추가한다. 오류는 안정된 `error_code`와 예외 유형을 남긴다. 기존 `X-Request-ID`를 HTTP 경계에서 검증하고 Kafka envelope/header로 전달한다. 추적을 실제 활성화하기 전에는 가짜 `trace_id`를 만들지 않는다.
-- 토큰·쿠키·비밀번호·MFA secret·원문 문서·프롬프트·모델 응답 전체를 기본 로그에서 제외한다. 허용 필드 기반으로 기록하고 Java/Python/변환기 모두 가짜 비밀값 검출 테스트를 둔다. 요청·run·사용자 ID는 검색용 로그 필드이며 CloudWatch metric dimension으로 사용하지 않는다.
-- 보존 후보: 일반 앱·노드 로그 14일, 제어 영역·접근 감사 90일, Prometheus 수집용 EMF 원문 7일. CloudWatch의 metric 보존 정책은 로그 보존과 별개다. S3 `pipeline-runs/`는 업무 감사와 구분해 현재/과거 version을 포함한 30일 보존 후보로 검토한다. 실행 로그 API의 만료 후 응답 계약과 진행 중 작업의 보존을 정한 뒤 lifecycle을 적용한다.
-- CloudWatch add-on의 Application Signals 자동 계측은 초기에는 명시적으로 끈다. 지원 설정 key와 add-on 버전은 구현 시 고정한다. Fluent Bit과 Prometheus 전용 수집기의 담당 범위를 구분해 같은 로그·지표가 중복 수집되지 않게 한다.
-- 우선 지표: ALB 대상별 요청 수·5xx·TargetResponseTime p95, Ready Pod 수·재시작·Pending, DB 연결/CPU/여유 저장 공간, Redis 연결/eviction, Kafka broker·group별 lag, DB 기반 outbox/변환 큐의 가장 오래된 대기 시간, AI 처리 완료·실패·취소·복구 실패 수와 작업 시간. 정상 취소는 작업 실패율에서 분리한다.
-- AI worker는 별도 HTTP 서버를 추가하기보다 공통 작업 경계에서 완료/실패 metric을 EMF로 내보내는 방식부터 구현한다. 영속 DB 기반 oldest pending age는 별도 주기 수집으로 보완한다. HTTP 지표만으로 비동기 성공을 판정하지 않는다.
-- Prometheus 수집 경로가 모든 histogram을 그대로 지원한다고 가정하지 않는다. 초기 API p95는 ALB 원천을 사용하고 `_sum/_count`는 평균으로만 표시한다. Pipeline·worker의 p95는 지원되는 분포 수집 경로를 검증한 뒤 추가한다. RDS Enhanced Monitoring/Database Insights·분산 trace는 기본 운영 패널과 분리해 필요성과 비용을 검토한다.
-
-운영 수용 기준·초기 알림 조건·Runbook·장애 훈련은 [구체 실행 계획](script.md#aws-운영-보완-실행-계획)에 기록한다. CloudWatch 수집·IAM·차트의 실제 설치, 알림 수신, 부하/복구 실험은 이번 계획 문서화에서 실행하지 않았다.
