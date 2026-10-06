@@ -15,6 +15,7 @@ resources:
   - task-workers.yaml
   - edit-event-consumer.yaml
   - converter.yaml
+  - embedding-server.yaml
   - kafka.yaml
   - networkpolicy.yaml
   - keda-scaledobject.yaml

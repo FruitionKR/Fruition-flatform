@@ -234,12 +234,12 @@ lint 결과에 materialized 또는 merged promotion이 있고, 해당 산출물 
 docker compose --env-file infra/.env -f infra/compose.converter.yml down
 ```
 
-pipeline-api(:8000)와 워커(ingest/query/agent/maintenance task worker, edit-event-consumer). 백엔드 기동 후 실행(스키마 순서 보장).
+pipeline-api(:8000), 임베딩 서버(embedding-server, query·agent worker가 내부 호출)와 워커(ingest/query/agent/maintenance task worker, edit-event-consumer). 백엔드 기동 후 실행(스키마 순서 보장). query·agent worker는 임베딩 서버가 BGE-M3 적재를 마쳐 healthy가 된 뒤 시작한다.
 
 ```sh
 docker compose --env-file infra/.env \
   -f infra/compose.infra.yml -f infra/compose.ai.yml \
-  up -d pipeline-api ingest-worker query-task-worker agent-task-worker \
+  up -d pipeline-api embedding-server ingest-worker query-task-worker agent-task-worker \
   maintenance-task-worker edit-event-consumer pipeline-agent-worker
 curl http://localhost:8000/health
 ```

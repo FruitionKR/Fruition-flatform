@@ -32,7 +32,7 @@ x-ai-task-worker: &ai-task-worker
     S3_SECRET_KEY: ${S3_SECRET_KEY:-fruition_dev_secret}
   extra_hosts:
     - "host.docker.internal:host-gateway"
-  depends_on:
+  depends_on: &ai-task-depends-on
     pipeline-api:
       condition: service_healthy
     postgresql:
@@ -135,6 +135,21 @@ services:
       redis:
         condition: service_healthy
 
+  # 짧은 텍스트 전용 BGE-M3 임베딩 서버(ai ADR-0026). query·agent worker가 EMBEDDING_SERVICE_URL로 호출한다.
+  embedding-server:
+    image: *pipeline-image
+    container_name: fruition-embedding-server-dev
+    restart: unless-stopped
+    command: ["uvicorn", "app.modules.wiki_embedding.interfaces.http.embedding_server:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      INTERNAL_CALLBACK_TOKEN: ${INTERNAL_CALLBACK_TOKEN:-local-internal-callback}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
   query-task-worker:
     <<: *ai-task-worker
     container_name: fruition-query-task-worker-dev
@@ -142,6 +157,11 @@ services:
       <<: *ai-task-environment
       AI_COMMAND_TOPIC: ${QUERY_COMMAND_TOPIC:-ai.query.command}
       AI_COMMAND_CONSUMER_GROUP: query-task-worker
+      EMBEDDING_SERVICE_URL: http://embedding-server:8000
+    depends_on:
+      <<: *ai-task-depends-on
+      embedding-server:
+        condition: service_healthy
 
   agent-task-worker:
     <<: *ai-task-worker
@@ -150,6 +170,11 @@ services:
       <<: *ai-task-environment
       AI_COMMAND_TOPIC: ${AGENT_COMMAND_TOPIC:-ai.agent.command}
       AI_COMMAND_CONSUMER_GROUP: agent-task-worker
+      EMBEDDING_SERVICE_URL: http://embedding-server:8000
+    depends_on:
+      <<: *ai-task-depends-on
+      embedding-server:
+        condition: service_healthy
 
   maintenance-task-worker:
     <<: *ai-task-worker
