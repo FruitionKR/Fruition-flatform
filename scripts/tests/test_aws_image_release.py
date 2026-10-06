@@ -3,7 +3,10 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -335,6 +338,72 @@ class ImageReleaseTests(unittest.TestCase):
             release.verify(legacy["release_sha"], allow_legacy=True)
             self.assertEqual(4, lookup.call_count)
         with self.assertRaises(ValueError): release.validate_manifest({**legacy, "schema_version": 3}, legacy["release_sha"])
+
+    def run_publish_step(self, failures):
+        """publish job의 공개 스크립트를 가짜 gh로 실행한다. failures: 실패시킬 (gh 하위명령, 횟수)."""
+        publisher = yaml.safe_load((ROOT / ".github/workflows/publish-images.yml").read_text())
+        step = next(s for s in publisher["jobs"]["publish"]["steps"] if s.get("name") == "Publish complete release for operator selection")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            bin_dir = tmp / "bin"
+            bin_dir.mkdir()
+            (tmp / "failures.json").write_text(json.dumps(dict(failures)))
+            # 가짜 gh: 호출을 기록하고, 지정한 하위명령은 정해진 횟수만큼 HTTP 500으로 실패한다.
+            # create가 서버에서는 성공했는데 500을 돌려준 경우도 재현하도록 "created" 플래그를 먼저 남긴다.
+            # 같은 폴더의 가짜 python3가 잡히지 않도록 테스트를 실행한 Python으로 고정한다.
+            (bin_dir / "gh").write_text(f"""#!{sys.executable}
+import json, sys
+from pathlib import Path
+tmp = Path({str(tmp)!r})
+calls = tmp / "calls.log"
+with calls.open("a") as log:
+    log.write(" ".join(sys.argv[1:3]) + "\\n")
+failures = json.loads((tmp / "failures.json").read_text())
+action = sys.argv[2]
+if action == "view":
+    sys.exit(0 if (tmp / "created").exists() else 1)
+if action == "create" and failures.get("create_after_write", 0):
+    (tmp / "created").touch()
+    failures["create_after_write"] -= 1
+    (tmp / "failures.json").write_text(json.dumps(failures))
+    print("HTTP 500", file=sys.stderr); sys.exit(1)
+if failures.get(action, 0):
+    failures[action] -= 1
+    (tmp / "failures.json").write_text(json.dumps(failures))
+    print("HTTP 500", file=sys.stderr); sys.exit(1)
+if action == "create":
+    (tmp / "created").touch()
+""")
+            for name, body in (("python3", "#!/bin/sh\nexit 0\n"), ("sleep", "#!/bin/sh\nexit 0\n")):
+                (bin_dir / name).write_text(body)
+            for path in bin_dir.iterdir():
+                path.chmod(0o755)
+            env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "RELEASE_SHA": "a" * 40,
+                   "GITHUB_REPOSITORY": "FruitionKR/Fruition-flatform", "GITHUB_SHA": "b" * 40,
+                   "GITHUB_STEP_SUMMARY": str(tmp / "summary.md")}
+            result = subprocess.run(["bash", "-c", step["run"]], cwd=tmp, env=env, capture_output=True, text=True)
+            calls = (tmp / "calls.log").read_text().split("\n") if (tmp / "calls.log").exists() else []
+            return result, [c for c in calls if c]
+
+    def test_publish_retries_transient_github_errors(self):
+        # 2026-10-06 release 생성 API가 HTTP 500을 연달아 돌려 게시가 멈췄다.
+        result, calls = self.run_publish_step({"create": 2, "upload": 1, "edit": 1})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(3, calls.count("release create"))
+        self.assertEqual(2, calls.count("release upload"))
+        self.assertEqual(2, calls.count("release edit"))
+
+    def test_publish_does_not_recreate_a_release_created_before_a_500(self):
+        result, calls = self.run_publish_step({"create_after_write": 1})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, calls.count("release create"))
+        self.assertEqual(1, calls.count("release edit"))
+
+    def test_publish_gives_up_after_bounded_retries(self):
+        result, calls = self.run_publish_step({"create": 99})
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(4, calls.count("release create"))
+        self.assertEqual(0, calls.count("release edit"))
 
     def test_deploy_workflow_allows_legacy_release_only_for_rollback(self):
         workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
