@@ -1,5 +1,6 @@
 """Release identity, main CI gating, complete publication and digest verification."""
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -15,14 +16,35 @@ release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
 
-def manifest(schema=2):
+def manifest(schema=release.SCHEMA_VERSION):
     services = release.SCHEMA_SERVICES[schema]
     repos = sorted({release.SERVICES[service][0] for service in services})
     sources = {repo: str(i + 1) * 40 for i, repo in enumerate(repos)}
     recipe = "a" * 64
-    return {"schema_version": schema, "sources": sources, "recipe": recipe,
-            "release_sha": release.identity(sources, recipe),
-            "images": {service: "sha256:" + "b" * 64 for service in services}}
+    data = {"schema_version": schema, "sources": sources, "recipe": recipe,
+            "release_sha": release.identity(sources, recipe)}
+    if schema < 3:
+        return {**data, "images": {service: "sha256:" + "b" * 64 for service in services}}
+    builds = {}
+    for i, service in enumerate(services):
+        repo, _, dockerfile = release.SERVICES[service]
+        tree = str(i + 5) * 40
+        builds[service] = {"context_tree": tree, "dockerfile": dockerfile,
+                           "tag": "b-" + release.build_id(service, repo, tree, dockerfile, release.BUILDER_VERSION)}
+    images = {service: {"tag": build["tag"], "digest": "sha256:" + "b" * 64} for service, build in builds.items()}
+    release_sha = release.identity(sources, recipe, builds, release.BUILDER_VERSION)
+    return {**data, "release_sha": release_sha, "builder_version": release.BUILDER_VERSION,
+            "builds": builds, "images": images}
+
+
+def outcomes(data, built=()):
+    return {service: {**image, "built": service in built} for service, image in data["images"].items()}
+
+
+def build_job_digest():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/publish-images.yml").read_text())
+    raw = json.dumps(workflow["jobs"]["build"], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 class ImageReleaseTests(unittest.TestCase):
@@ -53,7 +75,8 @@ class ImageReleaseTests(unittest.TestCase):
     def test_identity_tracks_each_service_revision_and_recipe(self):
         data = manifest()
         release.validate_manifest(data, data["release_sha"])
-        self.assertEqual(data["release_sha"], release.identity(dict(reversed(list(data["sources"].items()))), data["recipe"]))
+        reordered = dict(reversed(list(data["sources"].items())))
+        self.assertEqual(data["release_sha"], release.identity(reordered, data["recipe"], data["builds"], data["builder_version"]))
         for repo in release.REPOS:
             modified = copy.deepcopy(data)
             modified["sources"][repo] = "f" * 40
@@ -90,13 +113,13 @@ class ImageReleaseTests(unittest.TestCase):
     def test_finalize_requires_all_images_and_rejects_duplicate_results(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); results = root / "results"; results.mkdir()
-            data = manifest(); images = data.pop("images")
+            data = manifest(); outcome = outcomes(data, built=("pipeline",)); images = data.pop("images")
             path = root / "release.json"; path.write_text(json.dumps(data))
-            for service, digest in images.items():
-                (results / (service + ".json")).write_text(json.dumps({service: digest}))
+            for service, result in outcome.items():
+                (results / (service + ".json")).write_text(json.dumps({service: result}))
             release.finalize(path, results)
             self.assertEqual(images, json.loads(path.read_text())["images"])
-            (results / "duplicate.json").write_text(json.dumps({"pipeline": images["pipeline"]}))
+            (results / "duplicate.json").write_text(json.dumps({"pipeline": outcome["pipeline"]}))
             with self.assertRaises(ValueError): release.finalize(path, results)
             (results / "duplicate.json").unlink()
             (results / "pipeline.json").unlink()
@@ -105,8 +128,16 @@ class ImageReleaseTests(unittest.TestCase):
     def test_published_notes_round_trip_and_drafts_are_not_deployable(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); path = root / "release.json"; output = root / "notes.md"
-            data = manifest(); path.write_text(json.dumps(data)); release.notes(path, output)
-            response = {"draft": False, "prerelease": False, "body": output.read_text()}
+            data = manifest(); path.write_text(json.dumps(data))
+            (root / "results").mkdir()
+            for service, result in outcomes(data, built=("access-svc",)).items():
+                (root / "results" / (service + ".json")).write_text(json.dumps({service: result}))
+            release.notes(path, output, root / "results")
+            body = output.read_text()
+            # 서비스마다 태그와 이번 빌드/재사용 여부를 한 줄로 보여 준다.
+            self.assertIn(f"| access-svc | `{data['images']['access-svc']['tag']}` | 새로 빌드 |", body)
+            self.assertIn(f"| pipeline | `{data['images']['pipeline']['tag']}` | 재사용 |", body)
+            response = {"draft": False, "prerelease": False, "body": body}
             with patch.dict(release.os.environ, {"GITHUB_REPOSITORY": "FruitionKR/Fruition-flatform"}), patch.object(release, "github", return_value=response):
                 self.assertEqual(data, release.fetch_release(data["release_sha"]))
                 for field in ("draft", "prerelease"):
@@ -125,20 +156,27 @@ class ImageReleaseTests(unittest.TestCase):
                         release.record_build(path, "pipeline", result, value)
                     self.assertFalse(result.exists())
                 release.record_build(path, "pipeline", result, digest)
-                self.assertEqual({"pipeline": digest}, json.loads(result.read_text()))
+                tag = data["builds"]["pipeline"]["tag"]
+                self.assertEqual({"pipeline": {"tag": tag, "digest": digest, "built": True}}, json.loads(result.read_text()))
+            with patch.object(release, "ecr_digest", return_value=digest) as lookup:
+                release.record_build(path, "pipeline", result, digest)
+                lookup.assert_called_once_with("pipeline", tag)
 
     def test_prepare_retry_does_not_checkout_login_or_rebuild_existing_tag(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); path = root / "release.json"; result = root / "image.json"
-            path.write_text(json.dumps(manifest())); digest = "sha256:" + "b" * 64
+            data = manifest(); path.write_text(json.dumps(data)); digest = "sha256:" + "b" * 64
+            tag = data["builds"]["pipeline"]["tag"]
             with patch.dict(release.os.environ, {"AWS_ACCOUNT_ID": "123456789012"}), \
                  patch.object(release, "run", side_effect=["123456789012", json.dumps({"repositories": [{"imageTagMutability": "IMMUTABLE"}]})]), \
-                 patch.object(release, "ecr_digest", return_value=digest), \
+                 patch.object(release, "ecr_digest", return_value=digest) as lookup, \
                  patch.object(release.subprocess, "run") as command, patch.object(release, "output") as output:
                 release.prepare_build(path, "pipeline", result)
+                # 같은 빌드 입력의 이미지가 이미 있으면 다른 release가 만든 것이라도 그대로 쓴다.
+                lookup.assert_called_once_with("pipeline", tag, missing_ok=True)
                 command.assert_not_called()
                 output.assert_called_once_with("build", "false")
-                self.assertEqual({"pipeline": digest}, json.loads(result.read_text()))
+                self.assertEqual({"pipeline": {"tag": tag, "digest": digest, "built": False}}, json.loads(result.read_text()))
 
     def test_prepare_new_image_verifies_checkout_before_exposing_build_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -159,6 +197,7 @@ class ImageReleaseTests(unittest.TestCase):
                         values = dict(c.args for c in output.call_args_list)
                         self.assertEqual("true", values["build"])
                         self.assertEqual("source/pipeline", values["context"])
+                        self.assertTrue(values["image"].endswith("/fruition-pipeline:" + data["builds"]["pipeline"]["tag"]))
                         self.assertEqual(revision, values["revision"])
                         self.assertFalse(result.exists())  # only record after push verification
 
@@ -167,8 +206,115 @@ class ImageReleaseTests(unittest.TestCase):
         with patch.object(release, "fetch_release", return_value=data), patch.object(release, "ecr_digest", return_value="sha256:" + "b" * 64) as lookup:
             release.verify(data["release_sha"])
             self.assertEqual(5, lookup.call_count)
+            self.assertEqual({(s, image["tag"]) for s, image in data["images"].items()},
+                             {c.args for c in lookup.call_args_list})
         with patch.object(release, "fetch_release", return_value=data), patch.object(release, "ecr_digest", return_value="sha256:" + "c" * 64):
             with self.assertRaises(ValueError): release.verify(data["release_sha"])
+
+    def test_legacy_five_image_release_uses_release_tag_and_stays_deployable(self):
+        legacy = manifest(schema=2)
+        with patch.object(release, "fetch_release", return_value=legacy), patch.object(release, "ecr_digest", return_value="sha256:" + "b" * 64) as lookup:
+            release.verify(legacy["release_sha"])
+            self.assertEqual({(s, legacy["release_sha"]) for s in release.SERVICES}, {c.args for c in lookup.call_args_list})
+
+    def test_build_id_depends_only_on_service_build_inputs(self):
+        args = ("pipeline", "FruitionKR/Fruition-ai", "1" * 40, "pipeline/Dockerfile", 1)
+        value = release.build_id(*args)
+        self.assertRegex(value, r"^[0-9a-f]{40}$")
+        self.assertEqual(value, release.build_id(*args))
+        for index, changed in enumerate(("converter", "FruitionKR/other", "2" * 40, "Dockerfile", 2)):
+            modified = list(args); modified[index] = changed
+            self.assertNotEqual(value, release.build_id(*modified))
+
+    def test_schema3_build_inputs_are_bound_to_release_identity(self):
+        data = manifest()
+        # 빌드 입력과 태그를 서로 맞게 함께 바꿔도 release ID가 달라져 거부된다.
+        forged = copy.deepcopy(data)
+        repo, _, dockerfile = release.SERVICES["pipeline"]
+        tree = "e" * 40
+        forged["builds"]["pipeline"] = {"context_tree": tree, "dockerfile": dockerfile,
+                                        "tag": "b-" + release.build_id("pipeline", repo, tree, dockerfile, release.BUILDER_VERSION)}
+        forged["images"]["pipeline"]["tag"] = forged["builds"]["pipeline"]["tag"]
+        with self.assertRaises(ValueError):
+            release.validate_manifest(forged, forged["release_sha"])
+
+    def test_schema3_tags_are_recomputed_from_build_inputs(self):
+        data = manifest()
+        release.validate_manifest(data, data["release_sha"])
+        bad = []
+        item = copy.deepcopy(data); item["builds"]["pipeline"]["context_tree"] = "f" * 40; bad.append(item)
+        item = copy.deepcopy(data); item["builds"]["pipeline"]["dockerfile"] = "Dockerfile"; bad.append(item)
+        item = copy.deepcopy(data); item["builds"]["pipeline"]["tag"] = "b-" + "0" * 40; bad.append(item)
+        item = copy.deepcopy(data); item["images"]["pipeline"]["tag"] = data["images"]["converter"]["tag"]; bad.append(item)
+        item = copy.deepcopy(data); item["images"]["pipeline"] = "sha256:" + "b" * 64; bad.append(item)
+        item = copy.deepcopy(data); item["images"]["pipeline"]["extra"] = "x"; bad.append(item)
+        item = copy.deepcopy(data); del item["builds"]["converter"]; bad.append(item)
+        item = copy.deepcopy(data); item["builder_version"] = release.BUILDER_VERSION + 1; bad.append(item)
+        item = copy.deepcopy(data); item["builder_version"] = True; bad.append(item)
+        for item in bad:
+            with self.subTest(item=item), self.assertRaises(ValueError):
+                release.validate_manifest(item, data["release_sha"])
+        # 빌드 방식 버전이 오른 뒤에도 기록된 버전으로 다시 계산해 이전 release를 검증한다.
+        with patch.object(release, "BUILDER_VERSION", release.BUILDER_VERSION + 1):
+            release.validate_manifest(data, data["release_sha"])
+
+    def test_discover_records_context_tree_per_service(self):
+        trees = {"FruitionKR/Fruition-access": "1" * 40, "FruitionKR/Fruition-document": "2" * 40,
+                 "FruitionKR/Fruition-ai": "3" * 40, "FruitionKR/Fruition-frontend": "4" * 40}
+        pipeline_tree = "9" * 40
+        def github(path, missing_ok=False):
+            repo = "/".join(path.split("/")[1:3])
+            if path.endswith("/commits/main"):
+                return {"sha": hashlib.sha1(repo.encode()).hexdigest(),
+                        "commit": {"tree": {"sha": trees[repo]}}}
+            if "/actions/" in path:
+                sha = hashlib.sha1(repo.encode()).hexdigest()
+                return {"workflow_runs": [{"head_sha": sha, "event": "push", "head_branch": "main",
+                                           "head_repository": {"full_name": repo}, "status": "completed", "conclusion": "success"}]}
+            if path == f"repos/FruitionKR/Fruition-ai/git/trees/{trees['FruitionKR/Fruition-ai']}":
+                return {"sha": trees[repo], "truncated": False, "tree": [
+                    {"path": "converter", "type": "tree", "sha": "8" * 40},
+                    {"path": "pipeline", "type": "tree", "sha": pipeline_tree}]}
+            if "/releases/tags/" in path:
+                return None
+            raise AssertionError(path)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "release.json"
+            with patch.dict(release.os.environ, {"GITHUB_REPOSITORY": "FruitionKR/Fruition-flatform"}, clear=False), \
+                 patch.object(release, "github", side_effect=github), patch.object(release, "output"):
+                release.discover(path)
+            data = json.loads(path.read_text())
+        self.assertEqual(3, data["schema_version"])
+        self.assertEqual(release.BUILDER_VERSION, data["builder_version"])
+        self.assertEqual(pipeline_tree, data["builds"]["pipeline"]["context_tree"])
+        # converter는 저장소 루트를 context로 쓰므로 AI 저장소의 어떤 변경에도 다시 빌드된다.
+        self.assertEqual(trees["FruitionKR/Fruition-ai"], data["builds"]["converter"]["context_tree"])
+        self.assertEqual(trees["FruitionKR/Fruition-frontend"], data["builds"]["frontend"]["context_tree"])
+        release.validate_manifest(data, data["release_sha"], complete=False)
+
+    def test_fetch_and_verify_use_the_exact_manifest_file(self):
+        data = manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "release.json"
+            with patch.object(release, "fetch_release", return_value=data) as fetch:
+                release.fetch(data["release_sha"], path)
+                fetch.assert_called_once_with(data["release_sha"])
+            self.assertEqual(data, json.loads(path.read_text()))
+            with patch.object(release, "fetch_release") as fetch, \
+                 patch.object(release, "ecr_digest", return_value="sha256:" + "b" * 64) as lookup:
+                release.verify(data["release_sha"], manifest=path)
+                fetch.assert_not_called()
+                self.assertEqual(5, lookup.call_count)
+                with self.assertRaises(ValueError):
+                    release.verify("f" * 40, manifest=path)
+            tampered = copy.deepcopy(data); tampered["images"]["pipeline"]["digest"] = "sha256:" + "c" * 64
+            path.write_text(json.dumps(tampered))
+            with patch.object(release, "ecr_digest", return_value="sha256:" + "b" * 64), self.assertRaises(ValueError):
+                release.verify(data["release_sha"], manifest=path)
+
+    def test_build_job_change_requires_builder_version_bump(self):
+        # build job이 바뀌면 같은 소스여도 이미지가 달라질 수 있다. BUILDER_VERSION을 올리고 해시를 갱신한다.
+        self.assertEqual(release.BUILDER_JOB_SHA256, build_job_digest())
 
     def test_current_release_includes_frontend_image_and_repository(self):
         self.assertEqual(("FruitionKR/Fruition-frontend", ".", "Dockerfile"), release.SERVICES["frontend"])

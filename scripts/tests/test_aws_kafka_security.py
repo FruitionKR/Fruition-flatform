@@ -1,12 +1,12 @@
 """Check the rendered Kafka transport/identity/ACL contract, not just patches."""
 import unittest
-from test_aws_deploy import CONFIG, SHA, deploy
+from test_aws_deploy import CONFIG, SHA, MANIFEST, deploy
 
 
 class KafkaSecurityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.docs = deploy.render(CONFIG, SHA)
+        cls.docs = deploy.render(CONFIG, SHA, MANIFEST)
         cls.users = {d["metadata"]["name"]: d["spec"] for d in cls.docs if d["kind"] == "KafkaUser"}
         cls.apps = {d["metadata"]["name"]: d["spec"]["template"]["spec"] for d in cls.docs if d["kind"] == "Deployment"}
 

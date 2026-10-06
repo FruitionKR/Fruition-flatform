@@ -28,6 +28,16 @@ class IaCContractTests(unittest.TestCase):
             self.assertTrue(lock.exists())
             self.assertNotEqual(0, subprocess.run(["git", "check-ignore", "-q", str(lock)], cwd=ROOT).returncode)
 
+    def test_ecr_keeps_enough_images_for_reused_builds_and_rollback(self):
+        ecr = re.sub(r"\s+", " ", (ROOT / "infra/terraform/ecr.tf").read_text())
+        self.assertIn('image_tag_mutability = "IMMUTABLE"', ecr)
+        # 빌드 태그·이전 release 태그를 한 규칙으로 함께 센다. tagStatus any 규칙을 따로 두면
+        # 앞 규칙이 남긴 b- 이미지까지 세어 기대보다 먼저 만료될 수 있다.
+        rule = ('rulePriority = 1 description = "keep last 60 images" selection = { '
+                'tagStatus = "any" countType = "imageCountMoreThan" countNumber = 60 }')
+        self.assertIn(rule, ecr)
+        self.assertEqual(1, ecr.count("rulePriority"))
+
     def test_frontend_wake_trigger_cannot_choose_the_controller_action(self):
         wake = re.sub(r"\s+", " ", (ROOT / "infra/terraform/request-wake.tf").read_text())
         # 화면은 고정 source/detail-type 이벤트만 보낼 수 있고, Lambda 입력은 규칙이 정한다.

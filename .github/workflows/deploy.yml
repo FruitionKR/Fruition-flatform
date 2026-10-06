@@ -68,14 +68,21 @@ jobs:
           python3.12 -m venv "$RUNNER_TEMP/fruition-venv"
           "$RUNNER_TEMP/fruition-venv/bin/pip" install PyYAML==6.0.2
           echo "$RUNNER_TEMP/fruition-venv/bin" >> "$GITHUB_PATH"
-      - name: Validate and render before AWS mutation
+      - name: Fetch release manifest
+        # render·검증·배포가 같은 파일을 쓴다. 게시된 GitHub Release만 읽으며 AWS 권한은 필요 없다.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           SHA="$RELEASE_SHA"
           if [ "$ACTION" = rollback ]; then SHA="$ROLLBACK_SHA"; fi
-          printf '%s' "$DEPLOY_CONFIG" > "$RUNNER_TEMP/deploy-config.json"
-          python scripts/aws_deploy.py render --config "$RUNNER_TEMP/deploy-config.json" --sha "$SHA" > "$RUNNER_TEMP/rendered.yaml"
+          python scripts/aws_image_release.py fetch --release "$SHA" --output "$RUNNER_TEMP/release.json"
           echo "IMAGE_SHA=$SHA" >> "$GITHUB_ENV"
+      - name: Validate and render before AWS mutation
+        run: |
+          set -euo pipefail
+          printf '%s' "$DEPLOY_CONFIG" > "$RUNNER_TEMP/deploy-config.json"
+          python scripts/aws_deploy.py render --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --manifest "$RUNNER_TEMP/release.json" > "$RUNNER_TEMP/rendered.yaml"
       - name: Configure AWS credentials (OIDC)
         id: aws_credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
@@ -94,7 +101,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          VERIFY=(--release "$IMAGE_SHA")
+          VERIFY=(--release "$IMAGE_SHA" --manifest "$RUNNER_TEMP/release.json")
           if [ "$ACTION" = rollback ]; then VERIFY+=(--allow-legacy); fi
           python scripts/aws_image_release.py verify "${VERIFY[@]}"
       - name: Update kubeconfig
@@ -110,7 +117,7 @@ jobs:
           if [ "$BOOTSTRAP_PROBE_RECOVERY" = true ]; then EXTRA+=(--bootstrap-probe-recovery); fi
           if [ "$BOOTSTRAP_MAIL_HEALTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-mail-health-recovery); fi
           if [ "$BOOTSTRAP_OAUTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-oauth-recovery); fi
-          python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --review "docs/releases/$IMAGE_SHA.json" "${EXTRA[@]}"
+          python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --manifest "$RUNNER_TEMP/release.json" --review "docs/releases/$IMAGE_SHA.json" "${EXTRA[@]}"
       - name: Verify large PDF multipart upload, Range read, batch conversion and AI
         # deploy 전용 gate. bootstrap/rollback은 제외하며 실패 시 아래 Discord 알림이 실행된다.
         if: inputs.action == 'deploy'
@@ -127,5 +134,5 @@ jobs:
       - name: Remove temporary deployment files
         if: always()
         run: |
-          rm -f "$KUBECONFIG" "$RUNNER_TEMP/deploy-config.json" "$RUNNER_TEMP/rendered.yaml" "$RUNNER_TEMP/pdf-smoke-report.json"
+          rm -f "$KUBECONFIG" "$RUNNER_TEMP/deploy-config.json" "$RUNNER_TEMP/rendered.yaml" "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/pdf-smoke-report.json"
           rm -rf "$RUNNER_TEMP/fruition-venv"

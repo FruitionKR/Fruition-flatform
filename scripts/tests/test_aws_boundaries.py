@@ -7,7 +7,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from test_aws_deploy import CONFIG, SHA, REVIEW, FakeCluster, deploy
+from test_aws_deploy import CONFIG, SHA, MANIFEST, REVIEW, FakeCluster, deploy
 
 
 def selected(selector, app):
@@ -26,7 +26,7 @@ class BoundaryTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.docs=deploy.render(CONFIG,SHA)
+        cls.docs=deploy.render(CONFIG,SHA,MANIFEST)
         cls.policies=[d for d in cls.docs if d["kind"]=="NetworkPolicy"]
 
     def allows(self, app, direction, port, other_app=None, ip=None):

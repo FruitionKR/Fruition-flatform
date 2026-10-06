@@ -608,16 +608,19 @@ terraform output -json의 각 output은 value 필드로 제공된다. 스토리�
 
 설정이 완료되기 전에는 저장소 밖 파일 또는 Git에서 제외한 `k8s/overlays/aws/deploy-config.feedback.json`에 실제 값을 모은다. 예시 파일만 커밋하며 실제 계정·주소·ARN은 문서에 복제하지 않는다. [환경값 이전 절차](../k8s/overlays/aws/README.md#설정-완료-후-github-environment로-이전)에 따라 로컬 렌더 검증 후 Environment variables로 옮긴다. 현재 workflow는 이미 해당 Environment 변수를 읽으므로 실제 설정 파일을 GitHub에 게시할 필요가 없다.
 
-    python scripts/aws_deploy.py render --config /secure/path/aws-deploy.json --sha <40자리-commit-SHA>
+    # 게시된 릴리스 manifest를 받는다(GH_TOKEN, GITHUB_REPOSITORY 필요)
+    python scripts/aws_image_release.py fetch --release <40자리-release-ID> --output /secure/path/release.json
+    python scripts/aws_deploy.py render --config /secure/path/aws-deploy.json --sha <40자리-release-ID> --manifest /secure/path/release.json
     # AWS 배포 승인을 받고 대상 kubeconfig를 확인한 뒤 실행
-    python scripts/aws_deploy.py deploy --config /secure/path/aws-deploy.json --sha <40자리-commit-SHA> --review docs/releases/<40자리-commit-SHA>.json
+    python scripts/aws_deploy.py deploy --config /secure/path/aws-deploy.json --sha <40자리-release-ID> --manifest /secure/path/release.json --review docs/releases/<40자리-release-ID>.json
     # 최초 설치는 bootstrap. 필요 시 검토된 --bootstrap-probe-recovery / --bootstrap-mail-health-recovery / --bootstrap-oauth-recovery만 추가
-    python scripts/aws_deploy.py bootstrap --config /secure/path/aws-deploy.json --sha <40자리-commit-SHA> --review docs/releases/<40자리-commit-SHA>.json
-    python scripts/aws_deploy.py rollback --config /secure/path/aws-deploy.json --sha <이전-성공-SHA>
+    python scripts/aws_deploy.py bootstrap --config /secure/path/aws-deploy.json --sha <40자리-release-ID> --manifest /secure/path/release.json --review docs/releases/<40자리-release-ID>.json
+    # rollback도 대상 릴리스의 manifest를 같은 방법으로 받아 넘긴다
+    python scripts/aws_deploy.py rollback --config /secure/path/aws-deploy.json --sha <이전-성공-ID> --manifest /secure/path/rollback-release.json
 
 배포 순서는 다음과 같다.
 
-1. 입력과 임시 Kustomize 렌더를 검증한다. 미치환 값과 SHA가 다른 업무 이미지를 거부한다.
+1. 입력과 임시 Kustomize 렌더를 검증한다. 미치환 값과 릴리스에 기록되지 않은 업무 이미지를 거부한다(schema 3은 서비스별 `@digest`, schema 1·2는 릴리스 ID 태그).
 2. AWS 인증 계정·EKS ARN/버전/상태와 현재 kubeconfig endpoint를 대조하고, 플랫폼의 fruition namespace·gp3 StorageClass 존재와 aws-secrets-manager ClusterSecretStore Ready를 읽기 전용으로 확인한다. ServiceAccount·ConfigMap·ExternalSecret·앱 NetworkPolicy만 적용하고 모든 ExternalSecret Ready를 확인한다. 제한 정책 적용 후 기존 `internal-only-ingress` 정책을 이름으로 삭제한다. `kubectl apply`만으로는 과거 정책이 제거되지 않으며 삭제 실패 시 DB gate와 rollout을 진행하지 않는다.
 3. access-db-preflight, document-db-preflight, ai-db-preflight Job이 실제 runtime/migration 로그인, DB·public 스키마·테이블 소유권, 관리자 권한/membership 부재, runtime DML·DDL/교차 CONNECT 경계를 검사한다. 서비스별 runtime/migration 키 두 개만 참조하며 관리자 키는 받지 않는다. app.kubernetes.io/component=db-preflight, app=<서비스>-db-preflight Pod label을 네트워크 정책의 대상으로 사용한다.
 4. 세 migration Job Complete를 확인한다. 실패하면 runtime 적용을 중단한다. 이후 동일 사전검증으로 실제 변경된 public schema의 pg_dump --schema-only SHA256을 수집한다.
@@ -629,7 +632,7 @@ bootstrap은 앞 절의 별도 관리자 절차다. 이 배포 스크립트는 D
 
 rollback은 **실제 public schema가 이전 성공 release와 동일한 경우의 image/manifest 재배포**다. 현재 서비스 Secret으로 먼저 fingerprint를 대조하며 불일치 시 업무 ConfigMap·Secret·Deployment를 적용하지 않는다(검사용 Job만 실행). 일치하면 이전 성공 manifest를 재사용하고 migration을 건너뛴다. schema가 달라졌거나 성공 기록이 없으면 자동 복구를 거부한다. DB down-migration·데이터 복구·외부 S3 artifact 복원을 수행하지 않는다. 데이터 의미 변경까지 fingerprint가 증명하지 않으므로, 그 경우에는 별도 복구 검토/PITR 절차가 필요하다. schema 변경 migration 실패 후 구 image로 되돌리는 것도 일반적으로 보장하지 않는다.
 
-GitHub Deploy (EKS)는 platform 저장소 main에서 수동 실행한다. action은 deploy·bootstrap(최초 설치)·rollback이다. action=deploy/bootstrap은 명시한 release_sha를 사용하며 platform commit SHA에서 추정하지 않는다. 배포 전 `aws_image_release.py verify`로 게시된 이미지를 확인하고, deploy에 한해 `aws_pdf_smoke.py` PDF 업로드·변환·AI smoke를 추가로 실행한다(11페이지 합성 PDF가 분할 문서 없이 원본 문서 하나로 저장되는지 확인, [대용량 문서 전송](aws-document-transfer.md)). 다섯 ECR 저장소(frontend 포함)에 같은 release 태그의 이미지가 모두 있어야 한다. frontend 이미지가 없는 schema 1 release는 action=rollback에서만 검증을 통과한다([이미지 릴리스](aws-image-releases.md)). 이미지가 없으면 실패하며 Deploy workflow는 빌드하거나 push하지 않는다. 이미지는 별도 `Publish image release` workflow(`publish-images.yml`)가 게시한다. ECR tag는 Terraform에서 IMMUTABLE이다. action=rollback은 기존 성공 release의 rollback_sha를 사용한다. ECR lifecycle이 이전 SHA를 삭제했다면 복구 대상이 아니므로 필요한 release의 보존 정책을 운영자가 관리한다.
+GitHub Deploy (EKS)는 platform 저장소 main에서 수동 실행한다. action은 deploy·bootstrap(최초 설치)·rollback이다. action=deploy/bootstrap은 명시한 release_sha를 사용하며 platform commit SHA에서 추정하지 않는다. 배포 전 `aws_image_release.py verify`로 게시된 이미지를 확인하고, deploy에 한해 `aws_pdf_smoke.py` PDF 업로드·변환·AI smoke를 추가로 실행한다(11페이지 합성 PDF가 분할 문서 없이 원본 문서 하나로 저장되는지 확인, [대용량 문서 전송](aws-document-transfer.md)). 다섯 ECR 저장소(frontend 포함)에 release.json이 가리키는 이미지가 모두 있어야 한다(schema 3은 서비스별 `b-` 태그와 digest, schema 2는 같은 release 태그). frontend 이미지가 없는 schema 1 release는 action=rollback에서만 검증을 통과한다([이미지 릴리스](aws-image-releases.md)). 이미지가 없으면 실패하며 Deploy workflow는 빌드하거나 push하지 않는다. 이미지는 별도 `Publish image release` workflow(`publish-images.yml`)가 게시한다. ECR tag는 Terraform에서 IMMUTABLE이다. action=rollback은 기존 성공 release의 rollback_sha를 사용한다. ECR lifecycle이 이전 SHA를 삭제했다면 복구 대상이 아니므로 필요한 release의 보존 정책을 운영자가 관리한다.
 
 GitHub 관리자는 feedback Environment의 **required reviewers와 deployment branch 제한**을 설정해야 한다. YAML만으로 승인자를 강제하지 않는다. OIDC subject는 `<github_oidc_subject_prefix>:environment:feedback`이며 Terraform github_deploy_environment와 workflow Environment를 함께 맞춘다. `github_oidc_subject_prefix`는 GitHub API의 `sub_claim_prefix`(owner/repository 고유 ID를 포함할 수 있음)를 조회해 tfvars에 넣고 이름으로 추정하지 않는다([이미지 릴리스](aws-image-releases.md)). 환경 보호 규칙·AWS credentials·EKS/addon 설치·DNS/ACM·실제 배포와 복구는 로컬 테스트로 검증되지 않는다.
 
@@ -788,4 +791,4 @@ python3 -m venv .venv
 
 서비스 연동 검증은 형제 소스가 필요하며 platform 단독 CI와 구분한다. 기본 IaC 검증은 서비스 소스 없이 실행할 수 있다. 로컬 `dev-up.sh`·`front-up.sh`·`back-up.sh`·`ai-up.sh`는 platform의 공통 `.env`·runtime 관리와 Compose 네트워크를 사용하는 통합 도구다.
 
-독립 platform의 배포 workflow에는 `release_sha`로 ECR에 존재하는 40자리 이미지 묶음 태그를 명시한다. 플랫폼 커밋 SHA를 서비스 이미지 SHA로 사용하지 않는다. 현재 배포 스크립트는 다섯 이미지에 동일한 release 태그가 있는 묶음을 요구한다. 이 묶음은 platform의 `Publish image release` workflow가 네 서비스 저장소의 CI 성공 커밋으로 빌드·게시하며, 각 소스 커밋과 digest는 GitHub Release의 `release.json`에 기록된다([이미지 릴리스](aws-image-releases.md)). 이번 정리는 실제 배포를 실행하지 않는다.
+독립 platform의 배포 workflow에는 `release_sha`로 ECR에 존재하는 40자리 이미지 묶음 태그를 명시한다. 플랫폼 커밋 SHA를 서비스 이미지 SHA로 사용하지 않는다. 현재 배포 스크립트는 릴리스 manifest(`--manifest`)에 기록된 다섯 이미지 digest로 배포한다. 이 묶음은 platform의 `Publish image release` workflow가 네 서비스 저장소의 CI 성공 커밋으로 빌드·게시하며, 각 소스 커밋과 digest는 GitHub Release의 `release.json`에 기록된다([이미지 릴리스](aws-image-releases.md)). 이번 정리는 실제 배포를 실행하지 않는다.
