@@ -1,0 +1,70 @@
+# 짧은 텍스트 전용 BGE-M3 임베딩 서버(ai ADR-0026).
+# 워커마다 모델(약 2.5GB)을 올리지 않도록 모델을 이 pod 하나에만 올리고,
+# query·agent 워커가 EMBEDDING_SERVICE_URL로 호출한다. 긴 페이지 임베딩은 maintenance 워커가 직접 처리한다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embedding-server
+  namespace: fruition
+  labels:
+    app: embedding-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: embedding-server
+  template:
+    metadata:
+      labels:
+        app: embedding-server
+    spec:
+      containers:
+        - name: embedding-server
+          image: fruition-mvp-dev-pipeline-api:latest
+          imagePullPolicy: Never
+          command: ["uvicorn", "app.modules.wiki_embedding.interfaces.http.embedding_server:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+          env:
+            - name: INTERNAL_CALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: INTERNAL_CALLBACK_TOKEN
+          # /health는 모델 적재가 끝나야 200이다. 적재 중 liveness로 재시작되지 않게 startupProbe가 먼저 기다린다.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 60
+          # 요청이 몰려 응답이 늦어도 바쁜 서버를 재시작하지 않도록 타임아웃과 실패 허용 횟수를 넉넉히 둔다.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 500m, memory: 3Gi}
+            limits: {memory: 4Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding-server
+  namespace: fruition
+spec:
+  type: ClusterIP
+  selector:
+    app: embedding-server
+  ports:
+    - port: 8000
+      targetPort: 8000

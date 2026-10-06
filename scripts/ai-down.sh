@@ -6,6 +6,7 @@ COMPOSE_FILE="$ROOT_DIR/infra/compose.infra.yml"
 PIPELINE_COMPOSE_FILE="$ROOT_DIR/infra/compose.ai.yml"
 PIPELINE_SERVICES=(
   pipeline-api
+  embedding-server
   ingest-worker
   query-task-worker
   agent-task-worker

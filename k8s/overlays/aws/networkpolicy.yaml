@@ -20,6 +20,7 @@ spec:
       - agent-task-worker
       - maintenance-task-worker
       - converter
+      - embedding-server
       - access-migration
       - access-db-preflight
       - document-migration
@@ -452,6 +453,61 @@ spec:
           operator: In
           values:
           - converter
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+# embedding-server는 질의 임베딩을 요청하는 query·agent worker의 호출만 받는다(ai ADR-0026).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-internal-embedding-server
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - embedding-server
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - query-task-worker
+          - agent-task-worker
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aws-call-embedding-server
+  namespace: fruition
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - query-task-worker
+      - agent-task-worker
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - embedding-server
     ports:
     - protocol: TCP
       port: 8000

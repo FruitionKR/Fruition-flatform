@@ -28,6 +28,7 @@ RUNNING_CONTAINERS=(
   fruition-document-svc-dev
   fruition-access-svc-dev
   fruition-pipeline-api-dev
+  fruition-embedding-server-dev
   fruition-markitdown
   fruition-ingest-worker-dev
   fruition-query-task-worker-dev

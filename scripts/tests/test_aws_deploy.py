@@ -117,7 +117,7 @@ class DeploymentTests(unittest.TestCase):
         documents = deploy.render(CONFIG, SHA)
         self.assertEqual(before, {p: hashlib.sha256(p.read_bytes()).digest() for p in paths})
         self.assertFalse(deploy.PLACEHOLDER.search(json.dumps(documents)))
-        self.assertEqual(11, sum(d["kind"] == "Deployment" for d in documents))
+        self.assertEqual(12, sum(d["kind"] == "Deployment" for d in documents))
 
     def test_invalid_inputs_fail_without_cluster_mutation(self):
         for key in CONFIG:
@@ -391,7 +391,7 @@ class DeploymentTests(unittest.TestCase):
                     self.assertFalse(fake.applied("Deployment"))
                 else:
                     deploy.deploy(config, SHA, documents, review=REVIEW)
-                    self.assertEqual(11, len(fake.applied("Deployment")))
+                    self.assertEqual(12, len(fake.applied("Deployment")))
                 self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in fake.applied("Job")))
                 self.assertFalse(any(d["metadata"]["name"] == deploy.release_name(SHA) for d in fake.applied("ConfigMap")))
 

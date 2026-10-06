@@ -6,7 +6,7 @@ import unittest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKERS = {"ingest-worker", "pipeline-agent-worker", "query-task-worker", "agent-task-worker", "maintenance-task-worker", "edit-event-consumer", "converter"}
+WORKERS = {"ingest-worker", "pipeline-agent-worker", "query-task-worker", "agent-task-worker", "maintenance-task-worker", "edit-event-consumer", "converter", "embedding-server"}
 
 
 class SchedulingTest(unittest.TestCase):

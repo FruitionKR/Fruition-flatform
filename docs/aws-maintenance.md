@@ -97,6 +97,12 @@ bootstrap 준비 완료 이후 Google·Naver·Kakao OAuth Secret 연결 6개가 
 
 최소 구성(세 작업자 각 1개)은 AI 노드 1대에 들어갑니다. KEDA가 질의·에이전트 작업자를 늘리면 AI 노드 상한(2대)에 닿아 Pod가 대기할 수 있습니다.
 
+### 임베딩 서버(embedding-server)
+
+질의·에이전트 작업자는 질문 임베딩을 `embedding-server`(복제본 1개, 메모리 요청 3Gi, 한도 4Gi)에 `EMBEDDING_SERVICE_URL=http://embedding-server:8000`으로 요청합니다([ai ADR-0026](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/adr/0026-embedding-server.md)). 서버는 짧은 텍스트만 받고, 긴 페이지 임베딩은 유지보수 작업자가 계속 직접 계산합니다. 서버는 `/health`가 모델 적재 완료 시에만 200이라 `startupProbe`가 최대 5분 기다립니다. NetworkPolicy는 질의·에이전트 작업자에서 8000번 포트로 오는 요청만 허용합니다.
+
+전환 직후에는 질의·에이전트 작업자의 2.5Gi 메모리 패치를 그대로 둡니다. 운영에서 질문 지연과 오류율을 확인한 뒤 패치를 제거해야 메모리가 줄어듭니다. 서버가 재시작되는 동안에는 질문 임베딩이 실패하므로, 문제가 생기면 두 작업자에서 `EMBEDDING_SERVICE_URL`을 빼면 각자 모델을 올리던 이전 동작으로 돌아갑니다.
+
 ### 기존 위키 임베딩 채우기
 
 `text-only`로 운영하던 동안 편입한 페이지에는 페이지 임베딩 행이 없어 자동 재처리 대상이 아닙니다. 유지보수 작업자는 시작할 때 `pending`·`failed` 행을 자기 프로세스의 모델로 다시 계산합니다. 그래서 빈 페이지를 `pending`으로 표시한 뒤 작업자를 재시작합니다. 표시 명령은 모델을 올리지 않으므로 작업자 메모리에 영향이 없습니다.

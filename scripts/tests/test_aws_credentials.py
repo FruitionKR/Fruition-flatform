@@ -18,6 +18,7 @@ GROUPS = {
     "query-task-worker": "pipeline",
     "agent-task-worker": "pipeline",
     "maintenance-task-worker": "pipeline",
+    "embedding-server": "pipeline",
     "converter": "converter",
     "frontend": "frontend",
 }
@@ -36,6 +37,9 @@ ALLOWED = {
     "converter": {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"},
     "frontend": {"ACCESS_CODE"},
 }
+# 같은 서비스 계정을 쓰지만 그룹 전체가 아니라 필요한 키만 받는 워크로드.
+# embedding-server는 내부 토큰 검증만 하고 DB·모델 키를 쓰지 않는다.
+WORKLOAD_ALLOWED = {"embedding-server": {"INTERNAL_CALLBACK_TOKEN"}}
 
 
 def render(path: str) -> list[dict]:
@@ -82,7 +86,7 @@ class CredentialsTest(unittest.TestCase):
                         self.assertEqual(ref["name"], "fruition-" + group)
                         self.assertIn(ref["key"], secrets[ref["name"]])
                         keys.add(ref["key"])
-            self.assertEqual(keys, ALLOWED[group], name)
+            self.assertEqual(keys, WORKLOAD_ALLOWED.get(name, ALLOWED[group]), name)
         self.assertEqual(seen, set(GROUPS))
         jobs = {m["metadata"]["name"]: m for m in manifests if m["kind"] == "Job"}
         expected = {"access-migration": {"ACCESS_DB_MIGRATION_PASSWORD"},
@@ -110,11 +114,15 @@ class CredentialsTest(unittest.TestCase):
         for manifest in render("k8s/base"):
             if manifest["kind"] != "Deployment":
                 continue
-            group = GROUPS[manifest["metadata"]["name"]]
+            name = manifest["metadata"]["name"]
+            group = GROUPS[name]
             for container in manifest["spec"]["template"]["spec"]["containers"]:
                 self.assertFalse(any("secretRef" in r for r in container.get("envFrom", [])))
                 keys = {env["valueFrom"]["secretKeyRef"]["key"] for env in container.get("env", [])
                         if "secretKeyRef" in env.get("valueFrom", {})}
+                if name in WORKLOAD_ALLOWED:
+                    self.assertEqual(keys, WORKLOAD_ALLOWED[name], name)
+                    continue
                 self.assertLessEqual(keys, ALLOWED[group] | local_migration[group] | ({"S3_ACCESS_KEY", "S3_SECRET_KEY"} if group in {"document", "pipeline"} else set()))
                 self.assertTrue(local_migration[group] <= keys)
 
