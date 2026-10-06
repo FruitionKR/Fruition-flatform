@@ -1,13 +1,16 @@
 # API Pod는 KEDA 대상이 아니다. KEDA는 Kafka 적체만 보고 AI 작업자를 조절하므로
 # HTTP 요청이 아무리 늘어도 API replicas는 2개 고정이었다. CPU 기준 HPA로 그 구간을 채운다.
 #
-# 상한 4의 근거 — 일반 노드는 t3.large(2 vCPU / 8GiB) 최대 4대이고 노드당 할당 가능
-# CPU는 약 1.9 vCPU라 전체 약 7.6 vCPU다. 세 API가 동시에 상한에 닿으면
+# 상한 4의 근거 — 일반 노드는 t3.large(2 vCPU / 8GiB) 평소 최대 4대이고 노드당 할당 가능
+# CPU는 약 1.9 vCPU라 전체 약 7.6 vCPU다. 5번째 노드(max_size 5)는 rollout 중 Pending을
+# 받는 여유분이라 이 계산에 넣지 않는다. 세 API가 동시에 상한에 닿으면
 #   access-svc    4 x 250m = 1.0 vCPU   (base 요청값)
 #   document-svc  4 x 500m = 2.0 vCPU   (overlay 요청값)
 #   pipeline-api  4 x 500m = 2.0 vCPU   (overlay 요청값)
-# 합계 5.0 vCPU다. 남는 2.6 vCPU를 Kafka(일반 노드 상주)·converter·edit-event-consumer와
+# 합계 5.0 vCPU다. 남는 2.6 vCPU를 Kafka(일반 노드 상주, 250m)·클러스터 controller와
 # 노드별 DaemonSet(fluent-bit·cloudwatch-agent·ebs-csi·aws-node)이 쓴다.
+# converter·edit-event-consumer·pipeline-agent-worker·embedding-server와 AI worker는
+# ai-worker Spot 노드에 배치되므로(kustomization.yaml nodeSelector) 이 예산에 들어가지 않는다.
 # 상한을 6으로 두면 7.5 vCPU가 되어 노드 CPU를 넘고 Pending이 생긴다.
 #
 # 하한 2는 기존 replicas와 같다. 평상시 Pod 수가 그대로라 비용이 늘지 않는다.

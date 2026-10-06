@@ -94,7 +94,9 @@ module "eks" {
       capacity_type        = "ON_DEMAND"
       min_size             = 2
       desired_size         = 2
-      max_size             = 4 # 플랫폼 DaemonSet·Kafka·API 2 replicas와 rollout 여유
+      # 평소 2~4대. 5번째는 rollout 중 Pending pod가 생길 때만 Cluster Autoscaler가 띄우고,
+      # 끝나면 scale-down(기본 10분 유휴)으로 내려간다.
+      max_size = 5
     }
     ai_worker = {
       # 4 vCPU / 16GiB. 두 종류만 두면 Spot 풀이 말라 교체가 실패한다.
