@@ -62,6 +62,8 @@ class FrontendRoutingTest(unittest.TestCase):
             "/": "frontend",
             "/oauth/callback": "frontend",
             "/access/verify": "frontend",
+            # 로그인 전 기동 요청(GET 상태·POST 발행). /api 밖이라 화면이 받아 접근 코드 쿠키를 직접 확인한다.
+            "/wake": "frontend",
             "/healthz": "frontend",
             "/_next/static/chunks/app.js": "frontend",
         }
