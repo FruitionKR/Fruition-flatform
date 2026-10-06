@@ -38,16 +38,20 @@ spec:
               port: 8000
             periodSeconds: 5
             failureThreshold: 60
+          # 요청이 몰려 응답이 늦어도 바쁜 서버를 재시작하지 않도록 타임아웃과 실패 허용 횟수를 넉넉히 둔다.
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
             periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             requests: {cpu: 500m, memory: 3Gi}
             limits: {memory: 4Gi}
