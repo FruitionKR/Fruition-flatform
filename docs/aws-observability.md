@@ -193,6 +193,6 @@ observability_alb_arn_suffix = "app/실제-ALB-이름/실제ID"
 
 관찰 노트도 무료로 무한히 쓸 수는 없습니다. 숫자 수집, 로그 저장·검색, 대시보드, 경보, SNS·Lambda·Secret에 비용이 생깁니다. 14일 뒤 지운다고 처음 기록을 받아 온 비용까지 없어지지는 않습니다. 로그를 찾을 때는 짧은 시간 범위로 보고 불필요하게 계속 새로고침하지 마세요. [CloudWatch 요금](https://aws.amazon.com/cloudwatch/pricing/)
 
-자동 긴급 차단, 사람마다 정하는 AI 용돈 한도, 인증 서비스 일꾼 자동 늘리기(HPA)는 별도 작업입니다. 이 문서가 준비됐다고 그 기능들까지 끝난 것은 아닙니다.
+자동 긴급 차단, 사람마다 정하는 AI 용돈 한도는 별도 작업입니다. 이 문서가 준비됐다고 그 기능들까지 끝난 것은 아닙니다. API 일꾼 자동 늘리기(HPA)는 CloudWatch가 아니라 metrics-server의 CPU 숫자로 따로 동작합니다([안전하게 배포하고 점검하기](aws-maintenance.md)).
 
 더 자세한 원래 설명: [AWS 수집 도구 설치](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/install-CloudWatch-Observability-EKS-addon.html), [사용량 숫자의 뜻](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Container-Insights-metrics-EKS.html).

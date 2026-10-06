@@ -45,7 +45,7 @@ Terraform의 여섯 빈 초기값은 신규 Secret의 항목 준비용이며 실
 - DB·Redis·JWT·MFA·SMTP·내부 토큰은 Terraform 초기 설정과 서비스별 ExternalSecret 경로가 있다.
 - `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `TAVILY_API_KEY`는 빈 초기값과 ExternalSecret 매핑이 있다. 실제 운영 값 입력 여부는 이번 조사에서 확인하지 않았다.
 - CORS, OAuth 프론트 복귀 주소, 초대 URL, 내부 API URL, Kafka, HTTPS 쿠키 설정은 ConfigMap/Deployment에서 관리한다.
-- `QUERY_EMBEDDING_MODE`: 예제 `bge-m3`. AWS는 `fruition-config`가 `text-only`이고, 질의·에이전트·유지보수 작업자만 deployment env로 `bge-m3`를 켠다([의미 검색 켜기](aws-maintenance.md#의미-검색bge-m3-켜기와-기존-위키-임베딩)). 질의·에이전트 작업자는 `EMBEDDING_SERVICE_URL=http://embedding-server:8000`으로 임베딩 서버를 호출한다.
+- `QUERY_EMBEDDING_MODE`: 예제 `bge-m3`. AWS는 `fruition-config`가 `text-only`이고, 질의·에이전트·유지보수 작업자만 deployment env로 `bge-m3`를 켠다([의미 검색 켜기](../aws-maintenance.md#의미-검색bge-m3-켜기와-기존-위키-임베딩)). 질의·에이전트 작업자는 `EMBEDDING_SERVICE_URL=http://embedding-server:8000`으로 임베딩 서버를 호출한다.
 - `QUERY_WEB_SEARCH_TIMEOUT_SECONDS`: 예제 `20`, AWS 렌더 결과 `10`.
 - LangSmith는 tracing `false`, 프로젝트명 `local-pilot-dev`를 상속한다. 추적을 켤 때 운영 프로젝트명도 결정한다.
 - `AGENT_SKILLS_ENABLED`, `SKILL_API_ENABLED` 및 query evaluator 설정은 ConfigMap에 있다.

@@ -2,10 +2,19 @@
 
 이 디렉터리는 현재 구현 기준과 다르거나, 구현 전 설계 단계에서 작성된 이전 자료, 그리고 운영이 끝난 날짜별 이슈·changelog를 보관한다.
 
-현행 기준 문서는 `docs/README.md`, 최상위 본문 4개와 ADR이다:
-`README.md` · `architecture.md` · `api.md` · `data-model.md` · `script.md` · `adr/`
+현행 기준 문서 목록은 [docs/README.md](../README.md)가 관리한다.
 
 아래 목록의 `docs/spec/…`, `docs/issue/…`, `docs/changelog/…`, `docs/msa/…` 경로는 2026-08-07 이관으로 전부 이 디렉터리 내부(`spec/`, `issue/`, `changelog/`, `msa/`) 경로로 읽는다.
+
+## 2026-10-06 이관 (현행 코드 대조 정리)
+
+- `aws-operations-improvement-plan.md` — `architecture.md`의 "AWS 운영 보완 계획"(OPS-01~09)과 `script.md`의 "AWS 운영 보완 실행 계획". 계획 수립 시점의 근거라 이후 구현(관측·알람·HPA/PDB·Redis replica·Multi-AZ·이미지 게시 CI)과 맞지 않는다.
+- `aws-pre-deployment-status.md` — 첫 배포(2026-09-20) 전 준비 단계 서술: `script.md`의 사전조회 상태·배포 준비 범위, `aws-deployment-costs.md`의 "지금 어디까지 했나요?".
+- `aws-frontend-fargate-migration.md` — 화면 Vercel → EKS Fargate 전환 이유와 운영자 전환 절차. 전환 완료·Vercel 정리 완료. 현행 운영은 `../aws-frontend-hosting.md`.
+- `aws-environment-audit.md` — 2026-09-20 환경변수·Secret 일회성 대조. 이후 배포 경로가 바뀌어 현행과 다르다.
+- `deployment-checks/` — 2026-09-18 DB bootstrap·이미지/DB 리허설 기록. 첫 설치 완료.
+- `changelog/infra-2026-09.md` — 2026-09-17~21 인프라 변경 기록. 이후 기록은 git 이력과 `../releases/`로 대체.
+- `infra/.env.pipeline.example`은 `infra/.env.example`과 키가 같아 삭제했다.
 
 ## 평가 보고서
 

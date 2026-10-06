@@ -1,20 +1,23 @@
 # AWS에 배포하면 어떤 모습일까요?
 
-현재 Terraform과 Kubernetes 설정을 기준으로 그린 **배포 후 목표 구조**입니다. 실제 AWS에 모두 설치됐다는 뜻은 아닙니다. 프론트 화면·백엔드·AI 작업 모두 AWS 서울 리전에서 실행합니다. 프론트 화면은 같은 EKS의 Fargate에서 돌아갑니다. 자세한 내용은 [화면 운영 문서](aws-frontend-hosting.md)를 참고하세요.
+현재 Terraform과 Kubernetes 설정을 기준으로 그린 구조입니다. 프론트 화면·백엔드·AI 작업 모두 AWS 서울 리전에서 실행합니다. 프론트 화면은 같은 EKS의 Fargate에서 돌아갑니다. 자세한 내용은 [화면 운영 문서](aws-frontend-hosting.md)를 참고하세요.
 
-서버는 일을 하는 컴퓨터, Pod는 그 안에서 일하는 작은 프로그램입니다. 아래 그림은 컴퓨터 한 대 한 대의 정확한 위치가 아니라 각 서비스의 역할과 연결을 보여줍니다. 두 가용 영역(AZ)에 모든 서비스가 똑같이 하나씩 생기는 구조는 아닙니다.
+서버는 일을 하는 컴퓨터, Pod는 그 안에서 일하는 작은 프로그램입니다.
 
 ## 이미지로 한눈에 보기
 
-![Fruition AWS 배포 아키텍처 한글 설명판](images/aws-deployment-architecture-ko.png)
+![Fruition AWS 배포 아키텍처](images/aws-deployment-architecture-ko.png)
 
-[한글 PNG 원본](images/aws-deployment-architecture-ko.png) · [영문 PNG 원본](images/aws-deployment-architecture.png)
+[한글 PNG](images/aws-deployment-architecture-ko.png) · [영문 PNG](images/aws-deployment-architecture.png) · 원본 [한글 .drawio](images/aws-deployment-architecture-ko.drawio) · [영문 .drawio](images/aws-deployment-architecture.drawio)
 
-한글 그림은 **하나의 EKS 클러스터 → 일반 EC2 노드 2대 → 각 노드 안에서 실행되는 Pod** 순서로 읽으면 됩니다. 노드별 Pod 배치는 이해를 돕는 예시이며, 실제 배치는 Kubernetes가 결정합니다. 이후 보완으로 API 3종은 각각 2개 Pod가 됐으며, 그림의 Pod 상자는 개수 전체를 나타내지 않습니다. 자세한 현재 설정은 [유지보수 문서](aws-maintenance.md)를 참고하세요. Kafka도 클러스터 안의 Pod로 실행되며, 단일 브로커가 PVC로 연결한 EBS gp3 5Gi에 데이터를 저장합니다. AI 노드는 같은 클러스터에 추가되는 별도 노드 그룹이고, 배포 Runner는 클러스터 밖의 별도 EC2입니다.
+그림은 **VPC 안의 가용영역 A·B를 좌우로 나누고, 위에서부터 퍼블릭 서브넷 → 프라이빗 서브넷** 순으로 읽습니다. RDS와 Redis도 프라이빗 서브넷에 있어 DB 전용 서브넷은 없습니다.
 
-주요 비동기 작업 흐름은 **문서 요청 → Pipeline API → Kafka → AI 작업자**입니다. KEDA는 작업 Pod 수를, Cluster Autoscaler는 노드 수를 조절합니다. 영문 이미지는 전체 서비스를 요약한 이전 개념도이며, 노드와 Pod의 상세 구분은 한글 이미지를 참고하세요.
+- **가용영역별 배치:** NAT 게이트웨이는 A에만 1대 있고, ALB는 두 영역에 걸칩니다. 인증 DB는 A(primary)·B(standby)로 나뉜 Multi-AZ, 코어 DB는 A에만 있는 Single-AZ, Redis는 A(primary)·B(replica)입니다.
+- **EKS:** 두 영역에 걸친 클러스터 안에 Fargate(화면), general 노드 그룹(평소 2~4대, 배포 중 최대 5대), ai_worker Spot 노드 그룹(0~2대)이 있습니다. 그룹 안의 아이콘은 그 그룹에서 실행되는 Pod입니다. 실제 Pod 배치와 개수는 Kubernetes·HPA·KEDA가 정합니다.
+- **기동 흐름:** 절전 중 화면이 로그인 전에 기동 요청을 보내거나 ALB 5XX가 감지되면, Lambda가 general 2대와 AI 1대를 함께 올립니다([요청 기반 기동](aws-request-wake.md)).
+- 인스턴스 타입 같은 사양은 그림에 넣지 않습니다. [비용 문서](aws-deployment-costs.md)와 [Terraform 관리 항목](aws-resource-inventory.md)을 봅니다.
 
-AWS 서비스 아이콘 스타일로 만든 개념도입니다. 공식 AWS 아이콘 원본을 조합한 그림은 아니며, 연결선은 주요 흐름만 나타냅니다. 자세한 서비스 연결은 아래 다이어그램을 참고하세요. 비용·트래픽 알림은 운영자에게 전달되며, 자동으로 전체 서비스를 끄는 기능은 현재 구성에 포함되지 않습니다.
+그림은 draw.io(AWS 공식 도형)로 그렸습니다. 구성이 바뀌면 `.drawio` 원본을 draw.io에서 고친 뒤 PNG로 다시 내보냅니다(`draw.io -x -f png -s 2 -b 20 -o <png> <drawio>`).
 
 ## 서비스가 일하는 모습
 
@@ -38,7 +41,7 @@ flowchart TB
                         WEB["frontend<br/>프론트엔드 화면 2개"]
                     end
 
-                    subgraph GENERAL["일반 노드 · t3.large 2~3대"]
+                    subgraph GENERAL["일반 노드 · t3.large 평소 2~4대 · 최대 5대"]
                         ACCESS["access-svc<br/>로그인·인증"]
                         DOC["document-svc<br/>문서 처리"]
                         API["pipeline-api<br/>AI 요청 처리"]
@@ -48,6 +51,7 @@ flowchart TB
                     subgraph AI["AI 노드 · CPU Spot 최대 2대"]
                         WORKERS["AI 작업 일꾼들<br/>수집·질의·에이전트·유지보수"]
                         CONVERTER["파일 변환·편집 이벤트 처리"]
+                        EMBED["embedding-server<br/>질의 임베딩(BGE-M3)"]
                     end
                 end
 
@@ -135,19 +139,19 @@ CloudWatch는 컴퓨터의 일기와 사용량을 모읍니다. 문제가 생기
 
 | 구성 | 현재 설정 | 알아둘 점 |
 |---|---|---|
-| 프론트 | EKS Fargate Pod 2개, 각각 0.25 vCPU·512Mi 요청 | 노드 그룹이 0대인 절전 중에도 화면 유지 |
-| 일반 EKS 노드 | t3.large, 처음/최소 2대·최대 3대 | 앱·Kafka·플랫폼 도구 실행 |
-| AI EKS 노드 | m5.xlarge 또는 m6i.xlarge Spot, 처음/최소 0대·최대 2대 | GPU 없음. 앱 설치 후 상시 일꾼 때문에 노드가 필요 |
-| 인증·문서·AI API Pod | 각각 2개 | 순차 교체·PDB·노드 분산 적용, HPA 미설정 |
+| 프론트 | EKS Fargate Pod 2개, 각각 0.25 vCPU·768Mi 요청 | 노드 그룹이 0대인 절전 중에도 화면 유지 |
+| 일반 EKS 노드 | t3.large, 처음/최소 2대·최대 5대 | 앱·Kafka·플랫폼 도구 실행. 평소 2~4대, 5번째는 rollout 중 Pending Pod가 있을 때만 Cluster Autoscaler가 추가 |
+| AI EKS 노드 | m5·m5d·m6i·m7i.xlarge 중 Spot, 처음/최소 0대·최대 2대 | GPU 없음. 앱 설치 후 상시 일꾼 때문에 노드가 필요 |
+| 인증·문서·AI API Pod | 각각 2~4개 | CPU 70% 기준 HPA, 순차 교체·PDB·노드 분산 적용 |
 | AI 작업 Pod | 수집·질의·에이전트 각각 1~4개, 유지보수 1~2개 | KEDA가 밀린 작업을 보고 조절 |
 | runner | t3.small 1대, 암호화 gp3 30GB | 공인 IP 없는 배포 전용 컴퓨터 |
-| RDS | db.t4g.small 2대, 각각 암호화 gp3 30GB | PostgreSQL 16, 각각 Single-AZ, 백업 7일 |
-| Redis | cache.t4g.micro 1대 | 전송·저장 암호화, 예비 복제본 없음 |
+| RDS | db.t4g.small 2대, 각각 암호화 gp3 30GB | PostgreSQL 16, access는 Multi-AZ·core는 Single-AZ, TLS 강제, 백업 7일 |
+| Redis | cache.t4g.micro 2대(primary·replica) | 전송·저장 암호화, 두 AZ에 나눠 자동 장애 조치 |
 | Kafka | broker/controller 1대, gp3 5Gi | EKS 안에서 실행 |
 | ALB | 앱 Ingress로 생성 | HTTPS, app 주소는 경로로·두 API 주소는 주소로 요청 분기 |
 | NAT Gateway | 1개 | 내부 서비스의 외부 통신 경로 |
 | S3 | 앱 파일용과 Terraform 상태용 분리 | 파일용은 S3 전용 연결 사용 |
-| ECR | access-svc·document-svc·pipeline·converter·frontend 5개 | pipeline 이미지를 여러 AI 일꾼이 함께 사용 |
+| ECR | access-svc·document-svc·pipeline·converter·frontend 5개 | pipeline 이미지를 여러 AI 일꾼과 embedding-server가 함께 사용 |
 | CloudWatch | 로그·사용량·대시보드·경보 | 주요 로그 14일 보관, ALB 경보는 생성 후 이름표 등록 필요 |
 
 ## 보호 설정과 남은 한계
@@ -156,7 +160,7 @@ CloudWatch는 컴퓨터의 일기와 사용량을 모읍니다. 문제가 생기
 - **요청 제한:** WAF 기본값은 IP당 5분 3,000회, 전체 `/api/` 5분 6,000회입니다. 이는 근사적인 요청 제한이며 정확한 요금 상한은 아닙니다.
 - **긴급 문닫기:** 운영자가 설정을 바꾸어 공개 API를 막을 수 있습니다. 비용·트래픽 급증에 따른 자동 긴급 차단은 아직 연결하지 않았습니다.
 - **비밀정보:** DB·Redis 비밀번호, Gmail 앱 비밀번호, API 키는 Secrets Manager에서 서비스별로 필요한 값만 전달합니다. Discord 웹훅은 별도 Secret입니다.
-- **장애 대비:** 두 가용 영역을 사용해도 RDS는 각각 Single-AZ이고 Redis·Kafka·NAT는 각각 1개입니다. 어디가 고장 나도 끊기지 않는 구성은 아닙니다.
+- **장애 대비:** access RDS는 Multi-AZ, Redis는 예비 복제본과 자동 장애 조치를 둡니다. core RDS는 Single-AZ이고 Kafka·NAT는 각각 1개입니다. 어디가 고장 나도 끊기지 않는 구성은 아닙니다.
 - **비용:** 서버 대수에 상한이 있어도 통신량·로그·파일·외부 AI API 비용은 늘 수 있습니다. 예산 알림이 돈을 자동으로 멈추지는 않습니다.
 
 ## 무엇이 언제 만들어지나요?
@@ -175,6 +179,6 @@ Terraform만 적용했다고 사용자에게 서비스가 바로 열리는 것�
 
 - [현재 사양과 비용 보호 설명](aws-deployment-costs.md)
 - [CloudWatch·Discord 설정과 시험 순서](aws-observability.md)
-- [Terraform 관리 항목 185개 전체 목록](aws-resource-inventory.md)
+- [Terraform 관리 항목 전체 목록](aws-resource-inventory.md)
 - [runner 준비·등록 순서](../infra/runner/README.md)
 - 설정 원본: [VPC](../infra/terraform/vpc.tf), [EKS](../infra/terraform/eks.tf), [RDS](../infra/terraform/rds.tf), [Redis](../infra/terraform/elasticache.tf), [runner](../infra/terraform/runner.tf), [관측·알림](../infra/terraform/observability.tf), [앱 입구](../k8s/overlays/aws/ingress.yaml), [AWS 앱 배치](../k8s/overlays/aws/kustomization.yaml).

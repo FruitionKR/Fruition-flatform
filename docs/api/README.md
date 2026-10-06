@@ -2,9 +2,9 @@
 
 이 문서는 Fruition의 공개 API와 서비스 간 내부 API를 사람 기준으로 설명한다. 기계가 읽는 원본 계약은 `Access/api-specs/openapi.yaml`, `Document/api-specs/openapi.yaml`, `AI/pipeline/api-specs/openapi.yaml`이며, 충돌할 경우 실행 코드와 생성된 OpenAPI를 우선한다.
 
-- Gateway 공개 API: 117개 (`/api/**`)
-- 서비스 내부·운영 API: 58개
-- 전체 operation 수: 175
+- Gateway 공개 API: 136개 (`/api/**`)
+- 서비스 내부·운영 API: 64개
+- 전체 operation 수: 200 (2026-10-05 각 서비스 main의 OpenAPI 기준, WebSocket 제외)
 - 인증 기본값: 사용자 API는 Bearer access token, 내부 API는 서비스 토큰을 사용한다.
 - 공통 오류 형식은 서비스에 따라 `ErrorResponse` 또는 FastAPI validation 응답을 사용한다.
 - AI에게 넘기는 대화 맥락은 서버가 세션에서 읽어 조립한다. 클라이언트는 어떤 문답을 쓸지만 `selected_pair_ids`로 고르고, 비우면 세션의 최근 완결 문답을 쓴다. 이 세션에 속하지 않은 ID는 무시한다.
@@ -57,8 +57,8 @@ export PIPELINE=http://localhost:8000  # ai-svc pipeline: 내부 전용
 | 서비스 | Gateway `/api/**` | 내부·운영 | 합계 | 역할 |
 |---|---:|---:|---:|---|
 | [access-svc](https://github.com/FruitionKR/Fruition-access/blob/main/docs/api/README.md) | 37 | 4 | 41 | 인증·프로필과 워크스페이스·멤버·초대 관리 |
-| [document-svc](https://github.com/FruitionKR/Fruition-document/blob/main/docs/api/README.md) | 80 | 9 | 89 | 문서 저장과 사용자용 AI·Wiki·Agent Gateway |
-| [ai-svc](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/api/README.md) | 0 | 45 | 45 | 내부 Query·Agent·Wiki·Skill pipeline |
+| [document-svc](https://github.com/FruitionKR/Fruition-document/blob/main/docs/api/README.md) | 99 | 9 | 108 | 문서 저장과 사용자용 AI·Wiki·Agent Gateway |
+| [ai-svc](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/api/README.md) | 0 | 51 | 51 | 내부 Query·Agent·Wiki·Skill pipeline |
 
 공통 [AI 작업 취소·복구 계약](ai-task-cancellation.md)은 Python과 업무 DB 복구 완료를 함께 확인한다.
 

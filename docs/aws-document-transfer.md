@@ -18,7 +18,7 @@ V50 migration의 `document_convert_queue`에 완료 페이지, 전체 페이지,
 
 변환 Markdown의 PNG/JPEG/GIF data URI는 별도 S3 asset으로 저장한다. 10페이지 묶음 결과는 원본 문서에 이어 붙이고, 본문이 편집 문서 상한(5MB)을 넘을 때만 `origin=convert_part`, `source_document_id=원본 문서 ID`인 다음 파트 문서를 만든다(Document ADR-0024). AI packet 실행은 설정된 worker 수만큼만 대기/실행하여 전체 packet future를 한꺼번에 생성하지 않는다. PDF 변환이 끝나면 원본 문서와 파트를 각각 한 번씩 AI 큐에 등록한다.
 
-전체 파일 크기 제한과 작업별 메모리 제한은 별개다. 단일 PDF 객체 읽기에는 64MiB 방어 한도가 있고, 암호화·손상 PDF, 매우 큰 단일 페이지/이미지, LLM 제공자 토큰·호출 제한은 별도 오류가 될 수 있다. 페이지 추출 시 PDF parser 메타데이터와 페이지 리소스 메모리도 필요하다. 64KiB는 문서 입력 단위이며 모델의 모든 prompt/output 토큰 한도를 대체하지 않는다. 일반 Markdown 편집 한도는 유지된다. 기존 로컬 `/convert` multipart 경로의 50MiB 제한도 유지되며 AWS 대용량 경로에는 적용되지 않는다.
+전체 파일 크기 제한과 작업별 메모리 제한은 별개다. 단일 PDF 객체 읽기에는 64MiB 방어 한도가 있고, 암호화·손상 PDF, 매우 큰 단일 페이지/이미지, LLM 제공자 토큰·호출 제한은 별도 오류가 될 수 있다. 페이지 추출 시 PDF parser 메타데이터와 페이지 리소스 메모리도 필요하다. 파트를 나누는 5MB는 편집 문서 상한이며 모델의 모든 prompt/output 토큰 한도를 대체하지 않는다. 일반 Markdown 편집 한도는 유지된다. 기존 로컬 `/convert` multipart 경로의 50MiB 제한도 유지되며 AWS 대용량 경로에는 적용되지 않는다.
 
 ## 배포 순서
 
@@ -30,7 +30,7 @@ V50 migration의 `document_convert_queue`에 완료 페이지, 전체 페이지,
 
 임시 객체/미완료 multipart는 7일 lifecycle로 회수한다. 버전 관리 버킷의 임시 이전 버전도 만료한다. 새 경로를 중지할 때는 frontend에 `DOCUMENT_DIRECT_UPLOAD_ENABLED=false`를 명시하고 재배포한다. 이는 기존 경로의 크기 제한도 다시 적용한다. V50은 추가 컬럼 migration이므로 롤백 시 데이터를 제거할 필요가 없다.
 
-현재 인프라 상태에는 다른 브랜치의 요청 기반 기동 구성이 있으므로 이 작업을 적용할 때 전체 Terraform apply를 실행하지 않는다. CORS, storage lifecycle, document storage IAM만 대상으로 plan을 검토한다. `.local/aws/document-direct-upload.tfplan`은 변경 후 반드시 다시 생성한다.
+CORS, storage lifecycle, document storage IAM 변경은 `infra/terraform/s3.tf` 등에 포함되어 있으며, 요청 기반 기동 구성(`request-wake.tf`)도 main에 병합되어 있다. 적용은 일반 Terraform 절차대로 새 plan을 만들고 전체 변경 내용을 검토한 뒤 진행한다.
 
 ## 검증 범위
 
