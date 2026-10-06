@@ -75,6 +75,7 @@ resource "aws_secretsmanager_secret_version" "app" {
     OPENAI_API_KEY       = ""
     GEMINI_API_KEY       = ""
     ANTHROPIC_API_KEY    = ""
+    TYPESAFE_API_KEY     = ""
     LANGSMITH_API_KEY    = ""
     TAVILY_API_KEY       = ""
     # 화면 접근 코드. 비우면 게이트가 꺼진다. 바꾸면 WAF 해시(cost-guards.tf)를 위해 apply한다.
