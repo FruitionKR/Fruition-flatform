@@ -15,8 +15,34 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("aws_deploy", ROOT / "scripts/aws_deploy.py")
 deploy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(deploy)
+import aws_image_release as images  # noqa: E402  (aws_deploy가 scripts 경로를 추가한다)
 
-SHA = "a" * 40
+
+def release_manifest(schema, changed=()):
+    """게시된 release manifest fixture. changed 서비스만 소스·빌드 입력·digest가 다르다."""
+    services = images.SCHEMA_SERVICES[schema]
+    repos = sorted({images.SERVICES[s][0] for s in services})
+    changed_repos = {images.SERVICES[s][0] for s in changed}
+    sources = {repo: ("f" if repo in changed_repos else str(i + 1)) * 40 for i, repo in enumerate(repos)}
+    recipe = "a" * 64
+    data = {"schema_version": schema, "sources": sources, "recipe": recipe,
+            "release_sha": images.identity(sources, recipe)}
+    if schema < 3:
+        return {**data, "images": {s: "sha256:" + "b" * 64 for s in services}}
+    builds, pinned = {}, {}
+    for i, service in enumerate(services):
+        repo, _, dockerfile = images.SERVICES[service]
+        mark = "f" if service in changed else str(i + 5)
+        tag = "b-" + images.build_id(service, repo, mark * 40, dockerfile, images.BUILDER_VERSION)
+        builds[service] = {"context_tree": mark * 40, "dockerfile": dockerfile, "tag": tag}
+        pinned[service] = {"tag": tag, "digest": "sha256:" + mark * 64}
+    return {**data, "builder_version": images.BUILDER_VERSION, "builds": builds, "images": pinned}
+
+
+# 기존 테스트는 schema 2(release 태그) 경로를 그대로 검사한다. 같은 소스·recipe의 schema 3도 같은 ID다.
+MANIFEST = release_manifest(2)
+CURRENT = release_manifest(3)
+SHA = MANIFEST["release_sha"]
 REVIEW = {"release_sha": SHA, "migration_mode": "expand-only", "compatibility_test_url": "https://github.com/FruitionKR/Fruition-flatform/actions/runs/1", "restore_test_url": "https://github.com/FruitionKR/Fruition-flatform/issues/1"}
 CONFIG = {
     "waf_acl_arn": "arn:aws:wafv2:ap-northeast-2:123456789012:regional/webacl/fruition-cost/00000000-0000-0000-0000-000000000000",
@@ -87,7 +113,7 @@ class FakeCluster:
 
 class DeploymentTests(unittest.TestCase):
     def test_waf_is_required_and_bound_to_same_account_and_region(self):
-        documents = deploy.render(CONFIG, SHA)
+        documents = deploy.render(CONFIG, SHA, MANIFEST)
         ingress = next(d for d in documents if d["kind"] == "Ingress")
         self.assertEqual(CONFIG["waf_acl_arn"], ingress["metadata"]["annotations"]["alb.ingress.kubernetes.io/wafv2-acl-arn"])
         for arn in ("none", CONFIG["waf_acl_arn"].replace("123456789012", "999999999999"),
@@ -109,12 +135,12 @@ class DeploymentTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.documents = deploy.render(CONFIG, SHA)
+        cls.documents = deploy.render(CONFIG, SHA, MANIFEST)
 
     def test_render_preserves_sources_and_replaces_all_placeholders(self):
         paths = sorted((ROOT / "k8s").rglob("*.yaml"))
         before = {p: hashlib.sha256(p.read_bytes()).digest() for p in paths}
-        documents = deploy.render(CONFIG, SHA)
+        documents = deploy.render(CONFIG, SHA, CURRENT)
         self.assertEqual(before, {p: hashlib.sha256(p.read_bytes()).digest() for p in paths})
         self.assertFalse(deploy.PLACEHOLDER.search(json.dumps(documents)))
         self.assertEqual(12, sum(d["kind"] == "Deployment" for d in documents))
@@ -129,7 +155,9 @@ class DeploymentTests(unittest.TestCase):
                         deploy.deploy(config, SHA, self.documents, review=REVIEW)
                     self.assertFalse(fake.events)
         with self.assertRaises(ValueError):
-            deploy.render(CONFIG, "latest")
+            deploy.render(CONFIG, "latest", MANIFEST)
+        with self.assertRaises(ValueError):
+            deploy.render(CONFIG, "f" * 40, MANIFEST)
 
     def test_leftover_placeholder_blocks_before_apply(self):
         documents = copy.deepcopy(self.documents)
@@ -462,10 +490,162 @@ class DeploymentTests(unittest.TestCase):
                     self.assertFalse(fake.applied("Deployment"))
 
 
+class DigestReleaseTests(unittest.TestCase):
+    """schema 3: 서비스별 digest로 고정해 바뀐 서비스만 Pod template이 달라진다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.images = deploy.release_images(CONFIG, CURRENT)
+        cls.documents = deploy.render(CONFIG, SHA, CURRENT)
+
+    def setUp(self):
+        for name, value in (("smoke_settings", {"test": "fixture"}), ("authenticated_smoke", None)):
+            mock = patch.object(deploy, name, return_value=value)
+            mock.start()
+            self.addCleanup(mock.stop)
+
+    def workloads(self, documents):
+        return {(d["kind"], d["metadata"]["name"]): d for d in documents if d["kind"] in {"Deployment", "Job"}}
+
+    def test_render_pins_every_workload_to_its_repository_digest(self):
+        registry = CONFIG["account_id"] + ".dkr.ecr.ap-northeast-2.amazonaws.com"
+        expected = {"access-svc": "access-svc", "document-svc": "document-svc", "converter": "converter",
+                    "frontend": "frontend", "pipeline-api": "pipeline", "ingest-worker": "pipeline",
+                    "access-migration": "access-svc", "ai-migration": "pipeline"}
+        workloads = {name: d for (_, name), d in self.workloads(self.documents).items()}
+        for name, service in expected.items():
+            image = workloads[name]["spec"]["template"]["spec"]["containers"][0]["image"]
+            self.assertEqual(f"{registry}/fruition-{service}@{CURRENT['images'][service]['digest']}", image)
+        for document in workloads.values():
+            for container in document["spec"]["template"]["spec"]["containers"]:
+                self.assertIn("@sha256:", container["image"])
+                self.assertNotIn(SHA, container["image"])
+
+    def test_unchanged_services_keep_byte_identical_pod_templates(self):
+        changed = release_manifest(3, changed=("access-svc",))
+        self.assertNotEqual(SHA, changed["release_sha"])
+        before = self.workloads(self.documents)
+        after = self.workloads(deploy.render(CONFIG, changed["release_sha"], changed))
+        self.assertEqual(set(before), set(after))
+        rolled = set()
+        for key in before:
+            old = yaml.safe_dump(before[key]["spec"]["template"], sort_keys=False)
+            new = yaml.safe_dump(after[key]["spec"]["template"], sort_keys=False)
+            if old != new:
+                rolled.add(key)
+        self.assertEqual({("Deployment", "access-svc"), ("Job", "access-migration")}, rolled)
+
+    def test_check_manifest_rejects_one_wrong_or_unknown_digest(self):
+        deploy.check_manifest(self.documents, SHA, self.images)
+        converter = CONFIG["account_id"] + ".dkr.ecr.ap-northeast-2.amazonaws.com/fruition-converter"
+        # 다른 서비스의 digest, 임의 digest, 이전 태그 방식, 태그+digest 혼합은 모두 거부한다.
+        for image in ("@" + CURRENT["images"]["frontend"]["digest"], "@sha256:" + "c" * 64, ":" + SHA,
+                      ":latest@" + CURRENT["images"]["converter"]["digest"]):
+            documents = copy.deepcopy(self.documents)
+            container = next(d for d in documents if d["kind"] == "Deployment" and d["metadata"]["name"] == "converter")["spec"]["template"]["spec"]["containers"][0]
+            container["image"] = converter + image
+            with self.subTest(image=image), self.assertRaises(ValueError):
+                deploy.check_manifest(documents, SHA, self.images)
+        documents = copy.deepcopy(self.documents)
+        container = next(d for d in documents if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]
+        container["image"] = container["image"].replace("/fruition-", "/other-")
+        with self.assertRaises(ValueError):
+            deploy.check_manifest(documents, SHA, self.images)
+        # digest release를 이전 태그 규칙으로 검사하면 통과하지 않는다.
+        with self.assertRaises(ValueError):
+            deploy.check_manifest(self.documents, SHA)
+        with self.assertRaises(ValueError):
+            deploy.render(CONFIG, SHA, {**CURRENT, "images": {**CURRENT["images"], "converter": "sha256:" + "b" * 64}})
+
+    def test_digest_release_deploys_and_records_success(self):
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW, images=self.images)
+        self.assertEqual(12, len(fake.applied("Deployment")))
+        record = next(d for d in fake.applied("ConfigMap") if d["metadata"]["name"] == deploy.release_name(SHA))
+        self.assertEqual({"safety_contract_version", "fingerprints", "config", "manifest", "review"}, set(record["data"]))
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run), self.assertRaises(ValueError):
+            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+        self.assertFalse(fake.events)
+
+    def test_rollback_to_digest_release_uses_saved_manifest(self):
+        record = {"data": {"safety_contract_version": "2", "config": json.dumps(CONFIG),
+                           "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64)),
+                           "manifest": yaml.safe_dump_all(deploy.pinned(self.documents))}}
+        fake = FakeCluster(record=record)
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, self.documents, rollback=True, images=self.images)
+        self.assertEqual(12, len(fake.applied("Deployment")))
+        self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in fake.applied("Job")))
+
+    def test_bootstrap_resume_accepts_same_digest_only(self):
+        for scenario in ("same", "different_digest"):
+            fake = FakeCluster()
+            def run(args, *, input=None):
+                if "get" in args and "configmaps" in args:
+                    return json.dumps({"items": [{"metadata": {"name": "fruition-bootstrap"},
+                                                  "data": {"sha": SHA, "config": json.dumps(CONFIG, sort_keys=True)}}]})
+                if "get" in args and "deployments" in args:
+                    doc = copy.deepcopy(next(d for d in self.documents if d["kind"] == "Deployment"))
+                    if scenario == "different_digest":
+                        container = doc["spec"]["template"]["spec"]["containers"][0]
+                        container["image"] = container["image"].split("@")[0] + "@sha256:" + "c" * 64
+                    return json.dumps({"items": [doc]})
+                return fake.run(args, input=input)
+            with self.subTest(scenario=scenario), patch.object(deploy, "run", run):
+                if scenario == "same":
+                    deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW, bootstrap=True, images=self.images)
+                else:
+                    with self.assertRaises(ValueError):
+                        deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW, bootstrap=True, images=self.images)
+                    self.assertFalse(fake.applied("Deployment"))
+
+    def test_initial_install_resume_and_promotion_accept_digests(self):
+        review = {"release_sha": SHA, "migration_mode": "initial-install",
+                  "installation_test_url": REVIEW["compatibility_test_url"], "restore_test_url": REVIEW["restore_test_url"]}
+        data = {"initial_install_contract": "1", "sha": SHA, "config": json.dumps(CONFIG, sort_keys=True),
+                "manifest": yaml.safe_dump_all(self.documents, sort_keys=False)}
+        marker = deploy.install_record("fruition-bootstrap", data)
+        ready = deploy.install_record("fruition-bootstrap-ready", {**data, "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64))})
+        app = copy.deepcopy(next(d for d in self.documents if d["kind"] == "Deployment"))
+        for records, bootstrap, image, ok in (([marker], True, None, True), ([marker, ready], False, None, True),
+                                              ([marker], True, "@sha256:" + "c" * 64, False)):
+            live = copy.deepcopy(app)
+            if image:
+                container = live["spec"]["template"]["spec"]["containers"][0]
+                container["image"] = container["image"].split("@")[0] + image
+            fake = FakeCluster()
+            def run(args, *, input=None):
+                if "get" in args and "configmaps" in args:
+                    return json.dumps({"items": records})
+                if "get" in args and "deployments" in args:
+                    return json.dumps({"items": [live]})
+                return fake.run(args, input=input)
+            with self.subTest(bootstrap=bootstrap, image=image), patch.object(deploy, "run", run):
+                if ok:
+                    deploy.deploy(CONFIG, SHA, self.documents, review=review, bootstrap=bootstrap, images=self.images)
+                else:
+                    with self.assertRaises(ValueError):
+                        deploy.deploy(CONFIG, SHA, self.documents, review=review, bootstrap=bootstrap, images=self.images)
+                    self.assertFalse(fake.applied("Job"))
+
+    def test_image_changes_are_reported_against_live_deployments(self):
+        live = [copy.deepcopy(d) for d in self.documents if d["kind"] == "Deployment"]
+        container = next(d for d in live if d["metadata"]["name"] == "access-svc")["spec"]["template"]["spec"]["containers"][0]
+        container["image"] = container["image"].split("@")[0] + "@sha256:" + "c" * 64
+        live = [d for d in live if d["metadata"]["name"] != "frontend"]
+        changes = deploy.image_changes(self.documents, live)
+        self.assertEqual("changed", changes["access-svc"])
+        self.assertEqual("changed", changes["frontend"])
+        self.assertEqual("unchanged", changes["converter"])
+        self.assertEqual(12, len(changes))
+
+
 class InitialInstallTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.documents = deploy.render(CONFIG, SHA)
+        cls.documents = deploy.render(CONFIG, SHA, MANIFEST)
         cls.review = {"release_sha": SHA, "migration_mode": "initial-install",
                       "installation_test_url": REVIEW["compatibility_test_url"], "restore_test_url": REVIEW["restore_test_url"]}
 
@@ -764,6 +944,20 @@ class InitialInstallTests(unittest.TestCase):
         self.assertIn("bootstrap_oauth_recovery:", workflow)
         self.assertIn("BOOTSTRAP_OAUTH_RECOVERY: ${{ inputs.bootstrap_oauth_recovery }}", workflow)
         self.assertIn('if [ "$BOOTSTRAP_OAUTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-oauth-recovery); fi', workflow)
+
+    def test_workflow_fetches_one_manifest_for_render_verify_and_deploy(self):
+        workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
+        steps = yaml.safe_load(workflow)["jobs"]["deploy"]["steps"]
+        names = [step.get("name") for step in steps]
+        fetch = steps[names.index("Fetch release manifest")]
+        self.assertLess(names.index("Fetch release manifest"), names.index("Validate and render before AWS mutation"))
+        self.assertLess(names.index("Fetch release manifest"), names.index("Configure AWS credentials (OIDC)"))
+        self.assertEqual({"GH_TOKEN": "${{ github.token }}"}, fetch["env"])
+        self.assertIn('fetch --release "$SHA" --output "$RUNNER_TEMP/release.json"', fetch["run"])
+        for name in ("Validate and render before AWS mutation", "Verify published immutable images",
+                     "Deploy with DB, migration, rollout and smoke gates"):
+            self.assertIn('--manifest "$RUNNER_TEMP/release.json"', steps[names.index(name)]["run"], name)
+        self.assertIn('"$RUNNER_TEMP/release.json"', steps[names.index("Remove temporary deployment files")]["run"])
 
     def test_workflow_runs_pdf_smoke_only_after_deploy(self):
         workflow = (ROOT / ".github/workflows/deploy.yml").read_text()

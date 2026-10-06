@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from aws_release_safety import validate_review, smoke_settings, authenticated_smoke
+from aws_image_release import validate_manifest
 
 import yaml
 
@@ -82,8 +83,25 @@ def validate(config, sha):
         raise ValueError("SMTP port는 1~65535 정수여야 합니다")
 
 
-def render(config, sha):
+def release_images(config, manifest):
+    """schema 3이면 ECR 저장소별 digest, 이전 schema면 None(모든 이미지가 release 태그)."""
+    if manifest["schema_version"] < 3:
+        return None
+    registry = config["account_id"] + ".dkr.ecr.ap-northeast-2.amazonaws.com"
+    return {f"{registry}/fruition-{service}": image["digest"] for service, image in manifest["images"].items()}
+
+
+def image_matches(image, sha, images):
+    if images is None:
+        return image.endswith(":" + sha)
+    repository, _, digest = image.partition("@")
+    return images.get(repository) == digest
+
+
+def render(config, sha, manifest):
     validate(config, sha)
+    validate_manifest(manifest, sha)
+    images = release_images(config, manifest)
     with tempfile.TemporaryDirectory(prefix="fruition-aws-") as directory:
         tree = Path(directory) / "k8s"
         shutil.copytree(ROOT / "k8s", tree)
@@ -96,15 +114,22 @@ def render(config, sha):
         path = overlay / "kustomization.yaml"
         data = yaml.safe_load(path.read_text())
         for item in data["images"]:
-            item["newTag"] = sha
+            if images is None:
+                item["newTag"] = sha
+                continue
+            # 바뀌지 않은 서비스는 이전 release와 같은 digest라 Pod template도 같아 재시작하지 않는다.
+            if item["newName"] not in images:
+                raise ValueError("release에 없는 이미지 저장소입니다: " + item["newName"])
+            item.pop("newTag", None)
+            item["digest"] = images[item["newName"]]
         path.write_text(yaml.safe_dump(data, sort_keys=False))
         content = run(["kubectl", "kustomize", str(overlay)])
     documents = list(yaml.safe_load_all(content))
-    check_manifest(documents, sha)
+    check_manifest(documents, sha, images)
     return documents
 
 
-def check_manifest(documents, sha):
+def check_manifest(documents, sha, images=None):
     # 주석이 아니라 실제 렌더된 값 전체를 검사한다.
     if PLACEHOLDER.search(json.dumps(documents)):
         raise ValueError("렌더 결과에 미치환 placeholder가 남았습니다")
@@ -115,8 +140,26 @@ def check_manifest(documents, sha):
         if document["kind"] not in {"Deployment", "Job"}:
             continue
         for container in document["spec"]["template"]["spec"]["containers"]:
-            if not container["image"].endswith(":" + sha):
-                raise ValueError("업무 image는 모두 같은 immutable SHA여야 합니다")
+            if not image_matches(container["image"], sha, images):
+                raise ValueError("업무 image는 모두 release에 기록된 immutable 태그/digest여야 합니다")
+
+
+def image_changes(documents, live):
+    """Deployment별 image가 현재 cluster와 같은지(정보용). 같으면 rollout이 일어나지 않는다."""
+    current = {d["metadata"]["name"]: [c["image"] for c in d["spec"]["template"]["spec"]["containers"]] for d in live}
+    return {d["metadata"]["name"]: "unchanged" if current.get(d["metadata"]["name"]) ==
+            [c["image"] for c in d["spec"]["template"]["spec"]["containers"]] else "changed"
+            for d in documents if d["kind"] == "Deployment"}
+
+
+def report_image_changes(documents):
+    try:
+        live = json.loads(kubectl("get", "deployments", "-o", "json")).get("items", [])
+        for name, state in image_changes(documents, live).items():
+            print(f"image {state}: {name}")
+    except (subprocess.CalledProcessError, ValueError, KeyError, TypeError) as error:
+        # 비교는 안내용이다. 실패해도 배포 gate에는 영향을 주지 않는다.
+        print("현재 image 비교를 건너뜁니다: " + type(error).__name__)
 
 
 def apply(documents):
@@ -390,7 +433,7 @@ def access_oauth_secret_recovery(before, after):
     return original == updated
 
 
-def initial_install_state(config, sha, documents, bootstrap, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False):
+def initial_install_state(config, sha, documents, bootstrap, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False, images=None):
     """Bind an empty-DB installation and its promotion to the exact reviewed inputs."""
     records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
     expected = {"initial_install_contract": "1", "sha": sha,
@@ -463,7 +506,7 @@ def initial_install_state(config, sha, documents, bootstrap, probe_recovery=Fals
     apps = [a for a in apps if a["metadata"]["name"] in names]
     if apps and marker is None:
         raise ValueError("기존 앱이 있는 환경에서 최초 설치를 시작할 수 없습니다")
-    if any(not c["image"].endswith(":" + sha) for a in apps for c in a["spec"]["template"]["spec"]["containers"]):
+    if any(not image_matches(c["image"], sha, images) for a in apps for c in a["spec"]["template"]["spec"]["containers"]):
         raise ValueError("최초 설치 대상 앱 이미지 SHA가 다릅니다")
     if bootstrap and ready is not None:
         raise ValueError("최초 설치가 준비됐습니다. 같은 SHA의 deploy로 업무 검증을 완료하세요")
@@ -483,9 +526,9 @@ def install_record(name, data):
             "immutable": True, "data": data}
 
 
-def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False):
+def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False, images=None):
     validate(config, sha)
-    check_manifest(documents, sha)
+    check_manifest(documents, sha, images)
     if not rollback:
         validate_review(review, sha)
     if bootstrap and rollback:
@@ -501,7 +544,7 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     verify_target(config)
     initial = not rollback and review["migration_mode"] == "initial-install"
     if initial:
-        initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery, mail_health_recovery, oauth_recovery)
+        initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery, mail_health_recovery, oauth_recovery, images)
     if bootstrap:
         records = json.loads(kubectl("get", "configmaps", "-o", "json")).get("items", [])
         if any(d["metadata"]["name"].startswith("fruition-release-") for d in records):
@@ -513,7 +556,7 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
             previous = marker.get("data", {})
             if previous.get("sha") != sha or previous.get("config") != json.dumps(config, sort_keys=True):
                 raise ValueError("bootstrap은 최초 설치 또는 동일 SHA의 미완료 최초 설치 재시도만 가능합니다")
-            if any(not c["image"].endswith(":" + sha) for d in existing_apps if d["metadata"]["name"] in app_names
+            if any(not image_matches(c["image"], sha, images) for d in existing_apps if d["metadata"]["name"] in app_names
                    for c in d["spec"]["template"]["spec"]["containers"]):
                 raise ValueError("bootstrap 재시도 대상 앱 이미지가 최초 설치 SHA와 다릅니다")
     # 플랫폼 리소스는 인프라 관리자가 별도로 준비한다. 앱 deployer는 읽기만 가능하다.
@@ -538,7 +581,7 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
             raise ValueError("기존 release와 manifest가 다릅니다. 새 SHA가 필요합니다")
         # 고정 대상은 기록된 그대로 배포하고, 확장 정책만 현재 저장소 값을 따른다.
         documents = pinned(saved_documents) + [d for d in documents if d["kind"] in SCALING_KINDS]
-        check_manifest(documents, sha)
+        check_manifest(documents, sha, images)
         # 현재 Secret과 ServiceAccount로 먼저 확인한다. 불일치 시 업무 설정도 변경하지 않는다.
         current = fingerprints(config)
         if current != expected:
@@ -621,6 +664,7 @@ def main():
     parser.add_argument("action", choices=("render", "bootstrap", "deploy", "rollback"))
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--sha", required=True)
+    parser.add_argument("--manifest", type=Path, required=True, help="aws_image_release.py fetch로 받은 게시 release manifest")
     parser.add_argument("--review", type=Path, help="검토된 릴리스별 migration/복원 시험 기록 JSON")
     parser.add_argument("--bootstrap-probe-recovery", action="store_true", help="검토된 Access probe timeout 1→5초 복구만 허용")
     parser.add_argument("--bootstrap-mail-health-recovery", action="store_true", help="SMTP 반복 health 인증 제외 복구만 허용")
@@ -628,14 +672,17 @@ def main():
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     validate(config, args.sha)
-    documents = render(config, args.sha)
+    manifest = json.loads(args.manifest.read_text())
+    documents = render(config, args.sha, manifest)
     if args.action == "render":
         print(yaml.safe_dump_all(documents, sort_keys=False))
     else:
         review = json.loads(args.review.read_text()) if args.review and args.action != "rollback" else None
+        report_image_changes(documents)
         deploy(config, args.sha, documents, rollback=args.action == "rollback", review=review,
                bootstrap=args.action == "bootstrap", probe_recovery=args.bootstrap_probe_recovery,
-               mail_health_recovery=args.bootstrap_mail_health_recovery, oauth_recovery=args.bootstrap_oauth_recovery)
+               mail_health_recovery=args.bootstrap_mail_health_recovery, oauth_recovery=args.bootstrap_oauth_recovery,
+               images=release_images(config, manifest))
 
 
 if __name__ == "__main__":
