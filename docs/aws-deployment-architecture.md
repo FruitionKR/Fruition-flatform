@@ -12,7 +12,7 @@
 
 그림은 **VPC 안의 가용영역 A·B를 좌우로 나누고, 위에서부터 퍼블릭 서브넷 → 프라이빗 서브넷** 순으로 읽습니다. RDS와 Redis도 프라이빗 서브넷에 있어 DB 전용 서브넷은 없습니다.
 
-- **가용영역별 배치:** NAT 게이트웨이는 A에만 1대 있고, ALB는 두 영역에 걸칩니다. 인증 DB는 A(primary)·B(standby)로 나뉜 Multi-AZ, 코어 DB는 A에만 있는 Single-AZ, Redis는 A(primary)·B(replica)입니다.
+- **가용영역별 배치:** NAT 게이트웨이와 배포 runner는 A(`private_subnets[0]`)에 1대씩 있고, ALB는 두 영역에 걸칩니다. 인증 DB는 primary·standby가 서로 다른 영역에 있는 Multi-AZ, 코어 DB는 한 영역에만 있는 Single-AZ, Redis는 primary·replica가 서로 다른 영역에 있습니다. Terraform은 RDS·Redis의 영역을 고정하지 않으므로, 그림에서 A·B 중 어느 쪽에 그렸는지는 예시입니다.
 - **EKS:** 두 영역에 걸친 클러스터 안에 Fargate(화면), general 노드 그룹(평소 2~4대, 배포 중 최대 5대), ai_worker Spot 노드 그룹(0~2대)이 있습니다. 그룹 안의 아이콘은 그 그룹에서 실행되는 Pod입니다. 실제 Pod 배치와 개수는 Kubernetes·HPA·KEDA가 정합니다.
 - **기동 흐름:** 절전 중 화면이 로그인 전에 기동 요청을 보내거나 ALB 5XX가 감지되면, Lambda가 general 2대와 AI 1대를 함께 올립니다([요청 기반 기동](aws-request-wake.md)).
 - 인스턴스 타입 같은 사양은 그림에 넣지 않습니다. [비용 문서](aws-deployment-costs.md)와 [Terraform 관리 항목](aws-resource-inventory.md)을 봅니다.
