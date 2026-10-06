@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Authenticated production probe: synthetic PDF only; never print tokens or signed URLs."""
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -179,19 +178,20 @@ class Probe:
         self.stage = 'conversion-and-ai'
         parent = self.remember(self.api('POST', self.base + '/' + original + '/convert-markdown',
                                       expected=(202,), key=str(uuid.uuid4())))
-        last_part = 'doc_' + uuid.UUID(bytes=hashlib.md5((parent + ':11:0').encode()).digest(), version=3).hex
+        # 11페이지는 10페이지 묶음 2개로 변환되고, 5MB 이하라 원본 문서 하나에 이어 붙는다(Document ADR-0024).
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             rows = self.api('GET', self.base).get('documents', [])
-            parts = [row for row in rows if row['id'] == parent or
-                     (row['id'] == last_part and row.get('source_document_id') == parent)]
-            for part in parts:
-                self.remember(part)
-            if len(parts) >= 2 and all(part.get('status') == 'completed'
-                                      and part.get('pipeline_run_id')
-                                      and not part['pipeline_run_id'].startswith('convert:') for part in parts):
+            parts = [row for row in rows if row.get('source_document_id') == parent]
+            for row in parts:
+                self.remember(row)
+            if parts:
+                raise ValueError('Small PDF conversion created split documents')
+            document = next((row for row in rows if row['id'] == parent), None)
+            if (document and document.get('status') == 'completed' and document.get('pipeline_run_id')
+                    and not document['pipeline_run_id'].startswith('convert:')):
                 return {'status': 'passed', 'bytes': path.stat().st_size, 'upload_parts': started['part_count'],
-                        'converted_documents': len(parts), 'range_read': 'passed', 'completion_replay': 'passed',
+                        'converted_documents': 1, 'range_read': 'passed', 'completion_replay': 'passed',
                         'ai_processing': 'completed'}
             # Converter retries can briefly mark failed; allow its checkpoint retry window.
             time.sleep(5)
