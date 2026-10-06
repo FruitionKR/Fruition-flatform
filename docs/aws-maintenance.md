@@ -124,6 +124,16 @@ kubectl -n fruition rollout restart deploy/maintenance-task-worker
 
 재시작한 작업자 로그에서 `wiki page embedding job completed run_id=pending-recovery`를 확인합니다. 페이지의 근거 단위 벡터도 같은 작업에서 채워집니다. 실패가 남으면 `wiki_page_embeddings.status = 'failed'`로 기록되고, 작업자가 다시 시작하거나 다음 임베딩 작업이 돌 때만 재시도합니다. 실패 수가 0이 될 때까지 재시작을 반복합니다.
 
+## Jev 선택 판단 켜기
+
+AI는 Agent 라우팅·질의 근거 선택·ingest 개념 병합을 TypeSafe Jev로 판정할 수 있습니다([Fruition-ai ADR-0027](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/adr/0027-jev-selective-judge.md)). `fruition-config`의 `JEV_ROUTING_ENABLED`·`JEV_EVIDENCE_ENABLED`·`JEV_CONCEPT_MERGE_ENABLED`는 기본 `false`입니다. 켜도 `TYPESAFE_API_KEY`가 비어 있거나 크레딧 소진·호출 실패가 나면 해당 요청은 기존 경로로 처리됩니다.
+
+1. **배포 전(필수).** Secrets Manager `fruition/app`에 `TYPESAFE_API_KEY` 속성을 추가합니다. 아직 키가 없으면 빈 문자열로 둡니다. `fruition-pipeline` ExternalSecret이 이 속성을 읽으므로, 속성이 없으면 AI Secret 동기화 전체가 실패해 배포가 멈춥니다. 기존 Secret은 Terraform `ignore_changes` 때문에 apply로 키가 추가되지 않으니 콘솔/보안 입력 경로로 이 속성만 추가합니다.
+2. **키 입력.** 크레딧을 준비한 뒤 `TYPESAFE_API_KEY`에 실제 키를 넣습니다. ExternalSecret 갱신(최대 1시간)을 기다리거나 강제 동기화한 뒤 AI Pod를 재시작해야 새 값을 읽습니다.
+3. **경로별 켜기.** `k8s/base/configmap.yaml`에서 켤 경로의 값만 `"true"`로 바꿔 배포합니다. 경로마다 평가 근거의 강도가 달라 하나씩 켜고 사용량(`GET /usage/models`의 provider `typesafe`)과 품질을 확인합니다.
+
+402(크레딧 소진)·401/403(키 오류)를 받으면 각 Pod가 `JEV_BLOCK_SECONDS`(기본 600초) 동안 Jev 호출을 건너뛰고 기존 경로만 씁니다. 끄려면 해당 설정을 `"false"`로 되돌려 배포합니다.
+
 ## 노드·EKS 버전 점검
 
 API는 각 2개 Pod이며 `maxUnavailable: 0`, `maxSurge: 1`로 교체합니다. 노드 점검은 PDB가 최소 1개 Pod를 보호합니다. ALB Service/Ingress와 TargetGroupBinding을 먼저 만들고 Pod를 생성해 readiness gate가 주입되게 합니다. ALB Pod webhook 실패 시 새 Pod 생성을 막아 gate 없이 배포가 진행되지 않도록 합니다. 이미 있는 Pod에는 자동 주입되지 않으므로 최초 전환의 재배포 후 실제 Pod의 gate와 ALB target 상태를 확인하세요.

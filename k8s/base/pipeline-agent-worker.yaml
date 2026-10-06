@@ -69,6 +69,11 @@ spec:
                 secretKeyRef:
                   name: fruition-secret
                   key: ANTHROPIC_API_KEY
+            - name: TYPESAFE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: TYPESAFE_API_KEY
             - name: LANGSMITH_API_KEY
               valueFrom:
                 secretKeyRef:
