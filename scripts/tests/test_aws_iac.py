@@ -28,6 +28,23 @@ class IaCContractTests(unittest.TestCase):
             self.assertTrue(lock.exists())
             self.assertNotEqual(0, subprocess.run(["git", "check-ignore", "-q", str(lock)], cwd=ROOT).returncode)
 
+    def test_frontend_wake_trigger_cannot_choose_the_controller_action(self):
+        wake = re.sub(r"\s+", " ", (ROOT / "infra/terraform/request-wake.tf").read_text())
+        # 화면은 고정 source/detail-type 이벤트만 보낼 수 있고, Lambda 입력은 규칙이 정한다.
+        self.assertIn('input = jsonencode({ action = "request" })', wake)
+        self.assertIn('"events:source" = "fruition.frontend"', wake)
+        self.assertIn('"events:detail-type" = "wake-requested"', wake)
+        self.assertIn('"fruition:fruition-frontend"', wake)
+        frontend = next(d for d in yaml.safe_load_all((ROOT / "k8s/overlays/aws/frontend.yaml").read_text())
+                        if d["kind"] == "Deployment")
+        pod = frontend["spec"]["template"]["spec"]
+        # 절전 중 CoreDNS가 없어도 AWS API 주소를 VPC DNS로 찾는다.
+        self.assertEqual("Default", pod["dnsPolicy"])
+        env = {e["name"]: e.get("value") for e in pod["containers"][0]["env"]}
+        self.assertEqual("fruition.frontend", env["REQUEST_WAKE_EVENT_SOURCE"])
+        self.assertEqual("wake-requested", env["REQUEST_WAKE_DETAIL_TYPE"])
+        self.assertEqual("fruition-request-wake", env["REQUEST_WAKE_STATE_TABLE"])
+
     def test_app_iam_and_autoscaler_writes_have_resource_boundaries(self):
         deploy = (ROOT / "infra/terraform/github-oidc.tf").read_text()
         self.assertNotIn("AmazonEC2ContainerRegistryPowerUser", deploy)

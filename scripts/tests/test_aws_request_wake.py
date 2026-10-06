@@ -103,6 +103,28 @@ class WakeTests(unittest.TestCase):
         self.finish_updates()
         self.assertEqual("awake", self.tick()["phase"])
 
+    def test_wake_prewarms_one_ai_node_without_raising_its_minimum(self):
+        self.sleep()
+        self.finish_updates()
+        self.tick()
+        self.controller.run({"action": "wake"})
+        # AI 작업자는 최소 1개라 깨어나면 어차피 AI 노드가 뜬다. 일반 노드를 기다리지 않고 함께 띄운다.
+        self.assertEqual(1, self.nodes["ai_worker"]["scalingConfig"]["desiredSize"])
+        # 최소값은 0으로 둬서 이후 축소는 Cluster Autoscaler가 결정한다.
+        self.assertEqual(0, self.nodes["ai_worker"]["scalingConfig"]["minSize"])
+
+    def test_frontend_request_wakes_only_from_asleep(self):
+        request = {"action": "request"}
+        self.assertEqual("awake", self.controller.run(request)["phase"])
+        self.eks.update_nodegroup_config.assert_not_called()
+        self.sleep()
+        # 운영자가 재우는 중이면 화면 방문으로 절전을 취소하지 않는다.
+        self.assertEqual("sleeping", self.controller.run(request)["phase"])
+        self.finish_updates()
+        self.assertEqual("asleep", self.tick()["phase"])
+        self.assertEqual("waking", self.controller.run(request)["phase"])
+        self.assertEqual(2, self.nodes["general"]["scalingConfig"]["desiredSize"])
+
     def test_sleep_does_not_finish_while_instances_are_still_terminating(self):
         self.sleep()
         self.nodes["general"]["status"] = "ACTIVE"
