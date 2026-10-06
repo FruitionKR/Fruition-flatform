@@ -17,7 +17,7 @@ resources:
   - kafka-users.yaml
   - kafka-trigger-auth.yaml
 
-# 배포 스크립트가 임시 사본의 태그를 커밋 SHA로 설정한다.
+# 배포 스크립트가 임시 사본에서 release manifest의 서비스별 digest로 바꾼다(schema 1·2는 release ID 태그).
 images:
   - name: fruition-document-svc
     newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-document-svc

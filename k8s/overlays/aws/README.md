@@ -18,7 +18,7 @@ ALB 생성 후 DNS의 `api`·`access`와 화면 호스트(`app_domain`) CNAME을
 
 ## 설정 완료 후 GitHub Environment로 이전
 
-1. 로컬 JSON의 모든 placeholder를 채우고 기존 `scripts/aws_deploy.py render --config <로컬-파일> --sha <실제-release-SHA>`로 검증한다. 렌더는 AWS를 변경하지 않으며 출력에도 환경 정보가 있으므로 공개 artifact로 올리지 않는다.
+1. 로컬 JSON의 모든 placeholder를 채우고 `scripts/aws_image_release.py fetch --release <release-ID> --output <manifest>`로 받은 릴리스 manifest와 함께 `scripts/aws_deploy.py render --config <로컬-파일> --sha <release-ID> --manifest <manifest>`로 검증한다. 렌더는 AWS를 변경하지 않으며 출력에도 환경 정보가 있으므로 공개 artifact로 올리지 않는다.
 2. platform 저장소의 Settings → Environments에서 `feedback`을 생성하거나 선택한다. 환경명은 workflow와 OIDC trust policy의 `feedback`과 같아야 한다.
 3. 해당 환경의 **Environment variables**에 `AWS_DEPLOY_CONFIG_JSON`을 만들고 완성된 JSON 전체를 값으로 저장한다. `AWS_DEPLOY_ROLE_ARN`에는 Terraform의 `github_deploy_role_arn` output을 저장한다. 일반 repository variable 대신 이 환경에 설정한다.
 4. 사용할 GitHub 플랜에서 제공하는 배포 승인·브랜치 제한을 설정하고, `feedback` 환경의 OIDC 권한 및 전용 runner 준비를 확인한다. 앱 비밀번호·API 키·Discord webhook은 AWS Secrets Manager에서 관리한다. Environment Variables는 비밀값 저장소가 아니다.

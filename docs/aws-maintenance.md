@@ -15,6 +15,16 @@
 
 API HPA(`k8s/overlays/aws/api-autoscaling.yaml`)는 metrics-server의 CPU 사용률만 보며, 요청 수나 응답 시간으로는 늘어나지 않습니다. 실제 확장 동작은 부하 시험으로 확인해야 합니다. AI 작업 Pod가 늘어나도 EC2 최대치에 도달하면 대기할 수 있습니다. CloudWatch는 관측·알림용이며 HPA와 연결되지 않습니다. 일반 노드는 평소 2~4대이고, 롤아웃 중 Pending Pod가 생기면 상한인 5대까지 늘어나 비용이 증가할 수 있습니다. 유휴 노드는 Cluster Autoscaler가 다시 줄입니다.
 
+## 배포할 때 어떤 Pod가 교체되나요?
+
+schema 3 이미지 릴리스는 서비스별 digest로 Deployment·Job 이미지를 고정합니다([이미지 릴리스](aws-image-releases.md)). 이전 배포와 같은 digest이고 설정도 같은 서비스는 Pod template이 바뀌지 않아 재시작되지 않습니다. 이미지가 바뀐 서비스만 롤링 교체됩니다. pipeline 이미지를 쓰는 AI Pod들(pipeline-api, pipeline-agent-worker, 수집·질의·에이전트·유지보수 작업자, edit-event-consumer, embedding-server)은 함께 교체됩니다.
+
+- 배포 로그의 `image changed: <이름>`/`image unchanged: <이름>`은 현재 cluster의 Deployment 이미지와 비교한 안내입니다. 비교가 실패해도 배포를 막지 않으며, 설정(ConfigMap 등) 변경으로 인한 교체는 이 목록에 나오지 않습니다.
+- migration Job과 DB·smoke 검사는 교체 여부와 관계없이 기존 순서대로 실행됩니다.
+- schema 3으로 처음 배포할 때는 이미지 참조 형식이 태그에서 digest로 바뀌므로 모든 Deployment가 한 번 교체됩니다.
+- schema 1·2 릴리스로 rollback하면 이전처럼 릴리스 ID 태그를 쓰므로 모든 Deployment가 다시 교체됩니다.
+- ECR은 서비스별 `b-` 빌드 이미지를 최근 30개만 보존합니다. 실행 중인 digest와 rollback 대상 digest가 이 범위 안에 있어야 재배포·rollback 검증이 통과합니다. 자주 바뀌는 서비스일수록 오래된 rollback 후보가 먼저 만료됩니다.
+
 ## 처음 적용할 순서
 
 이미지 자동 게시 설정과 버전 선택·승인 절차는 [이미지 릴리스 안내](aws-image-releases.md)를 따릅니다. 서비스 main CI 성공 후 정기 게시하며, 운영자가 게시된 릴리스 ID를 선택해 기존 배포 workflow를 실행합니다.
