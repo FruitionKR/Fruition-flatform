@@ -32,7 +32,9 @@ def manifest(schema=release.SCHEMA_VERSION):
         builds[service] = {"context_tree": tree, "dockerfile": dockerfile,
                            "tag": "b-" + release.build_id(service, repo, tree, dockerfile, release.BUILDER_VERSION)}
     images = {service: {"tag": build["tag"], "digest": "sha256:" + "b" * 64} for service, build in builds.items()}
-    return {**data, "builder_version": release.BUILDER_VERSION, "builds": builds, "images": images}
+    release_sha = release.identity(sources, recipe, builds, release.BUILDER_VERSION)
+    return {**data, "release_sha": release_sha, "builder_version": release.BUILDER_VERSION,
+            "builds": builds, "images": images}
 
 
 def outcomes(data, built=()):
@@ -73,7 +75,8 @@ class ImageReleaseTests(unittest.TestCase):
     def test_identity_tracks_each_service_revision_and_recipe(self):
         data = manifest()
         release.validate_manifest(data, data["release_sha"])
-        self.assertEqual(data["release_sha"], release.identity(dict(reversed(list(data["sources"].items()))), data["recipe"]))
+        reordered = dict(reversed(list(data["sources"].items())))
+        self.assertEqual(data["release_sha"], release.identity(reordered, data["recipe"], data["builds"], data["builder_version"]))
         for repo in release.REPOS:
             modified = copy.deepcopy(data)
             modified["sources"][repo] = "f" * 40
@@ -222,6 +225,18 @@ class ImageReleaseTests(unittest.TestCase):
         for index, changed in enumerate(("converter", "FruitionKR/other", "2" * 40, "Dockerfile", 2)):
             modified = list(args); modified[index] = changed
             self.assertNotEqual(value, release.build_id(*modified))
+
+    def test_schema3_build_inputs_are_bound_to_release_identity(self):
+        data = manifest()
+        # 빌드 입력과 태그를 서로 맞게 함께 바꿔도 release ID가 달라져 거부된다.
+        forged = copy.deepcopy(data)
+        repo, _, dockerfile = release.SERVICES["pipeline"]
+        tree = "e" * 40
+        forged["builds"]["pipeline"] = {"context_tree": tree, "dockerfile": dockerfile,
+                                        "tag": "b-" + release.build_id("pipeline", repo, tree, dockerfile, release.BUILDER_VERSION)}
+        forged["images"]["pipeline"]["tag"] = forged["builds"]["pipeline"]["tag"]
+        with self.assertRaises(ValueError):
+            release.validate_manifest(forged, forged["release_sha"])
 
     def test_schema3_tags_are_recomputed_from_build_inputs(self):
         data = manifest()

@@ -23,7 +23,7 @@ schema 3 이미지 릴리스는 서비스별 digest로 Deployment·Job 이미지
 - migration Job과 DB·smoke 검사는 교체 여부와 관계없이 기존 순서대로 실행됩니다.
 - schema 3으로 처음 배포할 때는 이미지 참조 형식이 태그에서 digest로 바뀌므로 모든 Deployment가 한 번 교체됩니다.
 - schema 1·2 릴리스로 rollback하면 이전처럼 릴리스 ID 태그를 쓰므로 모든 Deployment가 다시 교체됩니다.
-- ECR은 서비스별 `b-` 빌드 이미지를 최근 30개만 보존합니다. 실행 중인 digest와 rollback 대상 digest가 이 범위 안에 있어야 재배포·rollback 검증이 통과합니다. 자주 바뀌는 서비스일수록 오래된 rollback 후보가 먼저 만료됩니다.
+- ECR은 서비스별로 최근 이미지 60개만 보존합니다(`b-` 빌드 태그·이전 릴리스 태그 포함). 실행 중인 digest와 rollback 대상 digest가 이 범위 안에 있어야 재배포·rollback 검증이 통과합니다. 자주 바뀌는 서비스일수록 오래된 rollback 후보가 먼저 만료됩니다.
 
 ## 처음 적용할 순서
 

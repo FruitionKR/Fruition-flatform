@@ -25,6 +25,8 @@ SCHEMA_SERVICES = {1: ["access-svc", "document-svc", "pipeline", "converter"], 2
 SCHEMA_VERSION = 3
 # publish-images.yml의 build job이 바뀌면 같은 소스여도 다른 이미지가 나올 수 있다.
 # 그때 BUILDER_VERSION을 올려 모든 서비스를 다시 빌드하고, 아래 해시를 새 build job 값으로 갱신한다.
+# 해시만 고치고 버전을 그대로 두면 바뀐 빌드 방식의 결과가 이전 태그로 재사용된다. 둘은 항상 함께 바꾼다.
+# prepare_build의 clone·checkout 방식이나 기준 이미지 정책을 바꿀 때도 버전을 올린다.
 BUILDER_VERSION = 1
 BUILDER_JOB_SHA256 = "e0d05c52fa1e584d6200bb19423d8f6cfe381a95644f55a2810bdb5d199f5ef2"
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -50,9 +52,12 @@ def github(path, missing_ok=False):
         raise ValueError(f"GitHub API request failed ({status})") from None
 
 
-def identity(sources, recipe):
-    raw = json.dumps({"sources": sources, "recipe": recipe}, sort_keys=True,
-                     separators=(",", ":")).encode()
+def identity(sources, recipe, builds=None, builder=None):
+    content = {"sources": sources, "recipe": recipe}
+    if builds is not None:
+        # schema 3은 빌드 입력도 release ID에 묶는다. Release 본문을 고쳐 다른 b- 태그를 가리킬 수 없다.
+        content.update(builds=builds, builder_version=builder)
+    raw = json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(raw).hexdigest()[:40]
 
 
@@ -103,10 +108,13 @@ def validate_manifest(data, release, complete=True):
     recipe = data.get("recipe", "")
     if not isinstance(recipe, str) or not re.fullmatch(r"[0-9a-f]{64}", recipe):
         raise ValueError("Invalid build recipe digest")
-    if identity(sources, recipe) != release:
-        raise ValueError("Release content does not match its identifier")
     if data["schema_version"] >= 3:
         validate_builds(data, services)
+        expected = identity(sources, recipe, data["builds"], data["builder_version"])
+    else:
+        expected = identity(sources, recipe)
+    if expected != release:
+        raise ValueError("Release content does not match its identifier")
     if complete:
         images = data.get("images", {})
         if (not isinstance(images, dict) or set(images) != set(services)
@@ -160,7 +168,7 @@ def discover(path):
                            "tag": "b-" + build_id(service, repo, tree, dockerfile, BUILDER_VERSION)}
     recipe = hashlib.sha256(Path(__file__).read_bytes() +
                             (ROOT / ".github/workflows/publish-images.yml").read_bytes()).hexdigest()
-    release = identity(sources, recipe)
+    release = identity(sources, recipe, builds, BUILDER_VERSION)
     repo = os.environ["GITHUB_REPOSITORY"]
     existing = github(f"repos/{repo}/releases/tags/images-{release}", missing_ok=True)
     if existing and not existing["draft"]:

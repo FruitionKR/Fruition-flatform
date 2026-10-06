@@ -23,7 +23,7 @@
 
 - 15분 간격으로 Access·Document·AI·frontend의 현재 main 커밋과 각 `ci.yml`의 해당 커밋에 대한 push CI 성공을 확인합니다. 서비스 push 직후 즉시 실행되는 것은 아니며 GitHub 일정 실행은 지연될 수 있습니다. 공개 저장소의 장기 비활동 시 일정이 비활성화될 수도 있습니다.
 - 하나라도 CI가 실패하거나 진행 중이면 게시를 건너뛰고 다음 실행에서 다시 확인합니다. PR·다른 브랜치의 성공 결과로 우회하지 않습니다.
-- 네 소스 커밋과 빌드 스크립트·workflow 해시로 40자리 릴리스 ID를 계산합니다. 이는 특정 저장소의 Git 커밋 SHA가 아닙니다. 문서·배포 검토 기록만 바꾸면 새 이미지를 만들지 않습니다.
+- 네 소스 커밋, 빌드 스크립트·workflow 해시, 서비스별 빌드 입력(`builds`·`builder_version`)으로 40자리 릴리스 ID를 계산합니다. 빌드 입력도 ID에 묶여 있어 Release 본문을 고쳐 다른 `b-` 태그를 가리키게 할 수 없습니다. 이는 특정 저장소의 Git 커밋 SHA가 아닙니다. 문서·배포 검토 기록만 바꾸면 새 이미지를 만들지 않습니다.
 - 서비스마다 빌드 context(Access·Document·frontend·converter는 저장소 루트, pipeline은 `pipeline/` 디렉터리)의 Git tree SHA, Dockerfile 경로, `BUILDER_VERSION`으로 빌드 ID를 계산해 `b-<40자리>` ECR 태그로 씁니다. 같은 태그가 이미 ECR에 있으면 clone·로그인·빌드 없이 그 이미지를 재사용합니다. converter는 AI 저장소 루트가 context라 AI 저장소의 어떤 커밋에도 다시 빌드되고, pipeline은 `pipeline/` 아래가 바뀔 때만 다시 빌드됩니다.
 - GitHub hosted Linux runner에서 x86_64 이미지 `access-svc`, `document-svc`, `pipeline`, `converter`, `frontend`를 빌드합니다. `frontend`는 Fruition-frontend 루트 Dockerfile을 `SAME_ORIGIN_API=true`로 빌드해 Next rewrite 없이 ALB 경로 라우팅을 따릅니다. 동시에 최대 4개를 빌드합니다(`max-parallel: 4`).
 - `b-` 태그도 immutable입니다. 부분 실패 후 재실행하면 이미 게시된 같은 태그를 재사용합니다.
@@ -48,7 +48,7 @@
 
 - 게시 실패는 GitHub Actions에서 확인합니다. 이 hosted 게시 workflow는 AWS 운영 SNS 접근권한이 없어 Discord 전송을 하지 않습니다. 배포 실패의 기존 Discord 알림은 유지됩니다.
 - 같은 ID가 이미 완전히 게시되어 있으면 정기 실행은 빌드를 생략합니다. 새 소스는 바뀐 서비스만 빌드합니다. 게시 스크립트나 workflow만 바뀌면 새 릴리스 ID가 생기지만 이미지는 모두 재사용합니다.
-- ECR은 저장소마다 `b-` 빌드 태그 최근 30개와 그 밖의 이전 릴리스 ID 태그 최근 30개를 따로 보존합니다(`infra/terraform/ecr.tf`). 오래된 GitHub Release가 있어도 이미지가 만료되면 배포/rollback 검증에서 실패합니다. 현재 실행 중인 digest와 rollback 후보 digest가 서비스별 최근 30개 빌드 안에 있는지 확인해야 합니다. 만료된 빌드 태그는 같은 입력이 다시 오면 새로 빌드되지만 digest가 달라 이전 Release로는 검증되지 않습니다.
+- ECR은 저장소마다 최근 이미지 60개를 보존합니다(`infra/terraform/ecr.tf`). `b-` 빌드 태그, 이전 릴리스 ID 태그, 태그 없는 하위 이미지를 함께 셉니다. 오래된 GitHub Release가 있어도 이미지가 만료되면 배포/rollback 검증에서 실패합니다. 현재 실행 중인 digest와 rollback 후보 digest가 서비스별 최근 60개 이미지 안에 있는지 확인해야 합니다. 만료된 빌드 태그는 같은 입력이 다시 오면 새로 빌드되지만 digest가 달라 이전 Release로는 검증되지 않습니다.
 
 ## schema 3 전환 시 한 번 일어나는 일
 

@@ -28,17 +28,15 @@ class IaCContractTests(unittest.TestCase):
             self.assertTrue(lock.exists())
             self.assertNotEqual(0, subprocess.run(["git", "check-ignore", "-q", str(lock)], cwd=ROOT).returncode)
 
-    def test_ecr_keeps_recent_build_tags_separately_from_legacy_release_tags(self):
+    def test_ecr_keeps_enough_images_for_reused_builds_and_rollback(self):
         ecr = re.sub(r"\s+", " ", (ROOT / "infra/terraform/ecr.tf").read_text())
         self.assertIn('image_tag_mutability = "IMMUTABLE"', ecr)
-        # 서비스별 빌드 태그(b-…)와 이전 release 태그가 서로의 보존 개수를 잠식하지 않는다.
-        build_rule = ('rulePriority = 1 description = "keep last 30 per-service build images" selection = { '
-                      'tagStatus = "tagged" tagPrefixList = ["b-"] countType = "imageCountMoreThan" countNumber = 30 }')
-        legacy_rule = ('rulePriority = 2 description = "keep last 30 legacy release images" selection = { '
-                       'tagStatus = "any" countType = "imageCountMoreThan" countNumber = 30 }')
-        self.assertIn(build_rule, ecr)
-        self.assertIn(legacy_rule, ecr)
-        self.assertNotIn("countNumber = 10", ecr)
+        # 빌드 태그·이전 release 태그를 한 규칙으로 함께 센다. tagStatus any 규칙을 따로 두면
+        # 앞 규칙이 남긴 b- 이미지까지 세어 기대보다 먼저 만료될 수 있다.
+        rule = ('rulePriority = 1 description = "keep last 60 images" selection = { '
+                'tagStatus = "any" countType = "imageCountMoreThan" countNumber = 60 }')
+        self.assertIn(rule, ecr)
+        self.assertEqual(1, ecr.count("rulePriority"))
 
     def test_frontend_wake_trigger_cannot_choose_the_controller_action(self):
         wake = re.sub(r"\s+", " ", (ROOT / "infra/terraform/request-wake.tf").read_text())

@@ -36,13 +36,16 @@ def release_manifest(schema, changed=()):
         tag = "b-" + images.build_id(service, repo, mark * 40, dockerfile, images.BUILDER_VERSION)
         builds[service] = {"context_tree": mark * 40, "dockerfile": dockerfile, "tag": tag}
         pinned[service] = {"tag": tag, "digest": "sha256:" + mark * 64}
-    return {**data, "builder_version": images.BUILDER_VERSION, "builds": builds, "images": pinned}
+    release_sha = images.identity(sources, recipe, builds, images.BUILDER_VERSION)
+    return {**data, "release_sha": release_sha, "builder_version": images.BUILDER_VERSION,
+            "builds": builds, "images": pinned}
 
 
 # 기존 테스트는 schema 2(release 태그) 경로를 그대로 검사한다. 같은 소스·recipe의 schema 3도 같은 ID다.
 MANIFEST = release_manifest(2)
 CURRENT = release_manifest(3)
 SHA = MANIFEST["release_sha"]
+CURRENT_SHA = CURRENT["release_sha"]
 REVIEW = {"release_sha": SHA, "migration_mode": "expand-only", "compatibility_test_url": "https://github.com/FruitionKR/Fruition-flatform/actions/runs/1", "restore_test_url": "https://github.com/FruitionKR/Fruition-flatform/issues/1"}
 CONFIG = {
     "waf_acl_arn": "arn:aws:wafv2:ap-northeast-2:123456789012:regional/webacl/fruition-cost/00000000-0000-0000-0000-000000000000",
@@ -140,7 +143,7 @@ class DeploymentTests(unittest.TestCase):
     def test_render_preserves_sources_and_replaces_all_placeholders(self):
         paths = sorted((ROOT / "k8s").rglob("*.yaml"))
         before = {p: hashlib.sha256(p.read_bytes()).digest() for p in paths}
-        documents = deploy.render(CONFIG, SHA, CURRENT)
+        documents = deploy.render(CONFIG, CURRENT_SHA, CURRENT)
         self.assertEqual(before, {p: hashlib.sha256(p.read_bytes()).digest() for p in paths})
         self.assertFalse(deploy.PLACEHOLDER.search(json.dumps(documents)))
         self.assertEqual(12, sum(d["kind"] == "Deployment" for d in documents))
@@ -496,7 +499,7 @@ class DigestReleaseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.images = deploy.release_images(CONFIG, CURRENT)
-        cls.documents = deploy.render(CONFIG, SHA, CURRENT)
+        cls.documents = deploy.render(CONFIG, CURRENT_SHA, CURRENT)
 
     def setUp(self):
         for name, value in (("smoke_settings", {"test": "fixture"}), ("authenticated_smoke", None)):
@@ -519,11 +522,11 @@ class DigestReleaseTests(unittest.TestCase):
         for document in workloads.values():
             for container in document["spec"]["template"]["spec"]["containers"]:
                 self.assertIn("@sha256:", container["image"])
-                self.assertNotIn(SHA, container["image"])
+                self.assertNotIn(CURRENT_SHA, container["image"])
 
     def test_unchanged_services_keep_byte_identical_pod_templates(self):
         changed = release_manifest(3, changed=("access-svc",))
-        self.assertNotEqual(SHA, changed["release_sha"])
+        self.assertNotEqual(CURRENT_SHA, changed["release_sha"])
         before = self.workloads(self.documents)
         after = self.workloads(deploy.render(CONFIG, changed["release_sha"], changed))
         self.assertEqual(set(before), set(after))
@@ -536,37 +539,37 @@ class DigestReleaseTests(unittest.TestCase):
         self.assertEqual({("Deployment", "access-svc"), ("Job", "access-migration")}, rolled)
 
     def test_check_manifest_rejects_one_wrong_or_unknown_digest(self):
-        deploy.check_manifest(self.documents, SHA, self.images)
+        deploy.check_manifest(self.documents, CURRENT_SHA, self.images)
         converter = CONFIG["account_id"] + ".dkr.ecr.ap-northeast-2.amazonaws.com/fruition-converter"
         # 다른 서비스의 digest, 임의 digest, 이전 태그 방식, 태그+digest 혼합은 모두 거부한다.
-        for image in ("@" + CURRENT["images"]["frontend"]["digest"], "@sha256:" + "c" * 64, ":" + SHA,
+        for image in ("@" + CURRENT["images"]["frontend"]["digest"], "@sha256:" + "c" * 64, ":" + CURRENT_SHA,
                       ":latest@" + CURRENT["images"]["converter"]["digest"]):
             documents = copy.deepcopy(self.documents)
             container = next(d for d in documents if d["kind"] == "Deployment" and d["metadata"]["name"] == "converter")["spec"]["template"]["spec"]["containers"][0]
             container["image"] = converter + image
             with self.subTest(image=image), self.assertRaises(ValueError):
-                deploy.check_manifest(documents, SHA, self.images)
+                deploy.check_manifest(documents, CURRENT_SHA, self.images)
         documents = copy.deepcopy(self.documents)
         container = next(d for d in documents if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]
         container["image"] = container["image"].replace("/fruition-", "/other-")
         with self.assertRaises(ValueError):
-            deploy.check_manifest(documents, SHA, self.images)
+            deploy.check_manifest(documents, CURRENT_SHA, self.images)
         # digest release를 이전 태그 규칙으로 검사하면 통과하지 않는다.
         with self.assertRaises(ValueError):
-            deploy.check_manifest(self.documents, SHA)
+            deploy.check_manifest(self.documents, CURRENT_SHA)
         with self.assertRaises(ValueError):
-            deploy.render(CONFIG, SHA, {**CURRENT, "images": {**CURRENT["images"], "converter": "sha256:" + "b" * 64}})
+            deploy.render(CONFIG, CURRENT_SHA, {**CURRENT, "images": {**CURRENT["images"], "converter": "sha256:" + "b" * 64}})
 
     def test_digest_release_deploys_and_records_success(self):
         fake = FakeCluster()
         with patch.object(deploy, "run", fake.run):
-            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW, images=self.images)
+            deploy.deploy(CONFIG, CURRENT_SHA, self.documents, review={**REVIEW, "release_sha": CURRENT_SHA}, images=self.images)
         self.assertEqual(12, len(fake.applied("Deployment")))
-        record = next(d for d in fake.applied("ConfigMap") if d["metadata"]["name"] == deploy.release_name(SHA))
+        record = next(d for d in fake.applied("ConfigMap") if d["metadata"]["name"] == deploy.release_name(CURRENT_SHA))
         self.assertEqual({"safety_contract_version", "fingerprints", "config", "manifest", "review"}, set(record["data"]))
         fake = FakeCluster()
         with patch.object(deploy, "run", fake.run), self.assertRaises(ValueError):
-            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+            deploy.deploy(CONFIG, CURRENT_SHA, self.documents, review={**REVIEW, "release_sha": CURRENT_SHA})
         self.assertFalse(fake.events)
 
     def test_rollback_to_digest_release_uses_saved_manifest(self):
@@ -575,7 +578,7 @@ class DigestReleaseTests(unittest.TestCase):
                            "manifest": yaml.safe_dump_all(deploy.pinned(self.documents))}}
         fake = FakeCluster(record=record)
         with patch.object(deploy, "run", fake.run):
-            deploy.deploy(CONFIG, SHA, self.documents, rollback=True, images=self.images)
+            deploy.deploy(CONFIG, CURRENT_SHA, self.documents, rollback=True, images=self.images)
         self.assertEqual(12, len(fake.applied("Deployment")))
         self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in fake.applied("Job")))
 
@@ -585,7 +588,7 @@ class DigestReleaseTests(unittest.TestCase):
             def run(args, *, input=None):
                 if "get" in args and "configmaps" in args:
                     return json.dumps({"items": [{"metadata": {"name": "fruition-bootstrap"},
-                                                  "data": {"sha": SHA, "config": json.dumps(CONFIG, sort_keys=True)}}]})
+                                                  "data": {"sha": CURRENT_SHA, "config": json.dumps(CONFIG, sort_keys=True)}}]})
                 if "get" in args and "deployments" in args:
                     doc = copy.deepcopy(next(d for d in self.documents if d["kind"] == "Deployment"))
                     if scenario == "different_digest":
@@ -595,16 +598,16 @@ class DigestReleaseTests(unittest.TestCase):
                 return fake.run(args, input=input)
             with self.subTest(scenario=scenario), patch.object(deploy, "run", run):
                 if scenario == "same":
-                    deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW, bootstrap=True, images=self.images)
+                    deploy.deploy(CONFIG, CURRENT_SHA, self.documents, review={**REVIEW, "release_sha": CURRENT_SHA}, bootstrap=True, images=self.images)
                 else:
                     with self.assertRaises(ValueError):
-                        deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW, bootstrap=True, images=self.images)
+                        deploy.deploy(CONFIG, CURRENT_SHA, self.documents, review={**REVIEW, "release_sha": CURRENT_SHA}, bootstrap=True, images=self.images)
                     self.assertFalse(fake.applied("Deployment"))
 
     def test_initial_install_resume_and_promotion_accept_digests(self):
-        review = {"release_sha": SHA, "migration_mode": "initial-install",
-                  "installation_test_url": REVIEW["compatibility_test_url"], "restore_test_url": REVIEW["restore_test_url"]}
-        data = {"initial_install_contract": "1", "sha": SHA, "config": json.dumps(CONFIG, sort_keys=True),
+        review = {"release_sha": CURRENT_SHA, "migration_mode": "initial-install",
+                  "installation_test_url": {**REVIEW, "release_sha": CURRENT_SHA}["compatibility_test_url"], "restore_test_url": {**REVIEW, "release_sha": CURRENT_SHA}["restore_test_url"]}
+        data = {"initial_install_contract": "1", "sha": CURRENT_SHA, "config": json.dumps(CONFIG, sort_keys=True),
                 "manifest": yaml.safe_dump_all(self.documents, sort_keys=False)}
         marker = deploy.install_record("fruition-bootstrap", data)
         ready = deploy.install_record("fruition-bootstrap-ready", {**data, "fingerprints": json.dumps(dict.fromkeys(("access", "document", "ai"), "b" * 64))})
@@ -624,10 +627,10 @@ class DigestReleaseTests(unittest.TestCase):
                 return fake.run(args, input=input)
             with self.subTest(bootstrap=bootstrap, image=image), patch.object(deploy, "run", run):
                 if ok:
-                    deploy.deploy(CONFIG, SHA, self.documents, review=review, bootstrap=bootstrap, images=self.images)
+                    deploy.deploy(CONFIG, CURRENT_SHA, self.documents, review=review, bootstrap=bootstrap, images=self.images)
                 else:
                     with self.assertRaises(ValueError):
-                        deploy.deploy(CONFIG, SHA, self.documents, review=review, bootstrap=bootstrap, images=self.images)
+                        deploy.deploy(CONFIG, CURRENT_SHA, self.documents, review=review, bootstrap=bootstrap, images=self.images)
                     self.assertFalse(fake.applied("Job"))
 
     def test_image_changes_are_reported_against_live_deployments(self):
