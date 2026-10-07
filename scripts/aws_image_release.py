@@ -27,8 +27,8 @@ SCHEMA_VERSION = 3
 # 그때 BUILDER_VERSION을 올려 모든 서비스를 다시 빌드하고, 아래 해시를 새 build job 값으로 갱신한다.
 # 해시만 고치고 버전을 그대로 두면 바뀐 빌드 방식의 결과가 이전 태그로 재사용된다. 둘은 항상 함께 바꾼다.
 # prepare_build의 clone·checkout 방식이나 기준 이미지 정책을 바꿀 때도 버전을 올린다.
-BUILDER_VERSION = 1
-BUILDER_JOB_SHA256 = "e0d05c52fa1e584d6200bb19423d8f6cfe381a95644f55a2810bdb5d199f5ef2"
+BUILDER_VERSION = 2
+BUILDER_JOB_SHA256 = "401587370e0f78bd5e4cb16e9cce1f18fa833cfead79e5486effa5108f202173"
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
