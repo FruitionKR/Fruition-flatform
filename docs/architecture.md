@@ -204,7 +204,7 @@ flowchart TB
 | 공개 진입점 | 인터넷용 ALB가 host별로 Access 8081·Document 8080에 전달하고, 화면 호스트는 경로별로 frontend 3000·Access·Document에 나눈다. `target-type: ip`로 Pod IP를 대상으로 삼는다. 관리 포트 8082는 probe·healthcheck용이다. AI·Converter·DB는 공개 Ingress 대상이 아니다. |
 | Fargate | `fruition` namespace의 `app=frontend` Pod만 실행한다. 노드 그룹이 0대인 절전 중에도 화면이 유지된다. |
 | General 노드 | `t3.large` On-Demand, 최소·초기 2대, 최대 5대. API와 Kafka를 배치한다. 평소 2~4대이며, 5번째 노드는 rollout 등으로 Pending Pod가 생길 때만 Cluster Autoscaler가 띄우고 유휴 후 축소한다. |
-| AI 노드 | `m5.xlarge`/`m5d.xlarge`/`m6i.xlarge`/`m7i.xlarge` Spot, 최소·초기 0대, 최대 2대. nodeSelector와 taint/toleration으로 AI worker·Converter·embedding-server를 배치한다. |
+| AI 노드 | `m5.xlarge`/`m5d.xlarge`/`m6i.xlarge`/`m7i.xlarge` Spot, 최소·초기 0대, 최대 4대(작업이 쌓일 때만 늘어남). nodeSelector와 taint/toleration으로 AI worker·Converter·embedding-server를 배치한다. |
 | PostgreSQL | RDS 2개(`db.t4g.small`)다. Access 인스턴스는 `access_db`(Multi-AZ), Core 인스턴스는 `core_db`와 `ai_db`(Single-AZ)를 가진다. **AI와 Document는 물리 인스턴스를 공유하지만 DB와 접속 권한은 분리한다.** runtime DML 계정과 migration DDL 계정도 분리한다. |
 | Redis | ElastiCache(`cache.t4g.micro` primary + replica 1, 자동 장애 조치·Multi-AZ)를 공유하되 서비스별 ACL로 key 값 접근을 제한한다. 업무 원장의 대체물이 아니라 캐시·일시 상태·권한 projection 저장소다. |
 | 파일·이벤트 저장 | 파일과 실행 로그는 S3, Kafka 데이터는 EBS gp3에 저장한다. Kafka는 EKS 안의 Strimzi 단일 broker 구성이다. |

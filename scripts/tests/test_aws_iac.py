@@ -92,6 +92,16 @@ class IaCContractTests(unittest.TestCase):
         self.assertIn('var.github_deploy_environment == "feedback"', variables)
         self.assertRegex((ROOT / "infra/terraform/elasticache.tf").read_text(), r'no_password_required\s*=\s*true')
 
+    def test_metrics_server_does_not_pin_its_node_and_ai_capacity_is_four(self):
+        eks = re.sub(r"\s+", " ", (ROOT / "infra/terraform/eks.tf").read_text())
+        # metrics-server의 emptyDir 때문에 Cluster Autoscaler가 그 노드를 줄이지 못했다(2026-10-06).
+        self.assertIn('"cluster-autoscaler.kubernetes.io/safe-to-evict" = "true"', eks)
+        ai = eks[eks.index("ai_worker = {"):eks.index("labels", eks.index("ai_worker = {"))]
+        self.assertIn("max_size = 4", ai)
+        # converter는 변환 중 중단 위험이 커서 옮겨도 된다는 표시를 붙이지 않는다.
+        converter = (ROOT / "k8s/base/converter.yaml").read_text()
+        self.assertNotIn("safe-to-evict", converter)
+
     def test_budget_delivery_keeps_webhook_out_of_state_and_scopes_permissions(self):
         budget = (ROOT / "infra/terraform/budgets.tf").read_text()
         self.assertNotIn('aws_secretsmanager_secret_version', budget)

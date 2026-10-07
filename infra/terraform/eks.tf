@@ -106,7 +106,9 @@ module "eks" {
       capacity_type  = "SPOT"
       min_size       = 0
       desired_size   = 0
-      max_size       = 2
+      # 상시 AI Pod가 메모리 약 13GiB를 잡아 2대로는 KEDA 확장분을 다 띄우지 못한다.
+      # 작업이 쌓일 때만 Cluster Autoscaler가 늘리고, 비면 줄인다.
+      max_size = 4
       labels = {
         "fruition.io/node-role" = "ai-worker"
       }
@@ -171,7 +173,14 @@ locals {
       service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
     }
     # API HPA가 CPU 사용률을 읽으려면 필요하다. 없으면 HPA가 <unknown>으로 멈춘다.
-    metrics-server = { addon_version = var.eks_addon_versions["metrics-server"] }
+    # emptyDir를 써서 Cluster Autoscaler가 이 Pod가 있는 노드를 줄이지 못했다(2026-10-06).
+    # 임시 데이터는 다시 만들어지는 캐시라 옮겨도 된다. 옮기는 동안 HPA 지표가 1분가량 빈다.
+    metrics-server = {
+      addon_version = var.eks_addon_versions["metrics-server"]
+      configuration_values = jsonencode({
+        podAnnotations = { "cluster-autoscaler.kubernetes.io/safe-to-evict" = "true" }
+      })
+    }
   }
 }
 

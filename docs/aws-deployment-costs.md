@@ -49,7 +49,7 @@ flowchart LR
 | 일꾼 관리자 EKS | Kubernetes 1.35 | 컴퓨터를 관리하는 부분도 돈이 들어요 |
 | 보통 일을 하는 컴퓨터 | t3.large, 처음 2대·최소 2대·최대 5대 | 평소에는 2~4대예요. 5번째는 프로그램 교체(rollout) 중 자리가 없어 기다리는(Pending) 일꾼이 생길 때만 Cluster Autoscaler가 켜고, 끝나면 약 10분 쉬었다가 줄여요. 오래 바쁘면 추가 CPU 요금 대신 속도를 제한하는 Standard 설정이에요 |
 | 화면 Fargate | 화면 Pod 2개, 각각 0.25 vCPU·768Mi 요청 | 컴퓨터를 빌리지 않고 Pod 크기만큼 시간당 내요. 추가 몫까지 합쳐 Pod 하나를 0.25 vCPU·1GB로 계산해요 |
-| AI 일을 하는 컴퓨터 | m5·m5d·m6i·m7i.xlarge 중 Spot, 처음 0대·최대 2대 | GPU는 없어요. Spot은 AWS 사정에 따라 중단될 수 있어요 |
+| AI 일을 하는 컴퓨터 | m5·m5d·m6i·m7i.xlarge 중 Spot, 처음 0대·최대 4대(작업이 쌓일 때만) | GPU는 없어요. Spot은 AWS 사정에 따라 중단될 수 있어요 |
 | 설치 담당 runner | t3.small 1대, 잠긴 gp3 저장 공간 30GB | 외부 공개 IP가 없고 Standard 설정을 써요 |
 | 중요한 기록장 RDS | PostgreSQL 16, db.t4g.small 2대, 각각 gp3 30GB | 외부에 열지 않고 암호화해요. 로그인 DB(access)는 두 구역(Multi-AZ)에 예비 DB가 있어 그만큼 요금이 더 들고, 문서·AI DB(core)는 한 구역(Single-AZ)이에요. 백업은 7일 보관해요 |
 | 빠른 메모장 Redis | cache.t4g.micro 2대(본체 1·예비 복사본 1) | 보낼 때와 저장할 때 잠가요. 본체가 고장 나면 예비가 자동으로 이어받아요. 자동 크기 확대는 없어요 |
