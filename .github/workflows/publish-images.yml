@@ -136,10 +136,23 @@ jobs:
           python3 scripts/aws_image_release.py finalize
           python3 scripts/aws_image_release.py notes
           TAG="images-$RELEASE_SHA"
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --draft --title "Images $RELEASE_SHA" --notes-file release-notes.md
-          fi
-          gh release upload "$TAG" release.json --clobber --repo "$GITHUB_REPOSITORY"
-          gh release edit "$TAG" --draft=false --notes-file release-notes.md --repo "$GITHUB_REPOSITORY"
+          # GitHub Releases API가 일시적으로 5xx를 돌려도 게시를 끝낸다(2026-10-06 create가 HTTP 500 연속).
+          # 4번까지 10·20·40초 간격으로 다시 시도한다. 매 시도 전에 release 존재를 다시 확인해,
+          # 서버에는 만들어졌지만 오류를 받은 경우 같은 태그로 다시 만들지 않는다.
+          retry() {
+            local attempt
+            for attempt in 1 2 3 4; do
+              if "$@"; then return 0; fi
+              if [ "$attempt" -lt 4 ]; then sleep $((10 * 2 ** (attempt - 1))); fi
+            done
+            return 1
+          }
+          ensure_draft() {
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+                --draft --title "Images $RELEASE_SHA" --notes-file release-notes.md
+          }
+          retry ensure_draft
+          retry gh release upload "$TAG" release.json --clobber --repo "$GITHUB_REPOSITORY"
+          retry gh release edit "$TAG" --draft=false --notes-file release-notes.md --repo "$GITHUB_REPOSITORY"
           printf 'Published image version: %s\n\nSelect this version in **Deploy (EKS)**, then approve the feedback deployment.\n' "$RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
