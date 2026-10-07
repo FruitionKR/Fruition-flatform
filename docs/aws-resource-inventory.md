@@ -154,7 +154,7 @@ plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현�
 | 58 | AI 컴퓨터에 들어갈 수 있는 일꾼 조건을 미리 알려줘요. | `aws_autoscaling_group_tag.discovery["ai_worker/k8s.io/cluster-autoscaler/node-template/taint/fruition.io/ai-worker"]` | AI node group scale-from-zero용 AI 노드 taint 정보 |
 | 59 | 일반 컴퓨터 묶음을 자동 확장 담당자가 찾게 표시해요. | `aws_autoscaling_group_tag.discovery["general/k8s.io/cluster-autoscaler/enabled"]` | 일반 node group Autoscaler 검색 활성화 태그 |
 | 60 | 일반 컴퓨터가 우리 서비스 소속임을 표시해요. | `aws_autoscaling_group_tag.discovery["general/k8s.io/cluster-autoscaler/fruition-eks"]` | 일반 node group 대상 클러스터 소유권 태그 |
-| 61 | AI 컴퓨터 묶음이에요. 처음 0대, 많아도 2대예요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_eks_node_group.this[0]` | CPU Spot m5/m5d/m6i/m7i.xlarge, 초기 0·최대 2대 |
+| 61 | AI 컴퓨터 묶음이에요. 처음 0대, 많아도 4대예요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_eks_node_group.this[0]` | CPU Spot m5/m5d/m6i/m7i.xlarge, 초기 0·최대 2대 |
 | 62 | AI 컴퓨터가 사용할 출입증이에요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role.this[0]` | AI 노드의 AWS 실행 역할 |
 | 63 | 설치할 프로그램 상자를 가져올 수 있게 해요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role_policy_attachment.this["AmazonEC2ContainerRegistryReadOnly"]` | ECR 이미지 읽기 |
 | 64 | 컴퓨터가 EKS에서 일할 기본 권한을 줘요. | `module.eks.module.eks_managed_node_group["ai_worker"].aws_iam_role_policy_attachment.this["AmazonEKSWorkerNodePolicy"]` | EKS worker 기본 API 권한 |

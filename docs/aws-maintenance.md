@@ -11,9 +11,9 @@
 | 수집·질의·에이전트 작업자 | KEDA가 Kafka의 미처리 메시지 수를 보고 조절 | 각각 1~4개 Pod |
 | 유지보수 작업자 | KEDA가 Kafka 대기 작업을 보고 조절 | 1~2개 Pod |
 | EC2 일반 노드 | Cluster Autoscaler가 자원 부족으로 배치되지 못한 Pod를 보고 조절 | 최소 2대, 최대 5대 |
-| EC2 AI 노드 | 같은 방식, CPU Spot 사용 | 최소 0대, 최대 2대 |
+| EC2 AI 노드 | 같은 방식, CPU Spot 사용 | 최소 0대, 최대 4대 |
 
-API HPA(`k8s/overlays/aws/api-autoscaling.yaml`)는 metrics-server의 CPU 사용률만 보며, 요청 수나 응답 시간으로는 늘어나지 않습니다. 실제 확장 동작은 부하 시험으로 확인해야 합니다. AI 작업 Pod가 늘어나도 EC2 최대치에 도달하면 대기할 수 있습니다. CloudWatch는 관측·알림용이며 HPA와 연결되지 않습니다. 일반 노드는 평소 2~4대이고, 롤아웃 중 Pending Pod가 생기면 상한인 5대까지 늘어나 비용이 증가할 수 있습니다. 유휴 노드는 Cluster Autoscaler가 다시 줄입니다.
+API HPA(`k8s/overlays/aws/api-autoscaling.yaml`)는 metrics-server의 CPU 사용률만 보며, 요청 수나 응답 시간으로는 늘어나지 않습니다. 실제 확장 동작은 부하 시험으로 확인해야 합니다. AI 작업 Pod가 늘어나도 EC2 최대치에 도달하면 대기할 수 있습니다. CloudWatch는 관측·알림용이며 HPA와 연결되지 않습니다. 일반 노드는 평소 2~4대이고, 롤아웃 중 Pending Pod가 생기면 상한인 5대까지 늘어나 비용이 증가할 수 있습니다. 유휴 노드는 Cluster Autoscaler가 다시 줄입니다. 단, emptyDir를 쓰는 Pod가 있는 노드는 기본 설정상 줄이지 않습니다. metrics-server에는 `cluster-autoscaler.kubernetes.io/safe-to-evict: "true"`를 붙여 이 제약을 풀었습니다(`infra/terraform/eks.tf`). converter는 변환 도중 중단 위험이 커서 붙이지 않았으므로, converter가 있는 AI 노드는 줄어들지 않습니다.
 
 ## 배포할 때 어떤 Pod가 교체되나요?
 
