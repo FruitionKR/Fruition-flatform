@@ -51,6 +51,10 @@ spec:
               value: wake-requested
             - name: REQUEST_WAKE_STATE_TABLE
               value: fruition-request-wake
+            # CSP connect-src에 넣는 직접 업로드(서명된 multipart PUT) 버킷 오리진(frontend #77).
+            # document-svc가 virtual-hosted 방식으로 서명하므로 버킷 호스트 하나다. 비우면 *.amazonaws.com.
+            - name: CSP_S3_ORIGIN
+              value: https://REPLACE_ME_S3_BUCKET.s3.ap-northeast-2.amazonaws.com
           # Fargate는 requests에 관리 여유분 256Mi를 더해 크기를 고른다. 768Mi면 0.25 vCPU / 1GiB 조합이다.
           resources:
             requests:
