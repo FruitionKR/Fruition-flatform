@@ -124,12 +124,13 @@ def plan_hash(plan):
     return hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()[:16]
 
 
+# Pod command에서 Kubernetes는 $$를 $로 줄인다. DO 블록은 이름 붙은 dollar quote($do$)를 쓴다.
 def apply_sql(plan):
     deleted = [u["id"] for g in plan["groups"] for u in g["delete"]]
     ids = sql_ids(deleted)
     lines = [f"SELECT 1 FROM users WHERE id IN ({ids}) FOR UPDATE;",
-             f"DO $$ BEGIN IF (SELECT count(*) FROM users WHERE id IN ({ids})) <> {len(deleted)} "
-             "THEN RAISE EXCEPTION 'duplicate accounts changed since report'; END IF; END $$;"]
+             f"DO $do$ BEGIN IF (SELECT count(*) FROM users WHERE id IN ({ids})) <> {len(deleted)} "
+             "THEN RAISE EXCEPTION 'duplicate accounts changed since report'; END IF; END $do$;"]
     for ws in plan["workspaces"]:
         wid, uid = sql_ids([ws["id"]]), sql_ids([ws["user_id"]])
         if ws["action"] == "promote":
@@ -143,8 +144,8 @@ def apply_sql(plan):
     # refresh token은 users FK가 없어 남는다. 남아도 refresh에서 거절되지만 같이 지운다.
     lines += [f"DELETE FROM user_refresh_tokens WHERE user_id IN ({ids});",
               f"DELETE FROM users WHERE id IN ({ids});",
-              f"DO $$ BEGIN IF EXISTS (SELECT 1 FROM users WHERE id IN ({ids})) "
-              "THEN RAISE EXCEPTION 'delete incomplete'; END IF; END $$;"]
+              f"DO $do$ BEGIN IF EXISTS (SELECT 1 FROM users WHERE id IN ({ids})) "
+              "THEN RAISE EXCEPTION 'delete incomplete'; END IF; END $do$;"]
     return "\n".join(lines)
 
 
