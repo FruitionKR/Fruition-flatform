@@ -7,7 +7,7 @@
 | 위치 | 내용 |
 |---|---|
 | `k8s/overlays/aws/ingress.yaml` | `app_domain` 호스트에 순서가 있는 경로 규칙을 둡니다. `/internal*`·`/swagger-ui*`·`/v3/api-docs*`는 모든 호스트에서 404입니다. |
-| `k8s/overlays/aws/frontend.yaml` | 화면 Deployment(2개)·Service·전용 ServiceAccount·`ACCESS_CODE` ExternalSecret·PDB |
+| `k8s/overlays/aws/frontend.yaml` | 화면 Deployment(2개)·Service·전용 ServiceAccount·`ACCESS_CODE` ExternalSecret·PDB. `CSP_S3_ORIGIN`은 CSP `connect-src`에 넣는 직접 업로드 버킷 오리진(`https://<s3_bucket>.s3.ap-northeast-2.amazonaws.com`)이며 배포 때 `s3_bucket`으로 채웁니다. |
 | `infra/terraform/eks.tf` | `frontend` Fargate profile, Fargate 로그 권한 |
 | `infra/terraform/cost-guards.tf` | 접근 코드 WAF 규칙(`frontend-access-code`), 속도 제한에서 `/_next/static/` 제외 |
 | `infra/terraform/ecr.tf` | `fruition-frontend` 저장소 |

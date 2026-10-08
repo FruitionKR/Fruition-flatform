@@ -54,6 +54,8 @@ class IaCContractTests(unittest.TestCase):
         self.assertEqual("fruition.frontend", env["REQUEST_WAKE_EVENT_SOURCE"])
         self.assertEqual("wake-requested", env["REQUEST_WAKE_DETAIL_TYPE"])
         self.assertEqual("fruition-request-wake", env["REQUEST_WAKE_STATE_TABLE"])
+        # 직접 업로드 PUT은 virtual-hosted 버킷 호스트로 간다(aws_pdf_smoke.storage_url과 같은 호스트).
+        self.assertEqual("https://REPLACE_ME_S3_BUCKET.s3.ap-northeast-2.amazonaws.com", env["CSP_S3_ORIGIN"])
 
     def test_app_iam_and_autoscaler_writes_have_resource_boundaries(self):
         deploy = (ROOT / "infra/terraform/github-oidc.tf").read_text()

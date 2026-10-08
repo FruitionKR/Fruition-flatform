@@ -32,7 +32,7 @@ ALB 생성 후 DNS의 `api`·`access`와 화면 호스트(`app_domain`) CNAME을
 | `kustomization.yaml` patches | `REPLACE_ME_CORE_RDS_ENDPOINT` | `terraform output core_rds_endpoint` |
 | `kustomization.yaml` patches | `REPLACE_ME_ACCESS_RDS_ENDPOINT` | `terraform output access_rds_endpoint` |
 | `configmap-aws.yaml` | `REPLACE_ME_REDIS_ENDPOINT` | `terraform output redis_endpoint` |
-| `configmap-aws.yaml` | `REPLACE_ME_S3_BUCKET` | `terraform output s3_bucket` |
+| `configmap-aws.yaml`, `frontend.yaml` | `REPLACE_ME_S3_BUCKET` | `terraform output s3_bucket` |
 | `configmap-aws.yaml`, `ingress.yaml` | `REPLACE_ME_APP_DOMAIN` | 화면 호스트(`app_domain`). Terraform `app_domain`과 같은 값 |
 | `ingress.yaml` | `REPLACE_ME_WAF_ACL_ARN` | `terraform output -raw waf_acl_arn` (필수, 서울 regional ACL) |
 | `ingress.yaml` | `REPLACE_ME_ACM_CERT_ARN` | ACM 인증서 ARN |
