@@ -2,13 +2,13 @@
 # k8s/base/postgres.yaml(pod)을 대체한다.
 # - access-postgres: access_db (users·oauth·workspaces·members)
 # - core-postgres:   core_db (문서·채팅) + 물리적으로 분리된 ai_db
-# 앱 계정(runtime/migration)은 provisioning 후 infra/postgres/init-db-isolation.sh를
+# 앱 계정(runtime/migration, AI converter)은 provisioning 후 infra/postgres/init-db-isolation.sh를
 # 각 endpoint에 psql로 실행해 생성한다 (README 절차 참조).
 resource "random_password" "db_role" {
   for_each = toset([
     "access_runtime", "access_migration",
     "core_runtime", "core_migration",
-    "ai_runtime", "ai_migration",
+    "ai_runtime", "ai_migration", "ai_converter",
   ])
   length  = 32
   special = false

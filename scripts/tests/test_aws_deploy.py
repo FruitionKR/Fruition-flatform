@@ -398,8 +398,10 @@ class DeploymentTests(unittest.TestCase):
             env = pod["spec"]["containers"][0]["env"]
             refs = [item["valueFrom"]["secretKeyRef"] for item in env if "valueFrom" in item]
             runtime = "pipeline" if service == "ai" else service
-            self.assertEqual({f"fruition-{runtime}", f"fruition-{service}-migration"}, {ref["name"] for ref in refs})
-            self.assertEqual(2, len(refs))
+            # AI는 converter 원장 전용 계정도 확인한다.
+            converter = {"fruition-converter"} if service == "ai" else set()
+            self.assertEqual({f"fruition-{runtime}", f"fruition-{service}-migration"} | converter, {ref["name"] for ref in refs})
+            self.assertEqual(2 + len(converter), len(refs))
             self.assertFalse(any("ADMIN" in ref["key"] for ref in refs))
 
     def test_existing_sha_requires_same_config_manifest_and_actual_schema(self):

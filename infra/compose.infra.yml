@@ -27,6 +27,8 @@ services:
       AI_DB_RUNTIME_PASSWORD: ${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}
       AI_DB_MIGRATION_USER: ${AI_DB_MIGRATION_USER:-ai_migration}
       AI_DB_MIGRATION_PASSWORD: ${AI_DB_MIGRATION_PASSWORD:-ai_migration_dev_password}
+      AI_DB_CONVERTER_USER: ${AI_DB_CONVERTER_USER:-ai_converter}
+      AI_DB_CONVERTER_PASSWORD: ${AI_DB_CONVERTER_PASSWORD:-ai_converter_dev_password}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -68,6 +70,8 @@ services:
       AI_DB_RUNTIME_PASSWORD: ${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}
       AI_DB_MIGRATION_USER: ${AI_DB_MIGRATION_USER:-ai_migration}
       AI_DB_MIGRATION_PASSWORD: ${AI_DB_MIGRATION_PASSWORD:-ai_migration_dev_password}
+      AI_DB_CONVERTER_USER: ${AI_DB_CONVERTER_USER:-ai_converter}
+      AI_DB_CONVERTER_PASSWORD: ${AI_DB_CONVERTER_PASSWORD:-ai_converter_dev_password}
     volumes:
       - ./postgres/validate-db-isolation.sh:/usr/local/bin/validate-db-isolation:ro
       - ./postgres/db-isolation-config.bash:/usr/local/bin/db-isolation-config.bash:ro

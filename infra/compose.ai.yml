@@ -61,6 +61,8 @@ services:
       AGENT_BACKEND_URL: http://host.docker.internal:8080
       # ai_db 스키마 적용(멱등)은 pipeline-api 기동 시에만 수행한다
       AI_DB_MIGRATION_URL: postgresql://${AI_DB_MIGRATION_USER:-ai_migration}:${AI_DB_MIGRATION_PASSWORD:-ai_migration_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      # 스키마 적용 때 converter 전용 role에 ai_model_usage 원장 권한만 부여한다
+      AI_DB_CONVERTER_ROLE: ${AI_DB_CONVERTER_USER:-ai_converter}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

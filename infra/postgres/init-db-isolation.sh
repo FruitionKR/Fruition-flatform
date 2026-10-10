@@ -67,9 +67,29 @@ SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE
 SQL
 }
 
+# converter role은 AI DB 접속과 public schema USAGE만 받는다.
+# ai_model_usage 테이블 권한은 테이블이 생긴 뒤 AI 스키마 적용 경로(AI_DB_CONVERTER_ROLE)가 부여한다.
+grant_converter_connect() {
+  local database="$1"
+  local role="$2"
+
+  admin_psql --dbname postgres --set=database="$database" --set=role="$role" <<'SQL'
+SELECT format('REVOKE ALL ON DATABASE %I FROM %I', :'database', :'role')
+\gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'database', :'role')
+\gexec
+SQL
+  admin_psql --dbname "$database" --set=role="$role" <<'SQL'
+SELECT format('REVOKE ALL ON SCHEMA public FROM %I', :'role')
+\gexec
+SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'role')
+\gexec
+SQL
+}
+
 # 상속 권한은 직접 GRANT 회수로 제거되지 않는다. 기존 membership은 변경 전에 거부한다.
 for service in "${services[@]}"; do
-  for kind in RUNTIME MIGRATION; do
+  for kind in $(service_kinds "$service"); do
     role_variable="${service}_DB_${kind}_USER"
     membership="$(admin_psql --dbname postgres --tuples-only --no-align --set=role="${!role_variable}" <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = :'role' AND (r.rolsuper OR r.rolreplication OR r.rolbypassrls OR EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid)));
@@ -80,7 +100,7 @@ SQL
 done
 
 for service in "${services[@]}"; do
-  for kind in RUNTIME MIGRATION; do
+  for kind in $(service_kinds "$service"); do
     role_variable="${service}_DB_${kind}_USER"
     password_variable="${service}_DB_${kind}_PASSWORD"
     create_role "${!role_variable}" "${!password_variable}"
@@ -92,10 +112,13 @@ for service in "${services[@]}"; do
   migration_variable="${service}_DB_MIGRATION_USER"
   runtime_variable="${service}_DB_RUNTIME_USER"
   create_database "${!database_variable}" "${!migration_variable}" "${!runtime_variable}"
+  if [[ "$service" == AI ]]; then
+    grant_converter_connect "${!database_variable}" "$AI_DB_CONVERTER_USER"
+  fi
   # 이전에 부여한 교차 접근도 선택한 서비스 경계 안에서 회수한다.
   for other in "${services[@]}"; do
     [[ "$other" != "$service" ]] || continue
-    for kind in RUNTIME MIGRATION; do
+    for kind in $(service_kinds "$other"); do
       role_variable="${other}_DB_${kind}_USER"
       admin_psql --dbname postgres --set=database="${!database_variable}" --set=role="${!role_variable}" <<'SQL'
 SELECT format('REVOKE ALL ON DATABASE %I FROM %I', :'database', :'role')
@@ -117,4 +140,4 @@ SQL
   done
 done
 
-printf '[db-init] %s 대상 DB와 runtime/migration 계정 구성을 완료했습니다.\n' "$DB_ISOLATION_TARGET"
+printf '[db-init] %s 대상 DB와 runtime/migration(AI는 converter 포함) 계정 구성을 완료했습니다.\n' "$DB_ISOLATION_TARGET"
