@@ -47,6 +47,9 @@ data:
   SPEECH_LIVE_ENDPOINT: "ws://pipeline-api:8000/speech/transcriptions/live"
   SPEECH_TRANSCRIPTION_ENDPOINT: "http://pipeline-api:8000/speech/transcriptions"
   MEETING_NOTES_ENDPOINT: "http://pipeline-api:8000/meeting-notes/preview"
+  # AI 사용량 조회·호출 단위 청구. 없으면 localhost:8000 기본값으로 나가 사용량 조회·정산이 실패한다.
+  MODEL_USAGE_ENDPOINT: "http://pipeline-api:8000/usage/models"
+  MODEL_USAGE_CALLS_ENDPOINT: "http://pipeline-api:8000/internal/model-usage/calls"
   # PDF → Markdown 변환기(converter Service, ClusterIP) — document-svc가 내부 호출
   CONVERTER_ENDPOINT: "http://converter:8000"
   # 서비스 간 내부 호출 — document-svc -> access-svc(/internal/authz·users),
