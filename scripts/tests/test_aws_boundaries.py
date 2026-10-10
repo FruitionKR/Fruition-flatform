@@ -120,6 +120,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn('"s3:ListMultipartUploadParts"', source)
         self.assertIn('"s3:GetObjectVersion"', source)
         self.assertIn("wiki/*",scopes["document"]["read"])
+        self.assertIn("meetings/*",scopes["document"]["read"])
         self.assertIn("sources/documents/*",scopes["pipeline"]["read"])
         self.assertEqual(["wiki/*","agent-runs/*"],scopes["pipeline"]["delete"])
         self.assertIn("pipeline-runs/*",scopes["pipeline"]["write"])

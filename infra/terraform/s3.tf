@@ -129,7 +129,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
 locals {
   storage_permissions = {
     document = {
-      read   = ["sources/documents/*", "assets/*", "wiki/*", "tmp/document-uploads/*"]
+      read   = ["sources/documents/*", "assets/*", "wiki/*", "tmp/document-uploads/*", "meetings/*"]
       write  = ["sources/documents/*", "assets/*", "tmp/document-uploads/*", "meetings/*"]
       delete = ["sources/documents/*", "assets/*", "meetings/*"]
     }
