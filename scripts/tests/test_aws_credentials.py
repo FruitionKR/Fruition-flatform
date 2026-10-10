@@ -110,7 +110,9 @@ class CredentialsTest(unittest.TestCase):
     def test_kind_only_injects_own_secrets(self) -> None:
         local_migration = {"access": {"ACCESS_DB_MIGRATION_PASSWORD"},
                            "document": {"CORE_DB_MIGRATION_PASSWORD"},
-                           "pipeline": {"AI_DB_MIGRATION_URL"}, "converter": {"AI_CONVERTER_DATABASE_URL"}}
+                           "pipeline": {"AI_DB_MIGRATION_URL"}, "converter": set()}
+        # kind는 fruition-secret 하나를 쓰므로 converter는 ai_runtime URL과 다른 키로 자기 원장 계정 URL을 받는다.
+        local_runtime = {"converter": {"AI_CONVERTER_DATABASE_URL"}}
         for manifest in render("k8s/base"):
             if manifest["kind"] != "Deployment":
                 continue
@@ -123,8 +125,9 @@ class CredentialsTest(unittest.TestCase):
                 if name in WORKLOAD_ALLOWED:
                     self.assertEqual(keys, WORKLOAD_ALLOWED[name], name)
                     continue
-                self.assertLessEqual(keys, ALLOWED[group] | local_migration[group] | ({"S3_ACCESS_KEY", "S3_SECRET_KEY"} if group in {"document", "pipeline"} else set()))
-                self.assertTrue(local_migration[group] <= keys)
+                local = local_migration[group] | local_runtime.get(group, set())
+                self.assertLessEqual(keys, ALLOWED[group] | local | ({"S3_ACCESS_KEY", "S3_SECRET_KEY"} if group in {"document", "pipeline"} else set()))
+                self.assertTrue(local <= keys)
 
 
 if __name__ == "__main__":

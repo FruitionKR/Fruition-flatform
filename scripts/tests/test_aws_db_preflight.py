@@ -56,18 +56,21 @@ class PreflightDatabaseTests(unittest.TestCase):
     def sql(cls, sql, database="postgres"):
         return cls.command(["docker", "exec", cls.container, "psql", "-U", "postgres", "-d", database, "-v", "ON_ERROR_STOP=1", "-Atc", sql])
 
-    def preflight(self, service="access", runtime="runtime_test_password", migration="migration_test_password", *, uri_replace=None, expected_host="127.0.0.1", require_empty=False):
+    def preflight(self, service="access", runtime="runtime_test_password", migration="migration_test_password", converter="converter_test_password", *, uri_replace=None, expected_host="127.0.0.1", require_empty=False):
         # 운영 SQL과 shell을 그대로 실행하되 TLS 없는 임시 DB 연결만 치환한다.
         document = deploy.preflight_job(service, {"access_rds_endpoint": "127.0.0.1", "core_rds_endpoint": expected_host}, require_empty=require_empty)
         script = document["spec"]["template"]["spec"]["containers"][0]["command"][2]
         if service == "ai":
             runtime = f"postgresql://ai_runtime:{runtime}@127.0.0.1:5432/ai_db"
             migration = f"postgresql://ai_migration:{migration}@127.0.0.1:5432/ai_db"
+            converter = f"postgresql://ai_converter:{converter}@127.0.0.1:5432/ai_db"
             if uri_replace:
                 runtime = runtime.replace(*uri_replace)
                 migration = migration.replace(*uri_replace)
+                converter = converter.replace(*uri_replace)
         return self.command(["docker", "exec", "--user", "10001:10001", "-i", "-e", "PGSSLMODE=disable", "-e", "PGCONNECT_TIMEOUT=3",
                          "-e", f"RUNTIME_CREDENTIAL={runtime}", "-e", f"MIGRATION_CREDENTIAL={migration}",
+                         "-e", f"CONVERTER_CREDENTIAL={converter}",
                          self.container, "sh", "-s"], input=script)
 
     def test_actual_bootstrap_roles_passwords_owners_and_fingerprints(self):
@@ -94,11 +97,11 @@ class PreflightDatabaseTests(unittest.TestCase):
                 self.assertEqual(first, self.preflight(service))
                 if service == "ai":
                     self.assertEqual(first, self.preflight(service, uri_replace=("/ai_db", "/ai_db?sslmode=require")))
-                for role in ("runtime", "migration"):
+                for role in ("runtime", "migration") + (("converter",) if service == "ai" else ()):
                     with self.subTest(role=role), self.assertRaises(subprocess.CalledProcessError):
                         self.preflight(service, **{role: "wrong_password"})
         for replacement in (("127.0.0.1", "wrong-target.invalid"), (":5432/", ":5433/"),
-                            ("ai_runtime:", "core_runtime:"), ("/ai_db", "/core_db"),
+                            ("ai_runtime:", "core_runtime:"), ("ai_converter:", "ai_runtime:"), ("/ai_db", "/core_db"),
                             ("/ai_db", "/ai_db?sslmode=disable"),
                             ("/ai_db", "/ai_db?host=wrong-target.invalid")):
             with self.subTest(uri=replacement), self.assertRaises(subprocess.CalledProcessError) as failure:
@@ -107,6 +110,20 @@ class PreflightDatabaseTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError) as failure:
             self.preflight("ai", expected_host="wrong-target.invalid")
         self.assertIn("AI database URI contract failed", failure.exception.stdout)
+        # converter는 원장 테이블 INSERT·열 단위 권한만 허용하고 그보다 넓은 권한은 거부한다.
+        self.sql("SET ROLE ai_migration; CREATE TABLE public.ai_model_usage(id uuid PRIMARY KEY, user_id text, status text, finished_at timestamptz); "
+                 "GRANT INSERT, UPDATE (status, finished_at) ON public.ai_model_usage TO ai_converter; "
+                 "GRANT SELECT (id, status, finished_at) ON public.ai_model_usage TO ai_converter", "ai_db")
+        self.assertRegex(self.preflight("ai"), r"^[0-9a-f]{64}$")
+        for grant in ("UPDATE ON public.ai_model_usage", "DELETE ON public.ai_model_usage", "SELECT ON public.ai_model_usage"):
+            with self.subTest(grant=grant):
+                self.sql(f"SET ROLE ai_migration; GRANT {grant} TO ai_converter", "ai_db")
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.preflight("ai")
+                self.sql(f"SET ROLE ai_migration; REVOKE {grant} FROM ai_converter; "
+                         "GRANT INSERT, UPDATE (status, finished_at) ON public.ai_model_usage TO ai_converter; "
+                         "GRANT SELECT (id, status, finished_at) ON public.ai_model_usage TO ai_converter", "ai_db")
+        self.sql("SET ROLE ai_migration; DROP TABLE public.ai_model_usage", "ai_db")
         self.sql("ALTER DATABASE access_db OWNER TO postgres")
         with self.assertRaises(subprocess.CalledProcessError):
             self.preflight()

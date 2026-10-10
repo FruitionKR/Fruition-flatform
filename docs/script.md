@@ -548,7 +548,7 @@ membership이 있으면 상속 권한을 임의로 변경하지 않고 초기화
 SELECT/INSERT/UPDATE/DELETE·sequence 사용, public CREATE 거부, 관리자 권한·membership
 부재와 같은 인스턴스의 선택 DB 간 양방향 CONNECT/read/write 거부를 확인한다. converter는 ai_db 접속,
 public CREATE·임시 테이블 read/write 거부를 확인하고, `ai_model_usage`가 있으면 원장 SQL 형태의 INSERT·id 기준
-UPDATE(롤백)는 성공하고 `SELECT *`·DELETE는 거부되는지 본다.
+UPDATE(롤백)는 성공하고 `SELECT *`·DELETE와 귀속 컬럼(`user_id`·`run_id`·`workspace_id`) UPDATE는 거부되는지 본다.
 
 기존 로컬 볼륨은 초기화 스크립트를 다시 실행하지 않으므로 converter role이 없다. compose로 PostgreSQL 컨테이너를
 다시 만든 뒤(`docker compose --env-file infra/.env -f infra/compose.infra.yml up -d postgresql`)
@@ -640,7 +640,7 @@ terraform output -json의 각 output은 value 필드로 제공된다. 스토리�
 
 1. 입력과 임시 Kustomize 렌더를 검증한다. 미치환 값과 릴리스에 기록되지 않은 업무 이미지를 거부한다(schema 3은 서비스별 `@digest`, schema 1·2는 릴리스 ID 태그).
 2. AWS 인증 계정·EKS ARN/버전/상태와 현재 kubeconfig endpoint를 대조하고, 플랫폼의 fruition namespace·gp3 StorageClass 존재와 aws-secrets-manager ClusterSecretStore Ready를 읽기 전용으로 확인한다. ServiceAccount·ConfigMap·ExternalSecret·앱 NetworkPolicy만 적용하고 모든 ExternalSecret Ready를 확인한다. 제한 정책 적용 후 기존 `internal-only-ingress` 정책을 이름으로 삭제한다. `kubectl apply`만으로는 과거 정책이 제거되지 않으며 삭제 실패 시 DB gate와 rollout을 진행하지 않는다.
-3. access-db-preflight, document-db-preflight, ai-db-preflight Job이 실제 runtime/migration 로그인, DB·public 스키마·테이블 소유권, 관리자 권한/membership 부재, runtime DML·DDL/교차 CONNECT 경계를 검사한다. 서비스별 runtime/migration 키 두 개만 참조하며 관리자 키는 받지 않는다. app.kubernetes.io/component=db-preflight, app=<서비스>-db-preflight Pod label을 네트워크 정책의 대상으로 사용한다.
+3. access-db-preflight, document-db-preflight, ai-db-preflight Job이 실제 runtime/migration 로그인, DB·public 스키마·테이블 소유권, 관리자 권한/membership 부재, runtime DML·DDL/교차 CONNECT 경계를 검사한다. 서비스별 runtime/migration 키 두 개만 참조하며 관리자 키는 받지 않는다. ai-db-preflight는 `fruition-converter`의 `AI_DATABASE_URL`로 `ai_converter`에도 접속해 같은 URI 계약과, `ai_model_usage` 테이블 단위 INSERT 외의 테이블·sequence 권한이 없는지 확인한다(원장 권한 부여 전에도 통과한다). app.kubernetes.io/component=db-preflight, app=<서비스>-db-preflight Pod label을 네트워크 정책의 대상으로 사용한다.
 4. 세 migration Job Complete를 확인한다. 실패하면 runtime 적용을 중단한다. 이후 동일 사전검증으로 실제 변경된 public schema의 pg_dump --schema-only SHA256을 수집한다.
 5. Kafka와 모든 KafkaTopic Ready를 확인한 뒤 runtime을 적용한다. 앱 Pod 생성 전에 access-svc·document-svc·frontend의 ALB TargetGroupBinding 준비를 기다린다. 렌더된 모든 Deployment의 rollout 완료와 모든 KEDA ScaledObject Ready를 확인한다.
 6. `check_public_routes`로 공개 경로를 검증한다. api.<domain>·access.<domain>·`app_domain`의 `/v3/api-docs`와 `/internal/`이 404인지, `app_domain`의 `/healthz`와 `/`가 200인지 확인한다. 화면 확인은 `curl --connect-to`로 ALB 호스트명에 직접 연결하므로 DNS 전환 전에도 수행된다.

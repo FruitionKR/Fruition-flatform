@@ -51,7 +51,11 @@ for service in "${services[@]}"; do
     if [[ "$ledger" == t ]]; then
       call_id='00000000-0000-4000-8000-00000000c0de'
       psql_as "$converter_password" "$converter" "${!db}" --command="BEGIN; INSERT INTO public.ai_model_usage (id, run_id, workspace_id, user_id, kind, provider, requested_model, model, status) VALUES ('$call_id', 'probe', 'probe', 'probe', 'probe', 'probe', 'probe', 'probe', 'started'); UPDATE public.ai_model_usage SET status = CASE WHEN status = 'abandoned' THEN status ELSE 'succeeded' END, finished_at = CASE WHEN status = 'abandoned' THEN finished_at ELSE now() END WHERE id = '$call_id'; ROLLBACK;" >/dev/null || fail "${converter}의 ai_model_usage 기록·갱신이 실패했습니다."
-      for sql in 'SELECT * FROM public.ai_model_usage' "BEGIN; DELETE FROM public.ai_model_usage WHERE id = '$call_id'; ROLLBACK;"; do
+      # 귀속 컬럼을 바꿔 비용을 다른 사용자에게 떠넘기는 UPDATE도 거부돼야 한다.
+      for sql in 'SELECT * FROM public.ai_model_usage' "BEGIN; DELETE FROM public.ai_model_usage WHERE id = '$call_id'; ROLLBACK;" \
+        "BEGIN; UPDATE public.ai_model_usage SET user_id = 'probe' WHERE id = '$call_id'; ROLLBACK;" \
+        "BEGIN; UPDATE public.ai_model_usage SET run_id = 'probe' WHERE id = '$call_id'; ROLLBACK;" \
+        "BEGIN; UPDATE public.ai_model_usage SET workspace_id = 'probe' WHERE id = '$call_id'; ROLLBACK;"; do
         if psql_as "$converter_password" "$converter" "${!db}" --command="$sql" >/dev/null 2>&1; then
           fail "${converter}에 ai_model_usage 원장 외 권한이 있습니다: $sql"
         fi

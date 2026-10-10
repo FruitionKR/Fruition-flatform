@@ -43,7 +43,7 @@ for target in access core all; do
     docker exec "${env_args[@]}" "$container" bash /work/validate-db-isolation.sh
     if [[ "$repeat" == 1 && "$roles" != "$((expected * 2))" ]]; then
       # AI 스키마 적용(ai_schema.sql + AI_DB_CONVERTER_ROLE 부여)을 흉내 내 두 번째 init이 원장 권한을 지우지 않는지와 원장 검증을 확인한다.
-      docker exec -e PGPASSWORD=migration_test_password "$container" psql -h 127.0.0.1 -U ai_migration -d ai_db -v ON_ERROR_STOP=1 -c "CREATE TABLE ai_model_usage (id uuid PRIMARY KEY, run_id text NOT NULL, workspace_id text NOT NULL, user_id text NOT NULL, kind text NOT NULL, provider text NOT NULL, requested_model text NOT NULL, model text NOT NULL, status text NOT NULL, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz); GRANT INSERT, UPDATE ON ai_model_usage TO ai_converter; GRANT SELECT (id, status, finished_at) ON ai_model_usage TO ai_converter;" >/dev/null
+      docker exec -e PGPASSWORD=migration_test_password "$container" psql -h 127.0.0.1 -U ai_migration -d ai_db -v ON_ERROR_STOP=1 -c "CREATE TABLE ai_model_usage (id uuid PRIMARY KEY, run_id text NOT NULL, workspace_id text NOT NULL, user_id text NOT NULL, kind text NOT NULL, provider text NOT NULL, requested_model text NOT NULL, model text NOT NULL, status text NOT NULL, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz); GRANT INSERT, UPDATE (status, finished_at) ON ai_model_usage TO ai_converter; GRANT SELECT (id, status, finished_at) ON ai_model_usage TO ai_converter;" >/dev/null
     fi
   done
   count="$(docker exec "$container" psql -U postgres -Atc "SELECT count(*) FROM pg_database WHERE datname NOT IN ('postgres','template0','template1')")"
