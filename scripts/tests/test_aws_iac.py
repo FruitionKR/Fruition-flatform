@@ -134,5 +134,14 @@ class IaCContractTests(unittest.TestCase):
         self.assertIn("-lockfile=readonly", script)
         self.assertNotRegex(script, r"(?m)^\s*aws\s")
 
+    def test_ai_billing_warn_lines_alarm_only_for_document_svc(self):
+        obs = re.sub(r"\s+", " ", (ROOT / "infra/terraform/observability.tf").read_text())
+        for expected in ('prefix = "[AI 모델 전환 감지]"', 'prefix = "[AI 단가 미등록]"',
+                         '$.kubernetes.container_name = \\"document-svc\\"', 'namespace = "Fruition/AIUsage"',
+                         'period = 86400', 'comparison_operator = "GreaterThanOrEqualToThreshold"',
+                         'alarm_actions = [aws_sns_topic.operations.arn]'):
+            self.assertIn(expected, obs)
+
+
 if __name__ == "__main__":
     unittest.main()
