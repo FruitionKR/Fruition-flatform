@@ -296,7 +296,7 @@ base의 API·ingest scratch는 개별 `emptyDir`이며 Compose도 공유 runs vo
 
 ### AWS 저장소·통신 권한
 
-S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 `sources/documents/*`·`assets/*` 읽기/쓰기/삭제, 대용량 직접 업로드용 `tmp/document-uploads/*` 읽기/쓰기(`tmp/`는 7일 lifecycle 삭제)와 `wiki/*` 읽기를 갖는다. AI API·worker는 `sources/documents/*` 읽기, `wiki/*`·`agent-runs/*` 읽기/쓰기/삭제, `pipeline-runs/*` 읽기/쓰기를 갖는다. Document의 취소는 자기 문서·asset 파일만 삭제하고 AI object 복구는 내부 API로 AI에 위임한다. 로그는 취소 복구 대상이 아니므로 AI role에도 로그 삭제 권한을 주지 않는다. multipart 업로드의 중단·part 조회는 쓰기 prefix에만 허용한다.
+S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 `sources/documents/*`·`assets/*` 읽기/쓰기/삭제, 회의 녹음 `meetings/*` 읽기/쓰기/삭제, 대용량 직접 업로드용 `tmp/document-uploads/*` 읽기/쓰기(`tmp/`는 7일 lifecycle 삭제)와 `wiki/*` 읽기를 갖는다. AI API·worker는 `sources/documents/*` 읽기, `wiki/*`·`agent-runs/*` 읽기/쓰기/삭제, `pipeline-runs/*` 읽기/쓰기를 갖는다. Document의 취소는 자기 문서·asset 파일만 삭제하고 AI object 복구는 내부 API로 AI에 위임한다. 로그는 취소 복구 대상이 아니므로 AI role에도 로그 삭제 권한을 주지 않고, `pipeline-runs/`는 30일 lifecycle 만료로 정리한다. 버전 관리 버킷의 이전 버전·delete marker는 전체 prefix에 30일 만료 규칙을 걸어 정리한다(`tmp/`는 7일). AI command·event Kafka 토픽은 `retention.ms` 72시간이다. 근거: [adr/0023](adr/0023-retention-after-personal-data-purge.md). multipart 업로드의 중단·part 조회는 쓰기 prefix에만 허용한다.
 
 Document·AI에 해당 앱 bucket의 ListBucket은 허용한다. 없는 객체 GET을 404로 구분해야 신규 object journal/로그 조회가 동작하기 때문이다. 따라서 bucket 내부 key 이름은 공유되는 metadata 예외이며 object 값·쓰기·삭제 권한과 구분한다. 다른 bucket 권한은 없다. [S3 GET의 403/404 계약](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
 

@@ -53,6 +53,8 @@ data:
   # access-svc -> document-svc(/internal/workspaces/*/initial-note)
   ACCESS_INTERNAL_BASE_URL: "http://access-svc:8081"
   DOCUMENT_INTERNAL_BASE_URL: "http://document-svc:8080"
+  # access-svc -> pipeline-api(/internal/ai/purge/*, 데이터 파기)
+  AI_INTERNAL_BASE_URL: "http://pipeline-api:8000"
   CORS_ALLOWED_ORIGINS: "http://localhost:3000"
   OAUTH_FRONTEND_REDIRECT_URI: "http://localhost:3000/oauth/callback"
   AUTH_REFRESH_COOKIE_SECURE: "false"

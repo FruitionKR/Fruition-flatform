@@ -79,6 +79,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -90,6 +93,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -101,6 +107,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -112,6 +121,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -123,6 +135,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 # 문서 편집 outbox 이벤트 (key=document_id)
 apiVersion: kafka.strimzi.io/v1
@@ -135,3 +150,6 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000

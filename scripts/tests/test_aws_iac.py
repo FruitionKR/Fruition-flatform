@@ -121,6 +121,26 @@ class IaCContractTests(unittest.TestCase):
         self.assertIn('on_failure', budget)
         self.assertIn('redrive_policy', budget)
 
+    def test_storage_lifecycle_expires_old_versions_and_pipeline_logs(self):
+        source = (ROOT / "infra/terraform/s3.tf").read_text()
+        rules = {m.group(1): m.group(2) for m in re.finditer(r'rule \{\s*id\s*=\s*"([^"]+)"(.*?)\n  \}', source, re.S)}
+        everything = re.sub(r"\s+", " ", rules["expire-noncurrent-versions"])
+        self.assertIn("filter {}", everything)
+        self.assertIn("noncurrent_days = 30", everything)
+        self.assertIn("expired_object_delete_marker = true", everything)
+        self.assertRegex(rules["expire-tmp"], r'prefix\s*=\s*"tmp/"')
+        self.assertIn("noncurrent_days = 7", rules["expire-tmp"])
+        logs = rules["expire-pipeline-runs"]
+        self.assertRegex(logs, r'prefix\s*=\s*"pipeline-runs/"')
+        self.assertRegex(logs, r'days\s*=\s*30')
+
+    def test_ai_kafka_topics_keep_messages_72_hours(self):
+        topics = [d for d in yaml.safe_load_all((ROOT / "k8s/base/kafka.yaml").read_text()) if d["kind"] == "KafkaTopic"]
+        self.assertEqual({"ai.ingest.command", "ai.query.command", "ai.agent.command", "ai.maintenance.command",
+                          "ai.task.event", "document.edit.event"}, {t["metadata"]["name"] for t in topics})
+        for topic in topics:
+            self.assertEqual(259200000, topic["spec"]["config"]["retention.ms"], topic["metadata"]["name"])
+
     def test_ci_has_no_aws_credentials_and_covers_infra_paths(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/aws-iac.yml").read_text())
         self.assertEqual({"contents": "read"}, workflow["permissions"])

@@ -46,7 +46,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertNotIn("internal-only-ingress",[d["metadata"]["name"] for d in self.policies])
         for src,dst,port in [("access-svc","document-svc",8080),("document-svc","access-svc",8081),
                              ("document-svc","pipeline-api",8000),("ingest-worker","document-svc",8080),
-                             ("pipeline-api","access-svc",8081),("document-svc","converter",8000)]:
+                             ("pipeline-api","access-svc",8081),("access-svc","pipeline-api",8000),("document-svc","converter",8000)]:
             self.assertTrue(self.allows(src,"egress",port,other_app=dst))
             self.assertTrue(self.allows(dst,"ingress",port,other_app=src))
         self.assertFalse(self.allows("pipeline-api","ingress",8000,other_app="converter"))
@@ -114,15 +114,17 @@ class BoundaryTests(unittest.TestCase):
         for service in ("document","pipeline"):
             block=re.search(rf'{service}\s*=\s*\{{(.*?)\n\s*\}}',source,re.S).group(1)
             scopes[service]={action:json.loads(re.search(rf'{action}\s*=\s*(\[[^\]]*\])',block).group(1)) for action in ("read","write","delete")}
-        self.assertEqual(["sources/documents/*","assets/*","tmp/document-uploads/*"],scopes["document"]["write"])
-        self.assertEqual(["sources/documents/*", "assets/*"], scopes["document"]["delete"])
+        self.assertEqual(["sources/documents/*","assets/*","tmp/document-uploads/*","meetings/*"],scopes["document"]["write"])
+        self.assertEqual(["sources/documents/*", "assets/*", "meetings/*"], scopes["document"]["delete"])
         self.assertIn("tmp/document-uploads/*", scopes["document"]["read"])
         self.assertIn('"s3:ListMultipartUploadParts"', source)
         self.assertIn('"s3:GetObjectVersion"', source)
         self.assertIn("wiki/*",scopes["document"]["read"])
+        self.assertIn("meetings/*",scopes["document"]["read"])
         self.assertIn("sources/documents/*",scopes["pipeline"]["read"])
         self.assertEqual(["wiki/*","agent-runs/*"],scopes["pipeline"]["delete"])
         self.assertIn("pipeline-runs/*",scopes["pipeline"]["write"])
+        self.assertNotIn("pipeline-runs/*",scopes["pipeline"]["delete"])
         self.assertNotIn('resource "aws_iam_access_key"',source)
         self.assertNotIn('resource "aws_iam_user"',source)
         self.assertIn('"s3:AbortMultipartUpload"',source)
