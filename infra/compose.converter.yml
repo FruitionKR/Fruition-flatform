@@ -23,6 +23,12 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # selective repair 사용량 원장(ai_model_usage) 기록용 converter 전용 계정.
+      # 이 파일은 별도 프로젝트로 단독 기동되므로 호스트에 publish된 PostgreSQL로 접속한다.
+      # compose.containerized.yml과 함께 쓰면 postgresql:5432로 덮어쓴다.
+      AI_DATABASE_URL: postgresql://${AI_DB_CONVERTER_USER:-ai_converter}:${AI_DB_CONVERTER_PASSWORD:-ai_converter_dev_password}@host.docker.internal:${POSTGRES_PORT:-5432}/${AI_DB_NAME:-ai_db}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8010:8000"
     healthcheck:

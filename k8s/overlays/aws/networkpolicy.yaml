@@ -161,6 +161,7 @@ spec:
       - query-task-worker
       - agent-task-worker
       - maintenance-task-worker
+      - converter
       - access-migration
       - access-db-preflight
       - document-migration

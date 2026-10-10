@@ -22,6 +22,8 @@ data:
   AI_DB_NAME: "ai_db"
   AI_DB_RUNTIME_USER: "ai_runtime"
   AI_DB_MIGRATION_USER: "ai_migration"
+  # AI 스키마 적용 시 ai_model_usage 원장 권한을 받을 converter 전용 role
+  AI_DB_CONVERTER_ROLE: "ai_converter"
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
   KAFKA_BOOTSTRAP_SERVERS: "kafka-kafka-bootstrap:9092"

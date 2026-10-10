@@ -42,6 +42,7 @@ class PreflightDatabaseTests(unittest.TestCase):
                      "-e", f"{prefix}_DB_NAME={prefix.lower()}_db",
                      "-e", f"{prefix}_DB_RUNTIME_USER={prefix.lower()}_runtime",
                      "-e", f"{prefix}_DB_MIGRATION_USER={prefix.lower()}_migration"]
+        args += ["-e", "AI_DB_CONVERTER_USER=ai_converter", "-e", "AI_DB_CONVERTER_PASSWORD=converter_test_password"]
         cls.command(args + [cls.container, "bash", "/work/init-db-isolation.sh"])
         # 중간 실패 후 같은 계정/DB에 재실행해도 권한 구성이 유지되어야 한다.
         cls.command(args + [cls.container, "bash", "/work/init-db-isolation.sh"])

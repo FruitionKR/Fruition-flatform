@@ -34,7 +34,7 @@ ALLOWED = {
     "pipeline": {"AI_DATABASE_URL", "INTERNAL_CALLBACK_TOKEN", "AGENT_INTERNAL_TOKEN",
                  "REDIS_PASSWORD", "OPENAI_API_KEY", "GEMINI_API_KEY",
                  "ANTHROPIC_API_KEY", "TYPESAFE_API_KEY", "LANGSMITH_API_KEY", "TAVILY_API_KEY"},
-    "converter": {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"},
+    "converter": {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "AI_DATABASE_URL"},
     "frontend": {"ACCESS_CODE"},
 }
 # 같은 서비스 계정을 쓰지만 그룹 전체가 아니라 필요한 키만 받는 워크로드.
@@ -110,7 +110,7 @@ class CredentialsTest(unittest.TestCase):
     def test_kind_only_injects_own_secrets(self) -> None:
         local_migration = {"access": {"ACCESS_DB_MIGRATION_PASSWORD"},
                            "document": {"CORE_DB_MIGRATION_PASSWORD"},
-                           "pipeline": {"AI_DB_MIGRATION_URL"}, "converter": set()}
+                           "pipeline": {"AI_DB_MIGRATION_URL"}, "converter": {"AI_CONVERTER_DATABASE_URL"}}
         for manifest in render("k8s/base"):
             if manifest["kind"] != "Deployment":
                 continue

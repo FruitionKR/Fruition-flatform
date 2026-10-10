@@ -7,6 +7,11 @@
 name: fruition-mvp-dev
 
 services:
+  # 같은 프로젝트 네트워크에서는 PostgreSQL 서비스 이름으로 접속한다.
+  markitdown:
+    environment:
+      AI_DATABASE_URL: postgresql://${AI_DB_CONVERTER_USER:-ai_converter}:${AI_DB_CONVERTER_PASSWORD:-ai_converter_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+
   pipeline-api:
     environment:
       ACCESS_INTERNAL_BASE_URL: http://access-svc:8081
