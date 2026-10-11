@@ -13,7 +13,7 @@
 ## 결정
 
 1. **S3 이전 버전은 30일 보관한다.** 버전 관리는 유지하고, 전체 prefix(`filter {}`)에 `noncurrent_version_expiration` 30일과 `expired_object_delete_marker`를 건다. `tmp/`는 기존 `expire-tmp` 규칙(7일)이 더 짧아 먼저 적용된다. S3는 겹치는 규칙의 동작을 각각 평가하고 먼저 도래하는 만료를 실행한다.
-2. **AI 실행 로그는 사용자별로 지우지 않고 `pipeline-runs/` prefix 30일 lifecycle로 만료한다.** AI role의 삭제 권한은 늘리지 않는다. 이전 버전은 1번 규칙이 정리한다.
+2. **AI 실행 로그는 사용자별로 지우지 않고 `pipeline-runs/` prefix lifecycle로 만료한다.** 현재 object는 30일에 만료(delete marker 생성)되고, 이전 버전은 이 prefix 전용 규칙(`noncurrent_days = 1`)이 1일 뒤 제거해 약 31일이면 완전히 사라진다. 1번 규칙의 30일은 더 짧은 이 규칙에 앞서지 않는다. AI role의 삭제 권한은 늘리지 않는다.
 3. **document role에 `meetings/*` 쓰기·삭제를 추가한다.** 녹음 업로드와 파기가 둘 다 필요하다.
 4. **AI command·event Kafka 토픽의 `retention.ms`를 72시간(259200000)으로 한다.**
 
@@ -26,6 +26,6 @@
 
 ## 결과
 
-- 파기 후에도 S3 이전 버전·AI 로그는 최대 30일, Kafka 메시지는 최대 72시간 남는다. 개인정보 처리방침의 보관 항목에 적어야 한다.
-- 로그 보관 30일 이내에는 파기한 사용자의 실행 ID·오류 문자열이 남을 수 있다.
+- 파기 후에도 S3 이전 버전은 최대 30일, AI 로그는 최대 약 31일, Kafka 메시지는 최대 72시간 남는다. 개인정보 처리방침의 보관 항목에 적어야 한다.
+- 로그 보관 기간(약 31일) 동안에는 파기한 사용자의 실행 ID·오류 문자열이 남을 수 있다.
 - 적용하려면 `terraform apply`와 Kafka 토픽 배포가 필요하다.

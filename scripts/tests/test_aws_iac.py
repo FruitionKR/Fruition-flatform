@@ -133,6 +133,7 @@ class IaCContractTests(unittest.TestCase):
         logs = rules["expire-pipeline-runs"]
         self.assertRegex(logs, r'prefix\s*=\s*"pipeline-runs/"')
         self.assertRegex(logs, r'days\s*=\s*30')
+        self.assertRegex(logs, r'noncurrent_days\s*=\s*1\b')
 
     def test_ai_kafka_topics_keep_messages_72_hours(self):
         topics = [d for d in yaml.safe_load_all((ROOT / "k8s/base/kafka.yaml").read_text()) if d["kind"] == "KafkaTopic"]

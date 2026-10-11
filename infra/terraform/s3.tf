@@ -123,6 +123,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
     expiration {
       days = 30
     }
+    # 만료로 생긴 delete marker와 덮어쓴 이전 버전이 남지 않게 1일 뒤 제거한다.
+    # 겹치는 규칙은 더 짧은 기간(1일)이 먼저 적용되고, delete marker는 전체 규칙이 정리한다.
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
   }
 }
 

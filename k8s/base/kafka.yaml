@@ -150,6 +150,6 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
-  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  # 문서·워크스페이스 ID, revision, content_hash만 담은 편집 알림이며 본문은 없다. 소비 지연 복구용으로 72시간 보관한다(ADR 0023).
   config:
     retention.ms: 259200000
