@@ -567,7 +567,7 @@ Job 내부 명령과 입력:
 
 Java Job은 migration 이력이 없는 비어 있지 않은 DB를 자동 baseline하지 않는다. bootstrap으로 생성한 빈 DB 또는 기존 Flyway 이력이 정상인 소유 DB를 대상으로 한다. AI 명령은 Agent·Skill·checkpoint를 포함한 `db/ai_schema.sql`을 트랜잭션으로 적용한다.
 
-Secrets Manager 값은 초기 생성 이후 Terraform `ignore_changes`로 보존된다. 기존 환경에 새 MFA/SMTP 키가 없으면 운영자가 Secret 원본에 추가해야 하며 Terraform 재실행만으로 채워졌다고 가정하지 않는다. MFA 키를 임의로 교체하면 기존 TOTP secret 복호화가 불가능하므로 기존 키를 유지·보관한다. Secret 값 변경 후 ExternalSecret 동기화를 확인하고 해당 workload만 재시작한다. 실제 회전·복구 검증은 AWS에서 별도로 수행한다.
+Secrets Manager 값은 초기 생성 이후 Terraform `ignore_changes`로 보존된다. 기존 환경에 새 MFA/SMTP 키(환율용 `KOREAEXIM_AUTH_KEY` 포함, 비우면 document-svc 환율 수집 작업이 꺼진다)가 없으면 운영자가 Secret 원본에 추가해야 하며 Terraform 재실행만으로 채워졌다고 가정하지 않는다. MFA 키를 임의로 교체하면 기존 TOTP secret 복호화가 불가능하므로 기존 키를 유지·보관한다. Secret 값 변경 후 ExternalSecret 동기화를 확인하고 해당 workload만 재시작한다. 실제 회전·복구 검증은 AWS에서 별도로 수행한다.
 
 로컬 Compose/kind는 자기 서비스의 자동 migration을 유지한다. kind는 `base/secret.yaml`과 별도로 MFA 키 Secret을 생성해야 Access를 시작할 수 있다. 새 로컬 환경에서만 키를 생성하고 기존 환경에서는 보관한 키 파일을 사용한다. 저장소 밖 권한 600 파일에 줄바꿈 없는 Base64 32바이트를 보관한 뒤 다음처럼 적용한다(키 값을 화면에 출력하지 않는다).
 
