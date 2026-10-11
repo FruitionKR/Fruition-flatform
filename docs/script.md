@@ -282,6 +282,8 @@ AI image를 처음 만들거나 AI 코드·의존성이 바뀐 경우에만 위 
 
 core_db의 Wiki·Agent·Skill·checkpoint를 ai_db로 옮기던 일회성 절차는 끝났다. core_db 사본은 Fruition-document#97(V74)이 지우고, 이 절차에 쓰던 `wiki_db_cutover.py`는 Fruition-ai에서 삭제했다. 신규·기존 환경 모두 따로 할 일이 없다.
 
+문서 편집 저장소는 V39가 비어 있는 `document_edit_states`와 `document_content_versions`에 편집 revision을 초기화하는 fresh PostgreSQL cutover다. 기존 Mongo 편집 데이터와 두 PostgreSQL table의 폐기는 대상별 승인 후 수행하며, 기존 편집 상태·write receipt·pending edit event를 import하거나 dual-write하지 않는다. 초기화된 편집 상태의 본문·revision·receipt·content version·asset/reference·적용 감사·outbox를 하나의 core DB transaction으로 기록한다. 결정 근거: [adr/0016](https://github.com/FruitionKR/Fruition-document/blob/main/docs/adr/0016-consolidate-document-body-into-postgres.md).
+
 ### 3-4. 프론트엔드 (:3000)
 
 ```sh
