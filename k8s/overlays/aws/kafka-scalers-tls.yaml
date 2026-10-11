@@ -69,3 +69,21 @@ spec:
       tls: enable
     authenticationRef:
       name: kafka-tls
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: converter
+  namespace: fruition
+spec:
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9093
+      consumerGroup: ai.convert.command-worker
+      topic: ai.convert.command
+      lagThreshold: '1'
+      offsetResetPolicy: earliest
+      tls: enable
+    authenticationRef:
+      name: kafka-tls

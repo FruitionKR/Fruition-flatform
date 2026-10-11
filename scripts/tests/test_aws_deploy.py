@@ -52,6 +52,7 @@ CONFIG = {
     "account_id": "123456789012",
     "document_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-document-storage",
     "pipeline_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-pipeline-storage",
+    "converter_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-converter-storage",
     "vpc_cidr": "10.0.0.0/16",
     "alb_subnet_cidr_1": "10.0.101.0/24",
     "alb_subnet_cidr_2": "10.0.102.0/24",

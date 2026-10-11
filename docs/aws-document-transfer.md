@@ -12,19 +12,19 @@ PDF 미리보기는 인증 후 발급한 1시간짜리 S3 GET URL을 사용한�
 
 ## 변환과 AI
 
-AWS 변환은 `/convert-source-batch`에 원본 URL·크기·완료 페이지 번호만 전달한다. converter는 승인된 S3 HTTPS 호스트에서 1MiB Range로 읽으며 16MiB 캐시를 사용한다. 원본 전체를 JVM이나 converter 임시 디스크에 내려받지 않는다. 기본 10페이지씩 추출하여 기존 PDF 복원 엔진에 전달한다. `PDF_PAGES_PER_BATCH`는 1~50, `PDF_BATCH_CONCURRENCY` 기본값은 1이다.
+변환은 Kafka `ai.convert.command`로 요청한다(AI ADR 0034). document가 원본 key(`sources/documents/{id}/original`)와 쪽 범위(최대 50쪽)를 발행하면 converter worker가 IRSA 자격으로 S3에서 1MiB Range로 읽으며 16MiB 캐시를 사용한다. 원본 전체를 JVM이나 converter 임시 디스크에 내려받지 않고 presigned URL·허용 호스트 목록(`CONVERTER_SOURCE_HOSTS`)도 쓰지 않는다. 결과 Markdown은 `tmp/convert/{workspace_id}/{document_id}/{start_page}.md`에 쓰고 이벤트에는 key만 싣는다. 이 prefix는 1일 뒤 S3 lifecycle이 지운다. converter IAM은 `sources/documents/*` 읽기와 `tmp/convert/*` 쓰기뿐이고, document 역할이 `tmp/convert/*`를 읽는다.
 
 V50 migration의 `document_convert_queue`에 완료 페이지, 전체 페이지, 시도 횟수와 heartbeat를 저장한다. 실패하면 완료한 묶음 다음부터 자동 재시도하며 총 3회 실패하면 실패 상태를 남긴다. 처리 중 heartbeat가 10분 이상 끊긴 작업은 회수한다. 페이지 묶음마다 읽기 URL을 새로 발급한다.
 
 변환 Markdown의 PNG/JPEG/GIF data URI는 별도 S3 asset으로 저장한다. 10페이지 묶음 결과는 원본 문서에 이어 붙이고, 본문이 편집 문서 상한(5MB)을 넘을 때만 `origin=convert_part`, `source_document_id=원본 문서 ID`인 다음 파트 문서를 만든다(Document ADR-0024). AI packet 실행은 설정된 worker 수만큼만 대기/실행하여 전체 packet future를 한꺼번에 생성하지 않는다. PDF 변환이 끝나면 원본 문서와 파트를 각각 한 번씩 AI 큐에 등록한다.
 
-전체 파일 크기 제한과 작업별 메모리 제한은 별개다. 단일 PDF 객체 읽기에는 64MiB 방어 한도가 있고, 암호화·손상 PDF, 매우 큰 단일 페이지/이미지, LLM 제공자 토큰·호출 제한은 별도 오류가 될 수 있다. 페이지 추출 시 PDF parser 메타데이터와 페이지 리소스 메모리도 필요하다. 파트를 나누는 5MB는 편집 문서 상한이며 모델의 모든 prompt/output 토큰 한도를 대체하지 않는다. 일반 Markdown 편집 한도는 유지된다. 기존 로컬 `/convert` multipart 경로의 50MiB 제한도 유지되며 AWS 대용량 경로에는 적용되지 않는다.
+전체 파일 크기 제한과 작업별 메모리 제한은 별개다. 단일 PDF 객체 읽기에는 64MiB 방어 한도가 있고, 암호화·손상 PDF, 매우 큰 단일 페이지/이미지, LLM 제공자 토큰·호출 제한은 별도 오류가 될 수 있다. 페이지 추출 시 PDF parser 메타데이터와 페이지 리소스 메모리도 필요하다. 파트를 나누는 5MB는 편집 문서 상한이며 모델의 모든 prompt/output 토큰 한도를 대체하지 않는다. 일반 Markdown 편집 한도는 유지된다. converter의 HTTP `/convert` 경로는 없어졌다.
 
 ## 배포 순서
 
-1. S3 CORS에 실제 프런트엔드 HTTPS origin을 `document_upload_allowed_origins`로 등록한다. PUT/GET/HEAD 및 Range를 허용한다. 문서 IRSA에 임시 prefix 읽기/쓰기와 GetObjectVersion을 추가한다. 공개 버킷으로 변경하지 않는다.
-2. converter에 pypdf 의존성과 새 API를 배포한다. `CONVERTER_SOURCE_HOSTS`는 현재 리전 S3 endpoint와 해당 버킷 hostname만 등록한다.
-3. 문서 DB V50 migration을 적용한 후 document-svc를 배포한다. 기존 converter보다 먼저 새 문서 서버를 배포하지 않는다.
+1. S3 CORS에 실제 프런트엔드 HTTPS origin을 `document_upload_allowed_origins`로 등록한다. PUT/GET/HEAD 및 Range를 허용한다. 문서 IRSA에 임시 prefix 읽기/쓰기와 GetObjectVersion, `tmp/convert/*` 읽기를 추가한다. 공개 버킷으로 변경하지 않는다.
+2. Terraform으로 converter IAM(`storage_role_arns.converter`)과 `tmp/convert/` lifecycle을 적용하고 배포 JSON에 `converter_storage_role_arn`을 더한다. `ai-migration` Job을 `AI_DB_CONVERTER_ROLE`과 함께 다시 실행해 converter의 작업 journal 권한을 부여한 뒤 converter worker를 배포한다.
+3. 문서 DB V50 migration을 적용한 후 document-svc를 배포한다. converter worker보다 먼저 새 문서 서버를 배포하지 않는다.
 4. 프런트엔드는 `SAME_ORIGIN_API=true` 이미지로 배포한다(release 이미지 `frontend`). 같은 출처이므로 API CORS 설정은 필요 없다. 별도 API origin을 쓰는 빌드라면 `BACKEND_URL=https://api.example.com`(실제 API origin)으로 빌드하고 API CORS에 프런트엔드 origin을 포함한다. 직접 업로드는 기본 활성화이므로 `DOCUMENT_DIRECT_UPLOAD_ENABLED=true`를 별도로 지정할 필요가 없다.
 5. deploy workflow는 `deploy` 액션에서만 배포 성공 후 `scripts/aws_pdf_smoke.py`를 실행한다. 검증 계정으로 65MiB 합성 PDF의 multipart 업로드·완료 재호출·Range 읽기·11페이지 묶음 변환이 원본 문서 하나로 저장되고 AI 처리까지 끝나는지 확인하고 테스트 문서만 정리한다. 실제 계정의 편집 충돌 확인은 별도로 수행한다.
 

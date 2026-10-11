@@ -1,5 +1,5 @@
 # MinIO 대체. 문서 원본·snapshot·AI 파일 저장 (§8.5).
-# 서비스별 IRSA와 object prefix 권한을 사용한다. Access·converter는 S3 권한이 없다.
+# 서비스별 IRSA와 object prefix 권한을 사용한다. Access는 S3 권한이 없고, converter는 원본 읽기·tmp/convert 쓰기만 갖는다.
 resource "random_id" "bucket" {
   byte_length = 4
 }
@@ -72,7 +72,7 @@ resource "aws_s3_bucket_cors_configuration" "document_upload" {
   }
 }
 
-# 임시 파일 lifecycle (tmp/ prefix 7일 후 삭제)
+# 임시 파일 lifecycle (tmp/ prefix 7일, 변환 결과 tmp/convert/ 1일 후 삭제)
 resource "aws_s3_bucket_lifecycle_configuration" "storage" {
   bucket = aws_s3_bucket.storage.id
 
@@ -98,12 +98,27 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
       noncurrent_days = 7
     }
   }
+
+  # converter가 쓰고 document가 병합 직후 읽는 변환 결과. 취소로 남은 object도 여기서 지운다.
+  rule {
+    id     = "expire-tmp-convert"
+    status = "Enabled"
+    filter {
+      prefix = "tmp/convert/"
+    }
+    expiration {
+      days = 1
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
 }
 
 locals {
   storage_permissions = {
     document = {
-      read   = ["sources/documents/*", "assets/*", "wiki/*", "tmp/document-uploads/*"]
+      read   = ["sources/documents/*", "assets/*", "wiki/*", "tmp/document-uploads/*", "tmp/convert/*"]
       write  = ["sources/documents/*", "assets/*", "tmp/document-uploads/*"]
       delete = ["sources/documents/*", "assets/*"]
     }
@@ -111,6 +126,12 @@ locals {
       read   = ["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*"]
       write  = ["wiki/*", "agent-runs/*", "pipeline-runs/*"]
       delete = ["wiki/*", "agent-runs/*"]
+    }
+    # converter: 원본 PDF 범위 읽기와 변환 결과 쓰기만 한다. 삭제 권한은 없다.
+    converter = {
+      read   = ["sources/documents/*"]
+      write  = ["tmp/convert/*"]
+      delete = []
     }
   }
 }
@@ -134,14 +155,21 @@ resource "aws_iam_policy" "storage" {
   name     = "${var.project}-${each.key}-storage"
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      { Effect = "Allow", Action = each.key == "document" ? ["s3:GetObject", "s3:GetObjectVersion"] : ["s3:GetObject"], Resource = [for p in each.value.read : "${aws_s3_bucket.storage.arn}/${p}"] },
-      { Effect = "Allow", Action = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"], Resource = [for p in each.value.write : "${aws_s3_bucket.storage.arn}/${p}"] },
-      { Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in each.value.delete : "${aws_s3_bucket.storage.arn}/${p}"] },
-      # 없는 객체의 GET을 403 대신 404로 판별해야 AI journal이 신규 생성을 기록한다.
-      { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [aws_s3_bucket.storage.arn] },
-      # SSE-KMS 객체 읽기/쓰기용 — storage CMK에만 한정.
-      { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = [aws_kms_key.storage.arn] }
-    ]
+    Statement = concat(
+      [
+        { Effect = "Allow", Action = each.key == "document" ? ["s3:GetObject", "s3:GetObjectVersion"] : ["s3:GetObject"], Resource = [for p in each.value.read : "${aws_s3_bucket.storage.arn}/${p}"] },
+        { Effect = "Allow", Action = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"], Resource = [for p in each.value.write : "${aws_s3_bucket.storage.arn}/${p}"] },
+      ],
+      # 삭제 권한이 없는 서비스(converter)는 빈 Resource statement를 만들지 않는다.
+      length(each.value.delete) > 0 ? [
+        { Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in each.value.delete : "${aws_s3_bucket.storage.arn}/${p}"] },
+      ] : [],
+      [
+        # 없는 객체의 GET을 403 대신 404로 판별해야 AI journal이 신규 생성을 기록한다.
+        { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [aws_s3_bucket.storage.arn] },
+        # SSE-KMS 객체 읽기/쓰기용 — storage CMK에만 한정.
+        { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = [aws_kms_key.storage.arn] },
+      ],
+    )
   })
 }

@@ -7,11 +7,6 @@
 name: fruition-mvp-dev
 
 services:
-  # 같은 프로젝트 네트워크에서는 PostgreSQL 서비스 이름으로 접속한다.
-  markitdown:
-    environment:
-      AI_DATABASE_URL: postgresql://${AI_DB_CONVERTER_USER:-ai_converter}:${AI_DB_CONVERTER_PASSWORD:-ai_converter_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
-
   pipeline-api:
     environment:
       ACCESS_INTERNAL_BASE_URL: http://access-svc:8081
@@ -86,6 +81,7 @@ services:
       QUERY_COMMAND_TOPIC: ${QUERY_COMMAND_TOPIC:-ai.query.command}
       AGENT_COMMAND_TOPIC: ${AGENT_COMMAND_TOPIC:-ai.agent.command}
       MAINTENANCE_COMMAND_TOPIC: ${MAINTENANCE_COMMAND_TOPIC:-ai.maintenance.command}
+      CONVERT_COMMAND_TOPIC: ${CONVERT_COMMAND_TOPIC:-ai.convert.command}
       AI_TASK_EVENT_TOPIC: ${AI_TASK_EVENT_TOPIC:-ai.task.event}
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-fruition}
@@ -105,8 +101,6 @@ services:
       WIKI_SCHEMA_ENDPOINT: http://pipeline-api:8000/wiki-schema
       WIKI_PAGE_ENDPOINT: http://pipeline-api:8000/wiki/pages
       WIKI_STATE_ENDPOINT: http://pipeline-api:8000/wiki
-      # PDF → Markdown 변환기(compose.converter.yml의 markitdown) — 컨테이너 네트워크 경유
-      CONVERTER_ENDPOINT: http://markitdown:8000
       AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-local-agent-internal}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
     ports:

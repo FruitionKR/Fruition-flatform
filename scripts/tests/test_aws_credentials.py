@@ -126,7 +126,7 @@ class CredentialsTest(unittest.TestCase):
                     self.assertEqual(keys, WORKLOAD_ALLOWED[name], name)
                     continue
                 local = local_migration[group] | local_runtime.get(group, set())
-                self.assertLessEqual(keys, ALLOWED[group] | local | ({"S3_ACCESS_KEY", "S3_SECRET_KEY"} if group in {"document", "pipeline"} else set()))
+                self.assertLessEqual(keys, ALLOWED[group] | local | ({"S3_ACCESS_KEY", "S3_SECRET_KEY"} if group in {"document", "pipeline", "converter"} else set()))
                 self.assertTrue(local <= keys)
 
 

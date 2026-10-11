@@ -72,6 +72,20 @@ class SchedulingTest(unittest.TestCase):
                 self.assertEqual(env["SERVER_SHUTDOWN"], "graceful")
                 self.assertEqual(env["SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE"], "40s")
 
+    def test_converter_waits_for_a_whole_command_on_sigterm(self):
+        # worker는 SIGTERM 뒤에도 진행 중인 command를 끝낸다(마감 7200초). 짧으면 SIGKILL로 끊겨 재전달·모델 비용이 반복된다.
+        for overlay in ("base", "overlays/aws"):
+            output = subprocess.check_output(["kubectl", "kustomize", str(ROOT / "k8s" / overlay)], text=True)
+            resources = list(yaml.safe_load_all(output))
+            converter = next(r for r in resources if r["kind"] == "Deployment" and r["metadata"]["name"] == "converter")
+            self.assertGreaterEqual(converter["spec"]["template"]["spec"]["terminationGracePeriodSeconds"], 7200 + 600)
+            self.assertFalse(any(r["kind"] == "Service" and r["metadata"]["name"] == "converter" for r in resources))
+            scaler = next(r for r in resources if r["kind"] == "ScaledObject" and r["metadata"]["name"] == "converter")
+            trigger, = scaler["spec"]["triggers"]
+            self.assertEqual("ai.convert.command", trigger["metadata"]["topic"])
+            self.assertEqual("ai.convert.command-worker", trigger["metadata"]["consumerGroup"])
+            self.assertEqual("1", trigger["metadata"]["lagThreshold"])
+
     def test_security_preserves_converter_and_enforces_namespace_before_addons(self):
         output = subprocess.check_output(["kubectl", "kustomize", str(ROOT / "k8s/overlays/aws")], text=True)
         resources = list(yaml.safe_load_all(output))

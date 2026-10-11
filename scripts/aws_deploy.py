@@ -32,7 +32,7 @@ SCALING_KINDS = {"HorizontalPodAutoscaler"}
 PLACEHOLDER = re.compile(r"REPLACE_ME|PLACEHOLDER|CHANGEME|<[^>]+>|\$\{[^}]+\}", re.I)
 DNS = r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}"
 KEYS = {"account_id", "access_rds_endpoint", "core_rds_endpoint", "redis_endpoint", "s3_bucket", "app_domain", "domain", "acm_cert_arn",
-        "document_storage_role_arn", "pipeline_storage_role_arn", "vpc_cidr", "alb_subnet_cidr_1", "alb_subnet_cidr_2", "smtp_port", "waf_acl_arn"}
+        "document_storage_role_arn", "pipeline_storage_role_arn", "converter_storage_role_arn", "vpc_cidr", "alb_subnet_cidr_1", "alb_subnet_cidr_2", "smtp_port", "waf_acl_arn"}
 
 
 def run(args, *, input=None):
@@ -65,10 +65,10 @@ def validate(config, sha):
         raise ValueError("ACM ARN의 region/account/certificate를 확인하세요")
     if not re.fullmatch(rf"arn:aws:wafv2:ap-northeast-2:{config['account_id']}:regional/webacl/[A-Za-z0-9_-]+/[0-9a-f-]{{36}}", config["waf_acl_arn"]):
         raise ValueError("WAF ARN의 region/account/regional webacl을 확인하세요")
-    for key in ("document_storage_role_arn", "pipeline_storage_role_arn"):
+    for key in ("document_storage_role_arn", "pipeline_storage_role_arn", "converter_storage_role_arn"):
         if not re.fullmatch(rf"arn:aws:iam::{config['account_id']}:role/[A-Za-z0-9+=,.@_/-]+", config[key]):
             raise ValueError("서비스 S3 role ARN의 account와 형식을 확인하세요")
-    if config["document_storage_role_arn"] == config["pipeline_storage_role_arn"]:
+    if len({config["document_storage_role_arn"], config["pipeline_storage_role_arn"], config["converter_storage_role_arn"]}) != 3:
         raise ValueError("서비스별 S3 role을 분리해야 합니다")
     network = ipaddress.ip_network(config["vpc_cidr"])
     if network.version != 4 or not network.is_private:
@@ -192,7 +192,7 @@ def preflight_job(service, config, *, require_empty=False):
             "name": runtime_secret if role == "runtime" else f"fruition-{service}-migration", "key": key}}})
     roles = "runtime migration"
     if service == "ai":
-        # converter 원장 전용 계정도 접속·URI 계약·권한 범위를 확인한다. 마지막 role의 연결로 pg_dump를 하므로 migration을 끝에 둔다.
+        # converter 전용 계정(원장·작업 journal 권한만)도 접속·URI 계약·권한 범위를 확인한다. 마지막 role의 연결로 pg_dump를 하므로 migration을 끝에 둔다.
         roles = "runtime converter migration"
         env.append({"name": "CONVERTER_CREDENTIAL", "valueFrom": {"secretKeyRef": {
             "name": "fruition-converter", "key": "AI_DATABASE_URL"}}})
@@ -241,7 +241,10 @@ SELECT current_user = :'expected_user' AND current_database() = :'expected_db'
  AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datname IN ('access_db','core_db','ai_db') AND datname <> current_database() AND has_database_privilege(current_user, oid, 'CONNECT'))
  AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','S','v','m') AND pg_get_userbyid(c.relowner) <> :'migration')
  AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) privilege WHERE n.nspname='public' AND c.relkind IN ('r','p') AND current_user NOT IN (:'migration', :'converter') AND NOT has_table_privilege(current_user,c.oid,privilege))
- AND (current_user <> :'converter' OR (NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m') AND (has_table_privilege(current_user,c.oid,'SELECT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR (c.relname <> 'ai_model_usage' AND has_table_privilege(current_user,c.oid,'INSERT'))))
+ AND (current_user <> :'converter' OR (NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m') AND (has_table_privilege(current_user,c.oid,'DELETE,TRUNCATE,REFERENCES,TRIGGER')
+   OR (c.relname NOT IN ('ai_task_runs','ai_task_changes','ai_purged_scopes') AND has_table_privilege(current_user,c.oid,'SELECT'))
+   OR (c.relname <> 'ai_task_runs' AND has_table_privilege(current_user,c.oid,'UPDATE'))
+   OR (c.relname NOT IN ('ai_model_usage','ai_task_runs') AND has_table_privilege(current_user,c.oid,'INSERT'))))
   AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' AND has_sequence_privilege(current_user,c.oid,'USAGE,SELECT,UPDATE'))));
 SQL
   )
@@ -637,8 +640,8 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     wait_alb_bindings()
     workloads = [d for d in documents if d["kind"] not in foundation | event_kinds | routing | SCALING_KINDS |
                  {"Namespace", "Job", "ScaledObject", "KafkaUser", "TriggerAuthentication"}]
-    # New document-svc calls converter /convert-source-batch. Roll converter out and
-    # confirm readiness before any other workload so documents never see an old converter.
+    # New document-svc publishes ai.convert.command. Roll the converter worker out and
+    # confirm it runs before any other workload so no command waits for an old worker.
     converter = [d for d in workloads if d["kind"] == "Deployment" and d["metadata"]["name"] == CONVERTER_DEPLOYMENT]
     if not converter:
         raise ValueError(f"{CONVERTER_DEPLOYMENT} Deployment가 manifest에 없습니다")

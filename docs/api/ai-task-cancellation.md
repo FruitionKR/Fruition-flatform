@@ -14,7 +14,7 @@
 - Python이 업무 DB의 미복구 변경 ID를 역순 지정하고, backend는 각 행의 현재 값·참조를 검사해 한 변경씩 원자적으로 복구합니다.
 - 본문을 복구하면 새 revision과 outbox 이벤트를 생성하고 AI 파생 상태에도 동기 반영합니다. 삭제된 생성 문서는 운영 tombstone으로 늦은 편집 이벤트를 흡수합니다.
 - 모든 단계가 끝난 뒤에만 `cancelled`와 Query `query.cancelled` SSE를 전달합니다. 늦은 완료 이벤트는 재생되지 않습니다.
-- PDF 변환 취소는 HTTP 작업 중단을 전달하고 converter 하위 프로세스 종료를 기다린 뒤 placeholder·생성 파일을 복구합니다.
+- PDF 변환 취소는 batch `run_id`의 취소 요청을 converter worker가 약 2초 안에 확인해 하위 프로세스를 종료한 뒤 placeholder·생성 파일을 복구합니다.
 - 문서·폴더 역작업은 이름·내용·부모·순서를 복원합니다. 버전 번호와 운영 감사·멱등 기록은 되감지 않습니다.
 - 새 폴더에 다른 항목이 생겼거나 게시한 Skill 버전을 다른 Agent가 사용한 경우 등은 강제 삭제하지 않습니다.
 - 전송한 도구 요청의 성공 여부가 불명확하면 복구 완료를 선언하지 않습니다.
@@ -25,7 +25,7 @@
   메모리 Workspace에 기존 폴더 2개·문서 6개를 준비하고, 폴더 생성·문서 이동 9단계의 각 중단 지점에서 원래 구조 복원을 검증합니다.
 - 별도 PostgreSQL schema에서 실제 DB trigger·역순 복구·동시 취소·부모/자식·Skill 게시/수정을 검증합니다.
 - Backend 통합 테스트는 실제 PostgreSQL·Redis와 Python 경계를 대체한 client를 사용합니다.
-- Converter 테스트는 실제 하위 프로세스 종료와 연결 중단 시 정리를 검증합니다.
+- Converter 테스트는 실제 하위 프로세스 종료와 취소 요청 시 정리를 검증합니다.
 - 로컬 서비스 E2E는 실제 Gemini 모델·공개 API·Kafka worker·PostgreSQL·Redis를 연결합니다.
   같은 입력으로 승인 전 변경 0회, 마지막 이동 중 취소, 생성한 폴더 2개와 이동한 문서 6개의
   역작업 8회, 원래 이름·부모·순서 복원과 `cancelled`를 확인했습니다. Query 취소 후 말풍선 제거도 확인했습니다.

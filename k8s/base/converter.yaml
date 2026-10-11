@@ -1,4 +1,6 @@
-# markitdown 변환기 (infra/compose.converter.yml 대응).
+# Kafka `ai.convert.command` 컨슈머 (consumer group: ai.convert.command-worker). PDF 변환 worker (ai ADR 0034).
+# replicas는 KEDA ScaledObject가 1~3으로 관리한다 (keda-scaledobject.yaml).
+# HTTP 서버·Service가 없어 probe는 프로세스 생존(컨테이너 종료 시 재시작) 수준으로 둔다(ingest-worker와 같다).
 # compose와 동일하게 read-only rootfs + 권한 축소, /tmp만 쓰기 허용.
 apiVersion: apps/v1
 kind: Deployment
@@ -17,27 +19,14 @@ spec:
       labels:
         app: converter
     spec:
+      # SIGTERM을 받아도 worker는 진행 중인 command를 끝내고(CONVERT_BATCH_DEADLINE_SECONDS 7200초) 종료한다.
+      # 마감 + 종료·결과 저장 여유(600초)를 주어 rollout·scale-down 때 SIGKILL로 끊겨 재전달되는 일을 막는다.
+      terminationGracePeriodSeconds: 7800
       containers:
         - name: converter
           image: fruition-converter:latest
           imagePullPolicy: Never
-          ports:
-            - containerPort: 8000
           env:
-            - name: CONVERTER_SOURCE_HOSTS
-              valueFrom:
-                configMapKeyRef:
-                  name: fruition-config
-                  key: CONVERTER_SOURCE_HOSTS
-                  optional: true
-            - name: PDF_PAGES_PER_BATCH
-              valueFrom:
-                configMapKeyRef:
-                  name: fruition-config
-                  key: PDF_PAGES_PER_BATCH
-                  optional: true
-            - name: MAX_UPLOAD_MB
-              value: "50"
             - name: OCR_LANGUAGE
               value: "kor+eng"
             - name: OCR_TIMEOUT_SECONDS
@@ -52,6 +41,16 @@ spec:
                 secretKeyRef:
                   name: fruition-secret
                   key: AI_CONVERTER_DATABASE_URL
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: S3_SECRET_KEY
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -67,6 +66,9 @@ spec:
                 secretKeyRef:
                   name: fruition-secret
                   key: ANTHROPIC_API_KEY
+          envFrom:
+            - configMapRef:
+                name: fruition-config
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -75,18 +77,6 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 20
-            periodSeconds: 15
           resources:
             requests:
               cpu: 100m
@@ -97,16 +87,3 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 512Mi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: converter
-  namespace: fruition
-spec:
-  type: ClusterIP
-  selector:
-    app: converter
-  ports:
-    - port: 8000
-      targetPort: 8000

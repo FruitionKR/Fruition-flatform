@@ -4,7 +4,6 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/infra/compose.infra.yml"
 PIPELINE_COMPOSE_FILE="$ROOT_DIR/infra/compose.ai.yml"
-CONVERTER_COMPOSE_FILE="$ROOT_DIR/infra/compose.converter.yml"
 RUNTIME_DIR="$ROOT_DIR/.runtime"
 
 REMOVE_VOLUMES="false"
@@ -77,9 +76,6 @@ down_infra() {
   if docker info >/dev/null 2>&1; then
     log "PostgreSQL, MinIO, pipeline API 컨테이너를 종료합니다."
     docker compose "${args[@]}"
-    # converter는 별도 compose project(fruition-local-tools)라 따로 내린다. 볼륨은 없다.
-    log "PDF 변환기(markitdown) 컨테이너를 종료합니다."
-    docker compose -f "$CONVERTER_COMPOSE_FILE" down --remove-orphans
   else
     log "Docker daemon에 연결할 수 없어 인프라 종료는 건너뜁니다."
   fi

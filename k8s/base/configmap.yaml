@@ -31,6 +31,7 @@ data:
   QUERY_COMMAND_TOPIC: "ai.query.command"
   AGENT_COMMAND_TOPIC: "ai.agent.command"
   MAINTENANCE_COMMAND_TOPIC: "ai.maintenance.command"
+  CONVERT_COMMAND_TOPIC: "ai.convert.command"
   AI_TASK_EVENT_TOPIC: "ai.task.event"
   DOCUMENT_EDIT_EVENT_TOPIC: "document.edit.event"
   S3_ENDPOINT: "http://minio:9000"
@@ -49,8 +50,6 @@ data:
   SPEECH_LIVE_ENDPOINT: "ws://pipeline-api:8000/speech/transcriptions/live"
   SPEECH_TRANSCRIPTION_ENDPOINT: "http://pipeline-api:8000/speech/transcriptions"
   MEETING_NOTES_ENDPOINT: "http://pipeline-api:8000/meeting-notes/preview"
-  # PDF → Markdown 변환기(converter Service, ClusterIP) — document-svc가 내부 호출
-  CONVERTER_ENDPOINT: "http://converter:8000"
   # 서비스 간 내부 호출 — document-svc -> access-svc(/internal/authz·users),
   # access-svc -> document-svc(/internal/workspaces/*/initial-note)
   ACCESS_INTERNAL_BASE_URL: "http://access-svc:8081"

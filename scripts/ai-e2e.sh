@@ -83,9 +83,8 @@ for _ in $(seq 1 180); do
 done
 [[ -z "$pending" ]] || fail "컨테이너 준비 시간 초과:$pending"
 curl -fsS http://localhost:8000/health >/dev/null || fail "pipeline-api health 실패"
-curl -fsS http://localhost:8010/health >/dev/null || fail "converter health 실패"
 
-log "실제 PDF converter 요청을 실행합니다."
+log "실제 PDF를 Kafka convert command로 변환합니다."
 CONVERTER_ENV_FILE="$ENV_FILE" CONVERTER_E2E_SKIP_START=true \
   "$ROOT_DIR/scripts/converter-e2e.sh" "$PDF_FILE" "$CONVERTER_OUTPUT"
 
