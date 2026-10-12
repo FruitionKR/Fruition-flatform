@@ -83,7 +83,7 @@ resource "aws_db_instance" "access" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project}-access-postgres-final"
 
-  depends_on = [aws_cloudwatch_log_group.rds["access"]]
+  depends_on                      = [aws_cloudwatch_log_group.rds["access"]]
   enabled_cloudwatch_logs_exports = ["postgresql"]
   performance_insights_enabled    = false
 }
@@ -115,7 +115,7 @@ resource "aws_db_instance" "core" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project}-core-postgres-final"
 
-  depends_on = [aws_cloudwatch_log_group.rds["core"]]
+  depends_on                      = [aws_cloudwatch_log_group.rds["core"]]
   enabled_cloudwatch_logs_exports = ["postgresql"]
   performance_insights_enabled    = false
 }
