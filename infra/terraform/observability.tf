@@ -142,6 +142,18 @@ locals {
       prefix      = "[AI 단가 미등록]"
       description = "단가가 없는 모델 호출이 있어 청구되지 않았습니다. 단가 마이그레이션을 추가하세요. 재계산 작업이 자동으로 정리합니다."
     }
+    ai_fx_refresh_failed = {
+      prefix      = "[환율 갱신 실패]"
+      description = "일일 환율 갱신이 실패해 이전 환율로 계산 중입니다. 한국수출입은행 API 키(KOREAEXIM_AUTH_KEY)와 응답을 확인하세요."
+    }
+    ai_usage_check_needed = {
+      prefix      = "[AI 사용량 확인 필요]"
+      description = "AI 호출이 완료되지 않은 상태로 남아 사용량이 청구되지 않았습니다. AI 사용량 원장의 해당 callId를 확인하세요."
+    }
+    ai_fx_policy_missing = {
+      prefix      = "[AI 환율·정책 없음]"
+      description = "호출 시각에 적용할 환율 또는 과금 정책이 없어 청구되지 않았습니다. 환율과 과금 정책 데이터를 확인하세요."
+    }
   }
 }
 
