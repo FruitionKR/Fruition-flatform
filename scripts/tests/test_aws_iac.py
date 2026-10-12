@@ -137,8 +137,9 @@ class IaCContractTests(unittest.TestCase):
 
     def test_ai_kafka_topics_keep_messages_72_hours(self):
         topics = [d for d in yaml.safe_load_all((ROOT / "k8s/base/kafka.yaml").read_text()) if d["kind"] == "KafkaTopic"]
-        self.assertEqual({"ai.ingest.command", "ai.query.command", "ai.agent.command", "ai.maintenance.command",
-                          "ai.task.event", "document.edit.event"}, {t["metadata"]["name"] for t in topics})
+        # 토픽이 추가돼도(예: ai.convert.command) 매니페스트의 모든 토픽이 72시간 보관을 지키는지 본다.
+        self.assertLessEqual({"ai.ingest.command", "ai.query.command", "ai.agent.command", "ai.maintenance.command",
+                              "ai.task.event", "document.edit.event"}, {t["metadata"]["name"] for t in topics})
         for topic in topics:
             self.assertEqual(259200000, topic["spec"]["config"]["retention.ms"], topic["metadata"]["name"])
 
