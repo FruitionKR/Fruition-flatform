@@ -131,7 +131,7 @@ resource "aws_cloudwatch_metric_alarm" "operations" {
   depends_on          = [aws_sns_topic_policy.operations, aws_sns_topic_subscription.operations]
 }
 
-# document-svc가 하루(UTC) 한 번 남기는 과금 정확도 WARN 줄. Fluent Bit 레코드는 {"log": "...", "kubernetes": {"container_name": ...}} 형태다.
+# document-svc의 과금 정확도 WARN 줄. 모델 전환·단가 미등록은 앱이 하루(UTC) 단위로 중복 제거하고, 나머지 3종은 호출·시도마다 남긴다. Fluent Bit 레코드는 {"log": "...", "kubernetes": {"container_name": ...}} 형태다.
 locals {
   ai_usage_alarms = {
     ai_model_switched = {
