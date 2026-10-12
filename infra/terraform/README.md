@@ -7,7 +7,7 @@
 | VPC / EKS | 2 AZ, General 2대, AI Worker 0–2대 Spot, 명시적 API CIDR·addon build |
 | RDS | Access/Core PostgreSQL 16 인스턴스 2대, core/ai는 Core RDS 내 별도 DB·role |
 | Redis | 7.1 single primary replication group, TLS·서비스별 ACL |
-| S3 | versioning, Document/AI IRSA prefix 권한, 정적 앱 key 없음 |
+| S3 | versioning, Document/AI/converter IRSA prefix 권한, 정적 앱 key 없음 |
 | ECR / GitHub | 네 repository immutable SHA, 제한된 ECR/DescribeCluster role, namespace RBAC 그룹 |
 | Secrets Manager | DB·Redis·내부 token·MFA/SMTP 원본, 서비스별 ExternalSecret 투영 |
 | Budget | 계정 전체 월 실제 비용 $400/$550/$650 초과 → SNS → Lambda → Discord, 실패 이벤트 SQS 14일 보관 |
