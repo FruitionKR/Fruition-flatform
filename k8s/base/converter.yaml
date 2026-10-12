@@ -27,12 +27,6 @@ spec:
           image: fruition-converter:latest
           imagePullPolicy: Never
           env:
-            - name: OCR_LANGUAGE
-              value: "kor+eng"
-            - name: OCR_TIMEOUT_SECONDS
-              value: "600"
-            - name: MARKDOWN_TIMEOUT_SECONDS
-              value: "300"
             - name: PDF_DIAGNOSTIC_TIMEOUT_SECONDS
               value: "60"
             # 사용량 원장·작업 journal 기록용 converter 전용 계정(ai_runtime 아님)

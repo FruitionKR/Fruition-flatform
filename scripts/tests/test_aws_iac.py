@@ -104,6 +104,19 @@ class IaCContractTests(unittest.TestCase):
         converter = (ROOT / "k8s/base/converter.yaml").read_text()
         self.assertNotIn("safe-to-evict", converter)
 
+    def test_rds_log_groups_are_managed_with_14_day_retention(self):
+        rds = (ROOT / "infra/terraform/rds.tf").read_text()
+        self.assertRegex(rds, r'resource "aws_cloudwatch_log_group" "rds"\s*\{[^}]*toset\(\["access", "core"\]\)[^}]*/aws/rds/instance/\$\{var\.project\}-\$\{each\.key\}-postgres/postgresql[^}]*retention_in_days\s*=\s*14')
+        for key in ("access", "core"):
+            self.assertIn(f'depends_on = [aws_cloudwatch_log_group.rds["{key}"]]', rds)
+
+    def test_converter_does_not_set_unread_env(self):
+        files = ["k8s/base/converter.yaml", "infra/compose.converter.yml"]
+        for path in files:
+            text = (ROOT / path).read_text()
+            for name in ("OCR_LANGUAGE", "OCR_TIMEOUT_SECONDS", "MARKDOWN_TIMEOUT_SECONDS"):
+                self.assertNotIn(name, text, f"{path} {name}")
+
     def test_budget_delivery_keeps_webhook_out_of_state_and_scopes_permissions(self):
         budget = (ROOT / "infra/terraform/budgets.tf").read_text()
         self.assertNotIn('aws_secretsmanager_secret_version', budget)
