@@ -82,6 +82,8 @@ spec:
                   name: fruition-secret
                   key: TAVILY_API_KEY
             - {name: AI_COMMAND_TOPIC, value: ai.query.command}
+            # 한 pod가 동시에 처리하는 메시지 수. 같은 Kafka 키(세션·워크스페이스)는 순서대로 하나씩 처리한다(ai ADR 0036).
+            - {name: AI_TASK_CONCURRENCY, value: "8"}
             - {name: AI_COMMAND_CONSUMER_GROUP, value: query-task-worker}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
@@ -171,6 +173,8 @@ spec:
                   name: fruition-secret
                   key: TAVILY_API_KEY
             - {name: AI_COMMAND_TOPIC, value: ai.agent.command}
+            # 한 pod가 동시에 처리하는 메시지 수. 같은 Kafka 키(세션·워크스페이스)는 순서대로 하나씩 처리한다(ai ADR 0036).
+            - {name: AI_TASK_CONCURRENCY, value: "4"}
             - {name: AI_COMMAND_CONSUMER_GROUP, value: agent-task-worker}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
@@ -260,6 +264,8 @@ spec:
                   name: fruition-secret
                   key: TAVILY_API_KEY
             - {name: AI_COMMAND_TOPIC, value: ai.maintenance.command}
+            # 한 pod가 동시에 처리하는 메시지 수. 같은 Kafka 키(세션·워크스페이스)는 순서대로 하나씩 처리한다(ai ADR 0036).
+            - {name: AI_TASK_CONCURRENCY, value: "1"}
             - {name: AI_COMMAND_CONSUMER_GROUP, value: maintenance-task-worker}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
