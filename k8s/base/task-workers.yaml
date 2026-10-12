@@ -264,3 +264,11 @@ spec:
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits: {memory: 1Gi}
+          # 회의 녹음 전사: 녹음(최대 500MiB) 다운로드와 디코딩한 chunk WAV를 /tmp에 둔다.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1536Mi

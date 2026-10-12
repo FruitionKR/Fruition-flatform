@@ -26,6 +26,11 @@ class SchedulingTest(unittest.TestCase):
                 name = resource["metadata"]["name"]
                 pod = resource["spec"]["template"]["spec"]
                 self.assertNotIn("podAffinity", pod.get("affinity", {}))
+                if name == "maintenance-task-worker":
+                    # 회의 녹음 전사: 500MiB 녹음 + chunk WAV를 담는 /tmp.
+                    tmp = next(v for v in pod["volumes"] if v["name"] == "tmp")
+                    self.assertEqual(tmp["emptyDir"]["sizeLimit"], "1536Mi")
+                    self.assertIn({"name": "tmp", "mountPath": "/tmp"}, pod["containers"][0]["volumeMounts"])
                 if name in ("pipeline-api", "ingest-worker"):
                     self.assertEqual(next(v for v in pod["volumes"] if v["name"] == "runs"), {"name": "runs", "emptyDir": {}})
                 if overlay == "overlays/aws" and name in WORKERS:

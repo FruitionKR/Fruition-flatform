@@ -28,7 +28,7 @@ V50 migration의 `document_convert_queue`에 완료 페이지, 전체 페이지,
 4. 프런트엔드는 `SAME_ORIGIN_API=true` 이미지로 배포한다(release 이미지 `frontend`). 같은 출처이므로 API CORS 설정은 필요 없다. 별도 API origin을 쓰는 빌드라면 `BACKEND_URL=https://api.example.com`(실제 API origin)으로 빌드하고 API CORS에 프런트엔드 origin을 포함한다. 직접 업로드는 기본 활성화이므로 `DOCUMENT_DIRECT_UPLOAD_ENABLED=true`를 별도로 지정할 필요가 없다.
 5. deploy workflow는 `deploy` 액션에서만 배포 성공 후 `scripts/aws_pdf_smoke.py`를 실행한다. 검증 계정으로 65MiB 합성 PDF의 multipart 업로드·완료 재호출·Range 읽기·11페이지 묶음 변환이 원본 문서 하나로 저장되고 AI 처리까지 끝나는지 확인하고 테스트 문서만 정리한다. 실제 계정의 편집 충돌 확인은 별도로 수행한다.
 
-임시 객체/미완료 multipart는 7일 lifecycle로 회수한다. 버전 관리 버킷의 임시 이전 버전도 만료한다. 새 경로를 중지할 때는 frontend에 `DOCUMENT_DIRECT_UPLOAD_ENABLED=false`를 명시하고 재배포한다. 이는 기존 경로의 크기 제한도 다시 적용한다. V50은 추가 컬럼 migration이므로 롤백 시 데이터를 제거할 필요가 없다.
+임시 객체/미완료 multipart는 7일 lifecycle로 회수한다(회의 녹음 `meetings/*` 직접 업로드의 미완료 multipart 포함, 버킷 전체 규칙). 회의 전사 chunk checkpoint(`pipeline-runs/meeting-transcription/`)는 1일 뒤 만료한다. 버전 관리 버킷의 임시 이전 버전도 만료한다. 새 경로를 중지할 때는 frontend에 `DOCUMENT_DIRECT_UPLOAD_ENABLED=false`를 명시하고 재배포한다. 이는 기존 경로의 크기 제한도 다시 적용한다. V50은 추가 컬럼 migration이므로 롤백 시 데이터를 제거할 필요가 없다.
 
 CORS, storage lifecycle, document storage IAM 변경은 `infra/terraform/s3.tf` 등에 포함되어 있으며, 요청 기반 기동 구성(`request-wake.tf`)도 main에 병합되어 있다. 적용은 일반 Terraform 절차대로 새 plan을 만들고 전체 변경 내용을 검토한 뒤 진행한다.
 
