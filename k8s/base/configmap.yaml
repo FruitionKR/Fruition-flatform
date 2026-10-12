@@ -50,7 +50,7 @@ data:
   SPEECH_LIVE_ENDPOINT: "ws://pipeline-api:8000/speech/transcriptions/live"
   SPEECH_TRANSCRIPTION_ENDPOINT: "http://pipeline-api:8000/speech/transcriptions"
   MEETING_NOTES_ENDPOINT: "http://pipeline-api:8000/meeting-notes/preview"
-  # document-svc AI 과금 강제 여부(ADR 0029). 켜면 크레딧이 없는 계정의 AI 호출이 막히므로
+  # document-svc AI 과금 강제 여부(Fruition-document ADR 0029). 켜면 크레딧이 없는 계정의 AI 호출이 막히므로
   # true로 바꾸기 전에 테스트 계정에 크레딧을 먼저 지급해야 한다.
   BILLING_ENFORCE: "false"
   # 서비스 간 내부 호출 — document-svc -> access-svc(/internal/authz·users),
