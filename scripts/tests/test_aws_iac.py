@@ -108,7 +108,7 @@ class IaCContractTests(unittest.TestCase):
         rds = (ROOT / "infra/terraform/rds.tf").read_text()
         self.assertRegex(rds, r'resource "aws_cloudwatch_log_group" "rds"\s*\{[^}]*toset\(\["access", "core"\]\)[^}]*/aws/rds/instance/\$\{var\.project\}-\$\{each\.key\}-postgres/postgresql[^}]*retention_in_days\s*=\s*14')
         for key in ("access", "core"):
-            self.assertIn(f'depends_on = [aws_cloudwatch_log_group.rds["{key}"]]', rds)
+            self.assertRegex(rds, rf'depends_on\s*=\s*\[aws_cloudwatch_log_group\.rds\["{key}"\]\]')
 
     def test_converter_does_not_set_unread_env(self):
         files = ["k8s/base/converter.yaml", "infra/compose.converter.yml"]
