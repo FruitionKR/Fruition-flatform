@@ -124,6 +124,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 소비 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
