@@ -514,8 +514,8 @@ Core RDS에는 `core`를 명시한다. `access`는 Access DB·두 role, `core`�
   `*_DB_MIGRATION_USER`, `*_DB_MIGRATION_PASSWORD`를 제공한다. 이름 중복, 관리 DB 이름,
   관리자와 같은 role, 빈 값은 DB 변경 전에 거부한다.
 - AI 선택 시 converter 전용 role: `AI_DB_CONVERTER_USER`(기본 `ai_converter`), `AI_DB_CONVERTER_PASSWORD`를
-  추가로 제공한다. init은 ai_db CONNECT와 public USAGE만 준다. `ai_model_usage` 권한은 테이블을 만든 AI 스키마
-  적용 경로가 `AI_DB_CONVERTER_ROLE`로 부여하므로, 다시 init해도 원장 권한은 지워지지 않는다.
+  추가로 제공한다. init은 ai_db CONNECT와 public USAGE만 준다. `ai_model_usage`·작업 journal(`ai_task_runs` 등) 권한은 테이블을 만든 AI 스키마
+  적용 경로가 `AI_DB_CONVERTER_ROLE`로 부여하므로, 다시 init해도 원장·journal 권한은 지워지지 않는다.
 - 관리자: `POSTGRES_ADMIN_USER`, `POSTGRES_ADMIN_PASSWORD`를 제공한다. PostgreSQL 컨테이너
   최초 초기화에서는 `POSTGRES_USER`, `POSTGRES_PASSWORD`를 사용한다. 비밀번호 대신
   libpq `PGPASSFILE`도 사용할 수 있다.
@@ -549,7 +549,7 @@ UPDATE(롤백)는 성공하고 `SELECT *`·DELETE와 귀속 컬럼(`user_id`·`r
 기존 로컬 볼륨은 초기화 스크립트를 다시 실행하지 않으므로 converter role이 없다. compose로 PostgreSQL 컨테이너를
 다시 만든 뒤(`docker compose --env-file infra/.env -f infra/compose.infra.yml up -d postgresql`)
 `docker exec fruition-postgresql-dev bash /docker-entrypoint-initdb.d/10-db-isolation.sh`로 init만 다시 실행하고
-pipeline-api를 재기동해 원장 권한을 부여한다.
+pipeline-api를 재기동해 원장·journal 권한을 부여한다.
 Access 단독 대상에서는 교차 DB 쌍이 없으므로 이 항목은 수행하지 않는다. 서로 다른 RDS의
 네트워크/인증 경계는 이 스크립트가 검증하지 않으며 실제 AWS 배포 검증에서 별도로 확인한다.
 
@@ -578,7 +578,7 @@ converter worker는 selective repair 호출 전에 `ai_model_usage`에 먼저 �
 1. `terraform apply`로 `random_password.db_role["ai_converter"]`를 만든다.
 2. 기존 Secret은 `ignore_changes`로 키가 추가되지 않으므로 `fruition/app`에 `AI_DB_CONVERTER_PASSWORD`와 `AI_CONVERTER_DATABASE_URL`(`postgresql://ai_converter:<비밀번호>@<core endpoint>:5432/ai_db?sslmode=require`)을 보안 입력 경로로 추가한다. 속성이 없으면 `fruition-converter` ExternalSecret 동기화 전체가 실패한다.
 3. Core endpoint에 `AI_DB_CONVERTER_USER=ai_converter`, `AI_DB_CONVERTER_PASSWORD`를 더해 `DB_ISOLATION_TARGET=core`로 init·validate를 다시 실행한다.
-4. 부여 코드가 들어간 AI 이미지로 `ai-migration` Job을 실행해 원장 권한을 부여한다(release의 `migration_mode`가 `expand-only`여야 Job이 실행된다).
+4. 부여 코드가 들어간 AI 이미지로 `ai-migration` Job을 실행해 원장·journal 권한을 부여한다(release의 `migration_mode`가 `expand-only`여야 Job이 실행된다).
 5. converter worker를 배포하고 Pod 로그에서 consumer group `ai.convert.command-worker` 기동을 확인한다. KEDA ScaledObject `converter`는 lag 1당 1 Pod, 1~3개로 늘린다. SIGTERM 뒤에도 command를 끝내도록 `terminationGracePeriodSeconds`는 7800초다.
 
 Secrets Manager 값은 초기 생성 이후 Terraform `ignore_changes`로 보존된다. 기존 환경에 새 MFA/SMTP 키가 없으면 운영자가 Secret 원본에 추가해야 하며 Terraform 재실행만으로 채워졌다고 가정하지 않는다. MFA 키를 임의로 교체하면 기존 TOTP secret 복호화가 불가능하므로 기존 키를 유지·보관한다. Secret 값 변경 후 ExternalSecret 동기화를 확인하고 해당 workload만 재시작한다. 실제 회전·복구 검증은 AWS에서 별도로 수행한다.
@@ -636,7 +636,7 @@ terraform output -json의 각 output은 value 필드로 제공된다. 스토리�
 
 1. 입력과 임시 Kustomize 렌더를 검증한다. 미치환 값과 릴리스에 기록되지 않은 업무 이미지를 거부한다(schema 3은 서비스별 `@digest`, schema 1·2는 릴리스 ID 태그).
 2. AWS 인증 계정·EKS ARN/버전/상태와 현재 kubeconfig endpoint를 대조하고, 플랫폼의 fruition namespace·gp3 StorageClass 존재와 aws-secrets-manager ClusterSecretStore Ready를 읽기 전용으로 확인한다. ServiceAccount·ConfigMap·ExternalSecret·앱 NetworkPolicy만 적용하고 모든 ExternalSecret Ready를 확인한다. 제한 정책 적용 후 기존 `internal-only-ingress` 정책을 이름으로 삭제한다. `kubectl apply`만으로는 과거 정책이 제거되지 않으며 삭제 실패 시 DB gate와 rollout을 진행하지 않는다.
-3. access-db-preflight, document-db-preflight, ai-db-preflight Job이 실제 runtime/migration 로그인, DB·public 스키마·테이블 소유권, 관리자 권한/membership 부재, runtime DML·DDL/교차 CONNECT 경계를 검사한다. 서비스별 runtime/migration 키 두 개만 참조하며 관리자 키는 받지 않는다. ai-db-preflight는 `fruition-converter`의 `AI_DATABASE_URL`로 `ai_converter`에도 접속해 같은 URI 계약과, `ai_model_usage` 테이블 단위 INSERT 외의 테이블·sequence 권한이 없는지 확인한다(원장 권한 부여 전에도 통과한다). app.kubernetes.io/component=db-preflight, app=<서비스>-db-preflight Pod label을 네트워크 정책의 대상으로 사용한다.
+3. access-db-preflight, document-db-preflight, ai-db-preflight Job이 실제 runtime/migration 로그인, DB·public 스키마·테이블 소유권, 관리자 권한/membership 부재, runtime DML·DDL/교차 CONNECT 경계를 검사한다. 서비스별 runtime/migration 키 두 개만 참조하며 관리자 키는 받지 않는다. ai-db-preflight는 `fruition-converter`의 `AI_DATABASE_URL`로 `ai_converter`에도 접속해 같은 URI 계약과, 허용 범위(`ai_model_usage` INSERT·열 단위 UPDATE/SELECT, `ai_task_runs` SELECT·INSERT·UPDATE, `ai_task_changes`·`ai_purged_scopes` SELECT) 밖의 테이블·sequence 권한이 없는지 확인한다(원장·journal 권한 부여 전에도 통과한다). app.kubernetes.io/component=db-preflight, app=<서비스>-db-preflight Pod label을 네트워크 정책의 대상으로 사용한다.
 4. 세 migration Job Complete를 확인한다. 실패하면 runtime 적용을 중단한다. 이후 동일 사전검증으로 실제 변경된 public schema의 pg_dump --schema-only SHA256을 수집한다.
 5. Kafka와 모든 KafkaTopic Ready를 확인한 뒤 runtime을 적용한다. 앱 Pod 생성 전에 access-svc·document-svc·frontend의 ALB TargetGroupBinding 준비를 기다린다. 렌더된 모든 Deployment의 rollout 완료와 모든 KEDA ScaledObject Ready를 확인한다.
 6. `check_public_routes`로 공개 경로를 검증한다. api.<domain>·access.<domain>·`app_domain`의 `/v3/api-docs`와 `/internal/`이 404인지, `app_domain`의 `/healthz`와 `/`가 200인지 확인한다. 화면 확인은 `curl --connect-to`로 ALB 호스트명에 직접 연결하므로 DNS 전환 전에도 수행된다.

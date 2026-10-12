@@ -36,7 +36,7 @@ data:
 
     seen_databases='|postgres|template0|template1|'
     seen_roles="|$POSTGRES_ADMIN_USER|"
-    # 서비스별 role 종류. AI에는 converter 전용 role을 더한다(ai_model_usage 원장 기록 전용).
+    # 서비스별 role 종류. AI에는 converter 전용 role을 더한다(사용량 원장·작업 journal 기록 전용).
     service_kinds() {
       if [[ "$1" == AI ]]; then echo RUNTIME MIGRATION CONVERTER; else echo RUNTIME MIGRATION; fi
     }

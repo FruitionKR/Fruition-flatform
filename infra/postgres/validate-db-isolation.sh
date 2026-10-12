@@ -40,10 +40,11 @@ for service in "${services[@]}"; do
     converter="$AI_DB_CONVERTER_USER"
     converter_password="$AI_DB_CONVERTER_PASSWORD"
     psql_as "$converter_password" "$converter" "${!db}" --command='SELECT 1' >/dev/null || fail "${converter}의 ${!db} 접속이 실패했습니다."
-    # converter는 원장 테이블 외에는 어떤 테이블도 읽거나 쓸 수 없어야 한다.
+    # converter는 원장(ai_model_usage)·작업 journal(ai_task_runs·ai_task_changes·ai_purged_scopes) 외의 테이블을 읽거나 쓸 수 없어야 한다.
+    # journal 권한은 AI 스키마 적용이 부여하므로 여기서는 부여 대상이 아닌 probe 테이블로 거부만 확인한다.
     for sql in "BEGIN; CREATE TABLE public.${probe}_ddl (id integer); ROLLBACK;" "SELECT * FROM public.$probe" "BEGIN; INSERT INTO public.$probe (value) VALUES ('converter'); ROLLBACK;"; do
       if psql_as "$converter_password" "$converter" "${!db}" --command="$sql" >/dev/null 2>&1; then
-        fail "${converter}에 원장 외 권한이 있습니다: $sql"
+        fail "${converter}에 원장·journal 외 권한이 있습니다: $sql"
       fi
     done
     # ai_model_usage는 AI 스키마 적용 뒤에만 생긴다. 있으면 원장 SQL 형태의 기록·갱신만 허용되는지 본다.
@@ -83,4 +84,4 @@ for service in "${services[@]}"; do
     done
   done
 done
-printf '[db-isolation] %s: 계정 제한, 자기 DB DML·sequence, runtime DDL 거부, converter 원장 전용 권한, 선택 DB 간 CONNECT/read/write 거부 확인\n' "$DB_ISOLATION_TARGET"
+printf '[db-isolation] %s: 계정 제한, 자기 DB DML·sequence, runtime DDL 거부, converter 원장·journal 외 권한 거부, 선택 DB 간 CONNECT/read/write 거부 확인\n' "$DB_ISOLATION_TARGET"
