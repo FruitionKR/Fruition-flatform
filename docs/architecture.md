@@ -241,7 +241,7 @@ AI 노드 그룹의 초기·최소값은 0이지만 worker의 최소 replica는 
 
 플랫폼 관리자는 Terraform state용 S3 bootstrap → VPC·EKS·RDS·Redis·S3·ECR·IAM 등 인프라 → ALB controller·External Secrets·Strimzi·KEDA·Cluster Autoscaler와 공통 Kubernetes 자원 순으로 준비한다. Terraform state는 S3의 버전 관리·암호화·잠금으로 관리한다.
 
-이미지 게시는 GitHub hosted runner에서 게시 전용 role(OIDC)로 ECR에 올린다. 앱 배포는 GitHub Actions의 전용 runner에서 실행하며, GitHub OIDC로 배포 role을 받아 장기 AWS access key 없이 게시된 ECR 이미지를 확인하고 EKS에 접근한다. 반면 실행 중인 Document·AI가 S3에 접근할 때는 각 Kubernetes ServiceAccount에 연결한 **IRSA** role을 사용한다. 두 경로는 서로 다른 신원과 권한이다. 비밀번호 등 앱 설정은 Secrets Manager → External Secrets → 서비스별 Kubernetes Secret으로 공급한다. [IRSA 공식 설명](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
+이미지 게시는 GitHub hosted runner에서 게시 전용 role(OIDC)로 ECR에 올린다. 앱 배포는 GitHub Actions의 전용 runner에서 실행하며, GitHub OIDC로 배포 role을 받아 장기 AWS access key 없이 게시된 ECR 이미지를 확인하고 EKS에 접근한다. 반면 실행 중인 Document·AI·converter가 S3에 접근할 때는 각 Kubernetes ServiceAccount에 연결한 **IRSA** role을 사용한다. 두 경로는 서로 다른 신원과 권한이다. 비밀번호 등 앱 설정은 Secrets Manager → External Secrets → 서비스별 Kubernetes Secret으로 공급한다. [IRSA 공식 설명](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
 
 workflow가 입력 검증·임시 manifest 렌더와 게시된 release ID 이미지 검증을 수행한다. 배포 스크립트는 실제 계정·클러스터를 대조하고, 새 release에 대해 서비스별 Secret 준비 → DB 소유권·접속 사전검증 → 세 migration Job 완료(`docs/releases/<ID>.json`의 `migration_mode`가 `expand-only`일 때) → Kafka/topic/KafkaUser 준비 → Service·Ingress와 ALB 연결 → converter worker 우선 rollout 후 나머지 Deployment rollout → KEDA 준비 → API HPA 적용 → 공개 경로 검사(화면 `/healthz`·`/` 200, `/v3/api-docs`·`/internal/` 404) → 검증 계정 로그인·문서 조회 smoke를 확인하고, workflow가 이어서 대용량 PDF 업로드·변환 smoke(`scripts/aws_pdf_smoke.py`)를 실행한다. 성공 시 manifest·설정·DB schema fingerprint를 release 기록으로 남긴다. 기존 성공 SHA 재배포·복구는 현재 schema와 설정 조건을 검사한 뒤 저장된 manifest를 사용하며 migration을 다시 실행하거나 자동으로 되돌리지 않는다. 현재 방식은 Deployment rollout이며 별도 blue/green·canary 전환은 구현하지 않았다.
 
@@ -296,9 +296,9 @@ base의 API·ingest scratch는 개별 `emptyDir`이며 Compose도 공유 runs vo
 
 ### AWS 저장소·통신 권한
 
-S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 `sources/documents/*`·`assets/*` 읽기/쓰기/삭제, 대용량 직접 업로드용 `tmp/document-uploads/*` 읽기/쓰기(`tmp/`는 7일 lifecycle 삭제)와 `wiki/*` 읽기를 갖는다. AI API·worker는 `sources/documents/*` 읽기, `wiki/*`·`agent-runs/*` 읽기/쓰기/삭제, `pipeline-runs/*` 읽기/쓰기를 갖는다. Document의 취소는 자기 문서·asset 파일만 삭제하고 AI object 복구는 내부 API로 AI에 위임한다. 로그는 취소 복구 대상이 아니므로 AI role에도 로그 삭제 권한을 주지 않는다. multipart 업로드의 중단·part 조회는 쓰기 prefix에만 허용한다.
+S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 `sources/documents/*`·`assets/*` 읽기/쓰기/삭제, 대용량 직접 업로드용 `tmp/document-uploads/*` 읽기/쓰기(`tmp/`는 7일 lifecycle 삭제)와 `wiki/*`·변환 결과 `tmp/convert/*` 읽기를 갖는다. AI API·worker는 `sources/documents/*` 읽기, `wiki/*`·`agent-runs/*` 읽기/쓰기/삭제, `pipeline-runs/*` 읽기/쓰기를 갖는다. converter는 `sources/documents/*` 읽기와 `tmp/convert/*` 쓰기만 갖고 삭제 권한은 없다. `tmp/convert/`는 1일 lifecycle로 삭제하므로 취소로 남은 변환 결과도 여기서 정리된다. Document의 취소는 자기 문서·asset 파일만 삭제하고 AI object 복구는 내부 API로 AI에 위임한다. 로그는 취소 복구 대상이 아니므로 AI role에도 로그 삭제 권한을 주지 않는다. multipart 업로드의 중단·part 조회는 쓰기 prefix에만 허용한다.
 
-Document·AI에 해당 앱 bucket의 ListBucket은 허용한다. 없는 객체 GET을 404로 구분해야 신규 object journal/로그 조회가 동작하기 때문이다. 따라서 bucket 내부 key 이름은 공유되는 metadata 예외이며 object 값·쓰기·삭제 권한과 구분한다. 다른 bucket 권한은 없다. [S3 GET의 403/404 계약](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
+Document·AI·converter에 해당 앱 bucket의 ListBucket은 허용한다. 없는 객체 GET을 404로 구분해야 신규 object journal/로그 조회가 동작하기 때문이며, converter도 같은 공통 정책으로 받는다. 따라서 bucket 내부 key 이름은 공유되는 metadata 예외이며 object 값·쓰기·삭제 권한과 구분한다. 다른 bucket 권한은 없다. [S3 GET의 403/404 계약](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
 
 Redis Access는 `auth:mfa:attempts:*`·`auth:email-availability:*` rate limit, `oauth:exchange:*` 일회용 교환 코드, `authz:role:*` 삭제만 허용한다. Document는 `authz:role:*` 적재/조회와 `query:*` 상태·이벤트, `query-events` pub/sub를 소유한다. AI는 `wiki:concept-index:*`만 읽기/쓰기/삭제한다. selectors로 Access의 projection SET을 거부하고 기본 사용자는 비활성화한다. Access의 workspace 단위 무효화에 쓰는 SCAN은 다른 서비스 key 이름까지 열람 가능한 metadata 예외다. 다른 key 값 조회·변경은 계속 거부한다. Concept write lock은 Redis가 아니라 ai_db advisory lock이다.
 
