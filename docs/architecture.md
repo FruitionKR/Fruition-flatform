@@ -128,7 +128,7 @@ ingest Kafka key는 `document_id`라 같은 문서의 순서는 유지하면서 
 
 - 매니페스트: `k8s/base` + `k8s/overlays/aws` (ingress·frontend·external-secrets·API HPA/PDB·Kafka TLS 사용자)
 - IaC: `infra/terraform` (EKS·RDS·ElastiCache·S3·ECR·OIDC·Secrets·budgets·관측(`observability.tf`)·WAF(`cost-guards.tf`)·요청 기반 기동(`request-wake.tf`)·배포 runner)
-- 실제 배포 단위 검증은 `compose.infra.yml` + `compose.ai.yml` + `compose.converter.yml` + `compose.containerized.yml`을 함께 구성한다. document-svc가 `core_db` Flyway를 먼저 적용한 뒤 access-svc와 pipeline API/worker를 기동하며. `JWT_SECRET`·`INTERNAL_CALLBACK_TOKEN`은 두 앱 동일 값 필수.
+- 실제 배포 단위 검증은 `compose.infra.yml` + `compose.ai.yml` + `compose.converter.yml` + `compose.containerized.yml`을 함께 구성한다. document-svc가 `core_db` Flyway를 먼저 적용한 뒤 access-svc와 pipeline API/worker를 기동한다. `JWT_SECRET`·`INTERNAL_CALLBACK_TOKEN`은 두 앱 동일 값 필수.
 - ALB는 `api.<domain>`을 document-svc, `access.<domain>`을 access-svc로 host 라우팅한다.
   화면 호스트(`app_domain`)는 같은 ALB가 경로로 나눈다: `/api/**`는 access-svc·document-svc, 나머지는 frontend. 기존 Vercel `next.config.mjs` rewrite를 대체하며, 브라우저가 ALB를 직접 부르므로 access-svc가 `X-Forwarded-For` 오른쪽 값으로 실제 클라이언트 IP를 얻는다. 상세: [aws-frontend-hosting.md](aws-frontend-hosting.md).
 - actuator는 업무 포트가 아니라 관리 포트로 분리한다(로컬 8082·8083, k8s는 Deployment env `MANAGEMENT_PORT`로 8082 통일).
