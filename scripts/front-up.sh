@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FRONTEND_DIR="$ROOT_DIR/../frontend"
+FRONTEND_DIR="$ROOT_DIR/../frontend/web"
 RUNTIME_DIR="$ROOT_DIR/.runtime"
 FRONTEND_PID=""
 

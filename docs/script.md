@@ -4,7 +4,7 @@
 
 > 원문: docs/backlog/local-runbook.md
 
-모든 통합 명령은 `platform/`을 현재 디렉터리로 실행한다. `../frontend/`, `../Access/`, `../Document/`, `../AI/` checkout은 platform과 같은 상위 디렉터리에 둔다. 서비스 단독 실행법은 각 서비스의 `docs/script.md`가 소유한다.
+모든 통합 명령은 `platform/`을 현재 디렉터리로 실행한다. `../frontend/`, `../Access/`, `../Document/`, `../AI/` checkout은 platform과 같은 상위 디렉터리에 둔다. frontend의 Next.js 프로젝트는 저장소 루트가 아니라 `../frontend/web/`에 있으므로(Fruition-frontend#163) 스크립트는 그 디렉터리에서 `npm`을 실행한다. 서비스 단독 실행법은 각 서비스의 `docs/script.md`가 소유한다.
 
 ## 1. 사전 조건
 
@@ -348,7 +348,7 @@ smoke test가 실패하면 worker를 재개하지 않는다. 구버전 이미지
 또는 수동 실행.
 
 ```sh
-cd ../frontend
+cd ../frontend/web
 npm install
 npm run dev
 ```
