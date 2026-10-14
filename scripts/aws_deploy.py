@@ -190,14 +190,24 @@ def preflight_job(service, config, *, require_empty=False):
         key = ("AI_DATABASE_URL" if role == "runtime" else "AI_DB_MIGRATION_URL") if service == "ai" else f"{prefix}_DB_{role.upper()}_PASSWORD"
         env.append({"name": role.upper() + "_CREDENTIAL", "valueFrom": {"secretKeyRef": {
             "name": runtime_secret if role == "runtime" else f"fruition-{service}-migration", "key": key}}})
+    roles = "runtime migration"
+    if service == "ai":
+        # converter 원장 전용 계정도 접속·URI 계약·권한 범위를 확인한다. 마지막 role의 연결로 pg_dump를 하므로 migration을 끝에 둔다.
+        roles = "runtime converter migration"
+        env.append({"name": "CONVERTER_CREDENTIAL", "valueFrom": {"secretKeyRef": {
+            "name": "fruition-converter", "key": "AI_DATABASE_URL"}}})
     host = config["access_rds_endpoint" if service == "access" else "core_rds_endpoint"]
     # credential은 Secret에서만 주입한다. shell trace와 DB client 오류 출력은 비활성화한다.
     script = f"""set -eu
 export PGHOST={host} PGPORT=5432
-for role in runtime migration; do
+for role in {roles}; do
   export PGUSER={db}_"$role"
   export PGDATABASE={db}_db
-  if [ "$role" = runtime ]; then credential="$RUNTIME_CREDENTIAL"; else credential="$MIGRATION_CREDENTIAL"; fi
+  case "$role" in
+    runtime) credential="$RUNTIME_CREDENTIAL" ;;
+    converter) credential="$CONVERTER_CREDENTIAL" ;;
+    *) credential="$MIGRATION_CREDENTIAL" ;;
+  esac
 """
     if service == "ai":
         # Terraform이 생성하는 단일 endpoint URI 계약만 허용한다. query의 host/sslmode 재정의를 거부한다.
@@ -220,7 +230,7 @@ for role in runtime migration; do
 '''
     else:
         script += '  export PGPASSWORD="$credential"\n'
-    script += f"""  result=$(psql --dbname="$PGDATABASE" -X -A -t -v ON_ERROR_STOP=1 -v expected_user="{db}_$role" -v expected_db='{db}_db' -v migration='{db}_migration' 2>/dev/null <<'SQL'
+    script += f"""  result=$(psql --dbname="$PGDATABASE" -X -A -t -v ON_ERROR_STOP=1 -v expected_user="{db}_$role" -v expected_db='{db}_db' -v migration='{db}_migration' -v converter='{db}_converter' 2>/dev/null <<'SQL'
 SELECT current_user = :'expected_user' AND current_database() = :'expected_db'
  AND (SELECT pg_get_userbyid(datdba) = :'migration' FROM pg_database WHERE datname = current_database())
  AND (SELECT pg_get_userbyid(nspowner) = :'migration' FROM pg_namespace WHERE nspname = 'public')
@@ -230,7 +240,9 @@ SELECT current_user = :'expected_user' AND current_database() = :'expected_db'
  AND NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user))
  AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datname IN ('access_db','core_db','ai_db') AND datname <> current_database() AND has_database_privilege(current_user, oid, 'CONNECT'))
  AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','S','v','m') AND pg_get_userbyid(c.relowner) <> :'migration')
- AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) privilege WHERE n.nspname='public' AND c.relkind IN ('r','p') AND current_user <> :'migration' AND NOT has_table_privilege(current_user,c.oid,privilege));
+ AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) privilege WHERE n.nspname='public' AND c.relkind IN ('r','p') AND current_user NOT IN (:'migration', :'converter') AND NOT has_table_privilege(current_user,c.oid,privilege))
+ AND (current_user <> :'converter' OR (NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m') AND (has_table_privilege(current_user,c.oid,'SELECT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR (c.relname <> 'ai_model_usage' AND has_table_privilege(current_user,c.oid,'INSERT'))))
+  AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' AND has_sequence_privilege(current_user,c.oid,'USAGE,SELECT,UPDATE'))));
 SQL
   )
   [ "$result" = t ] || {{ echo 'DB ownership gate failed'; exit 1; }}

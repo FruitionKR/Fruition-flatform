@@ -46,6 +46,12 @@ spec:
               value: "300"
             - name: PDF_DIAGNOSTIC_TIMEOUT_SECONDS
               value: "60"
+            # selective repair 사용량 원장 기록용 converter 전용 계정(ai_runtime 아님)
+            - name: AI_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: AI_CONVERTER_DATABASE_URL
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:

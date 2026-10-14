@@ -129,3 +129,6 @@ spec:
         env:
         - name: PGSSLMODE
           value: require
+        # 스키마 적용과 같은 트랜잭션에서 converter role에 ai_model_usage 원장 권한만 부여한다.
+        - name: AI_DB_CONVERTER_ROLE
+          value: ai_converter

@@ -50,7 +50,8 @@ class BoundaryTests(unittest.TestCase):
             self.assertTrue(self.allows(src,"egress",port,other_app=dst))
             self.assertTrue(self.allows(dst,"ingress",port,other_app=src))
         self.assertFalse(self.allows("pipeline-api","ingress",8000,other_app="converter"))
-        self.assertFalse(self.allows("converter","egress",5432,ip="10.0.5.5"))
+        # converter는 사용량 원장(ai_model_usage) 기록을 위해 전용 계정으로 RDS에 접속한다.
+        self.assertTrue(self.allows("converter","egress",5432,ip="10.0.5.5"))
         self.assertFalse(self.allows("ingest-worker","egress",443,ip="169.254.169.254"))
         self.assertFalse(self.allows("ingest-worker","egress",443,ip="10.0.5.5"))
         self.assertTrue(self.allows("ingest-worker","egress",443,ip="52.1.2.3"))

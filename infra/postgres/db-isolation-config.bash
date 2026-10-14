@@ -25,8 +25,15 @@ export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
 
 seen_databases='|postgres|template0|template1|'
 seen_roles="|$POSTGRES_ADMIN_USER|"
+# 서비스별 role 종류. AI에는 converter 전용 role을 더한다(ai_model_usage 원장 기록 전용).
+service_kinds() {
+  if [[ "$1" == AI ]]; then echo RUNTIME MIGRATION CONVERTER; else echo RUNTIME MIGRATION; fi
+}
+
 for service in "${services[@]}"; do
-  for suffix in NAME RUNTIME_USER MIGRATION_USER RUNTIME_PASSWORD MIGRATION_PASSWORD; do
+  suffixes=(NAME)
+  for kind in $(service_kinds "$service"); do suffixes+=("${kind}_USER" "${kind}_PASSWORD"); done
+  for suffix in "${suffixes[@]}"; do
     variable_name="${service}_DB_${suffix}"
     value="${!variable_name:-}"
     [[ -n "$value" ]] || fail "$variable_name 값이 필요합니다."

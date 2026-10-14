@@ -50,6 +50,7 @@ erDiagram
 ## 4. 계정 격리 정책
 
 - DB 계정은 **runtime(DML) / migration(DDL) 분리**: `access_runtime/migration`, `core_runtime/migration`, `ai_runtime/migration` (`infra/postgres/init-db-isolation.sh`).
+- converter 전용 `ai_converter`: ai_db CONNECT·public USAGE만 init이 주고, AI 스키마 적용(`AI_DB_CONVERTER_ROLE`)이 `ai_model_usage`의 INSERT, `finish_call`이 SET하는 컬럼의 UPDATE(귀속 컬럼 `run_id`·`workspace_id`·`user_id` 제외), `id`·`status`·`finished_at` 컬럼 SELECT만 부여한다. DELETE·다른 테이블·기본 권한·다른 DB 접근은 없다. 원장 SQL의 컬럼이 바뀌면 AI 저장소의 부여 목록도 함께 바꾼다. 같은 테이블 다른 행의 사용량 값 변경까지 막으려면 RLS가 필요하다.
 - AWS runtime은 자기 runtime 자격증명만 받고 migration 자격증명은 별도 Job만 받는다. bootstrap 관리자 인증은 runtime/Job에 주입하지 않는다. 로컬 startup migration은 자기 서비스 migration 계정만 사용하는 개발 실행 예외다.
 - 타 서비스 DB write를 금지한다. `ai_runtime`에는 core DB DML 권한과 runtime 연결 설정을 부여하지 않는다.
 - 코드 경계도 컴파일러가 강제: access-svc와 document-svc는 서로의 repository를 import하지 않고 내부 API·Redis projection으로만 연결.

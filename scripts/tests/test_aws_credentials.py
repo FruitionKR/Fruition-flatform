@@ -34,7 +34,7 @@ ALLOWED = {
     "pipeline": {"AI_DATABASE_URL", "INTERNAL_CALLBACK_TOKEN", "AGENT_INTERNAL_TOKEN",
                  "REDIS_PASSWORD", "OPENAI_API_KEY", "GEMINI_API_KEY",
                  "ANTHROPIC_API_KEY", "TYPESAFE_API_KEY", "LANGSMITH_API_KEY", "TAVILY_API_KEY"},
-    "converter": {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"},
+    "converter": {"OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "AI_DATABASE_URL"},
     "frontend": {"ACCESS_CODE"},
 }
 # 같은 서비스 계정을 쓰지만 그룹 전체가 아니라 필요한 키만 받는 워크로드.
@@ -111,6 +111,8 @@ class CredentialsTest(unittest.TestCase):
         local_migration = {"access": {"ACCESS_DB_MIGRATION_PASSWORD"},
                            "document": {"CORE_DB_MIGRATION_PASSWORD"},
                            "pipeline": {"AI_DB_MIGRATION_URL"}, "converter": set()}
+        # kind는 fruition-secret 하나를 쓰므로 converter는 ai_runtime URL과 다른 키로 자기 원장 계정 URL을 받는다.
+        local_runtime = {"converter": {"AI_CONVERTER_DATABASE_URL"}}
         for manifest in render("k8s/base"):
             if manifest["kind"] != "Deployment":
                 continue
@@ -123,8 +125,9 @@ class CredentialsTest(unittest.TestCase):
                 if name in WORKLOAD_ALLOWED:
                     self.assertEqual(keys, WORKLOAD_ALLOWED[name], name)
                     continue
-                self.assertLessEqual(keys, ALLOWED[group] | local_migration[group] | ({"S3_ACCESS_KEY", "S3_SECRET_KEY"} if group in {"document", "pipeline"} else set()))
-                self.assertTrue(local_migration[group] <= keys)
+                local = local_migration[group] | local_runtime.get(group, set())
+                self.assertLessEqual(keys, ALLOWED[group] | local | ({"S3_ACCESS_KEY", "S3_SECRET_KEY"} if group in {"document", "pipeline"} else set()))
+                self.assertTrue(local <= keys)
 
 
 if __name__ == "__main__":
