@@ -131,6 +131,62 @@ resource "aws_cloudwatch_metric_alarm" "operations" {
   depends_on          = [aws_sns_topic_policy.operations, aws_sns_topic_subscription.operations]
 }
 
+# document-svc의 과금 정확도 WARN 줄. 모델 전환·단가 미등록은 앱이 하루(UTC) 단위로 중복 제거하고, 나머지 3종은 호출·시도마다 남긴다. Fluent Bit 레코드는 {"log": "...", "kubernetes": {"container_name": ...}} 형태다.
+locals {
+  ai_usage_alarms = {
+    ai_model_switched = {
+      prefix      = "[AI 모델 전환 감지]"
+      description = "AI 공급사가 요청과 다른 모델로 답했습니다(자동 라우팅). 모델 카탈로그와 단가표가 실제 응답 모델과 맞는지 확인하세요."
+    }
+    ai_price_missing = {
+      prefix      = "[AI 단가 미등록]"
+      description = "단가가 없는 모델 호출이 있어 청구되지 않았습니다. 단가 마이그레이션을 추가하세요. 재계산 작업이 자동으로 정리합니다."
+    }
+    ai_fx_refresh_failed = {
+      prefix      = "[환율 갱신 실패]"
+      description = "일일 환율 갱신이 실패해 이전 환율로 계산 중입니다. 한국수출입은행 API 키(KOREAEXIM_AUTH_KEY)와 응답을 확인하세요."
+    }
+    ai_usage_check_needed = {
+      prefix      = "[AI 사용량 확인 필요]"
+      description = "AI 호출이 완료되지 않은 상태로 남아 사용량이 청구되지 않았습니다. AI 사용량 원장의 해당 callId를 확인하세요."
+    }
+    ai_fx_policy_missing = {
+      prefix      = "[AI 환율·정책 없음]"
+      description = "호출 시각에 적용할 환율 또는 과금 정책이 없어 청구되지 않았습니다. 환율과 과금 정책 데이터를 확인하세요."
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "ai_usage" {
+  for_each       = local.ai_usage_alarms
+  name           = "${var.project}-${each.key}"
+  log_group_name = aws_cloudwatch_log_group.containers["application"].name
+  pattern        = "{ ($.kubernetes.container_name = \"document-svc\") && ($.log = \"*${each.value.prefix}*\") }"
+  metric_transformation {
+    name      = each.key
+    namespace = "Fruition/AIUsage"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "ai_usage" {
+  for_each            = local.ai_usage_alarms
+  alarm_name          = "${var.project}-ops-${each.key}"
+  alarm_description   = "${each.value.description} See docs/aws-observability.md. ALARM and recovery are sent to Discord."
+  namespace           = "Fruition/AIUsage"
+  metric_name         = aws_cloudwatch_log_metric_filter.ai_usage[each.key].metric_transformation[0].name
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.operations.arn]
+  ok_actions          = [aws_sns_topic.operations.arn]
+  depends_on          = [aws_sns_topic_policy.operations, aws_sns_topic_subscription.operations]
+}
+
 # No SNS actions on notifier-health alarms: avoid a self-amplifying failure loop.
 resource "aws_cloudwatch_metric_alarm" "notification_failures" {
   alarm_name          = "${var.project}-ops-discord-delivery-failures"
