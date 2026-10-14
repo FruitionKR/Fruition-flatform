@@ -361,6 +361,7 @@ spec:
           operator: In
           values:
           - document-svc
+          - access-svc
     ports:
     - protocol: TCP
       port: 8000
@@ -377,6 +378,7 @@ spec:
       operator: In
       values:
       - document-svc
+      - access-svc
   policyTypes:
   - Egress
   egress:
