@@ -122,12 +122,13 @@ class BoundaryTests(unittest.TestCase):
         for service in ("document","pipeline","converter"):
             block=re.search(rf'{service}\s*=\s*\{{(.*?)\n\s*\}}',source,re.S).group(1)
             scopes[service]={action:json.loads(re.search(rf'{action}\s*=\s*(\[[^\]]*\])',block).group(1)) for action in ("read","write","delete")}
-        self.assertEqual(["sources/documents/*","assets/*","tmp/document-uploads/*"],scopes["document"]["write"])
-        self.assertEqual(["sources/documents/*", "assets/*"], scopes["document"]["delete"])
+        self.assertEqual(["sources/documents/*","assets/*","tmp/document-uploads/*","meetings/*"],scopes["document"]["write"])
+        self.assertEqual(["sources/documents/*", "assets/*", "meetings/*"], scopes["document"]["delete"])
         self.assertIn("tmp/document-uploads/*", scopes["document"]["read"])
         self.assertIn('"s3:ListMultipartUploadParts"', source)
         self.assertIn('"s3:GetObjectVersion"', source)
         self.assertIn("wiki/*",scopes["document"]["read"])
+        self.assertIn("meetings/*",scopes["document"]["read"])
         self.assertIn("sources/documents/*",scopes["pipeline"]["read"])
         self.assertEqual(["wiki/*","agent-runs/*"],scopes["pipeline"]["delete"])
         # converter(ai ADR 0034)는 원본 읽기와 변환 결과 쓰기만 하고, document는 그 결과를 읽는다.
@@ -135,6 +136,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn("tmp/convert/*",scopes["document"]["read"])
         self.assertRegex(re.sub(r"\s+"," ",source),r'prefix = "tmp/convert/" } expiration \{ days = 1 \}')
         self.assertIn("pipeline-runs/*",scopes["pipeline"]["write"])
+        self.assertNotIn("pipeline-runs/*",scopes["pipeline"]["delete"])
         self.assertNotIn('resource "aws_iam_access_key"',source)
         self.assertNotIn('resource "aws_iam_user"',source)
         self.assertIn('"s3:AbortMultipartUpload"',source)

@@ -121,6 +121,28 @@ class IaCContractTests(unittest.TestCase):
         self.assertIn('on_failure', budget)
         self.assertIn('redrive_policy', budget)
 
+    def test_storage_lifecycle_expires_old_versions_and_pipeline_logs(self):
+        source = (ROOT / "infra/terraform/s3.tf").read_text()
+        rules = {m.group(1): m.group(2) for m in re.finditer(r'rule \{\s*id\s*=\s*"([^"]+)"(.*?)\n  \}', source, re.S)}
+        everything = re.sub(r"\s+", " ", rules["expire-noncurrent-versions"])
+        self.assertIn("filter {}", everything)
+        self.assertIn("noncurrent_days = 30", everything)
+        self.assertIn("expired_object_delete_marker = true", everything)
+        self.assertRegex(rules["expire-tmp"], r'prefix\s*=\s*"tmp/"')
+        self.assertIn("noncurrent_days = 7", rules["expire-tmp"])
+        logs = rules["expire-pipeline-runs"]
+        self.assertRegex(logs, r'prefix\s*=\s*"pipeline-runs/"')
+        self.assertRegex(logs, r'days\s*=\s*30')
+        self.assertRegex(logs, r'noncurrent_days\s*=\s*1\b')
+
+    def test_ai_kafka_topics_keep_messages_72_hours(self):
+        topics = [d for d in yaml.safe_load_all((ROOT / "k8s/base/kafka.yaml").read_text()) if d["kind"] == "KafkaTopic"]
+        # 토픽이 추가돼도(예: ai.convert.command) 매니페스트의 모든 토픽이 72시간 보관을 지키는지 본다.
+        self.assertLessEqual({"ai.ingest.command", "ai.query.command", "ai.agent.command", "ai.maintenance.command",
+                              "ai.task.event", "document.edit.event"}, {t["metadata"]["name"] for t in topics})
+        for topic in topics:
+            self.assertEqual(259200000, topic["spec"]["config"]["retention.ms"], topic["metadata"]["name"])
+
     def test_ci_has_no_aws_credentials_and_covers_infra_paths(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/aws-iac.yml").read_text())
         self.assertEqual({"contents": "read"}, workflow["permissions"])
@@ -133,6 +155,16 @@ class IaCContractTests(unittest.TestCase):
         self.assertIn("-backend=false", script)
         self.assertIn("-lockfile=readonly", script)
         self.assertNotRegex(script, r"(?m)^\s*aws\s")
+
+    def test_ai_billing_warn_lines_alarm_only_for_document_svc(self):
+        obs = re.sub(r"\s+", " ", (ROOT / "infra/terraform/observability.tf").read_text())
+        for expected in ('prefix = "[AI 모델 전환 감지]"', 'prefix = "[AI 단가 미등록]"',
+                         'prefix = "[환율 갱신 실패]"', 'prefix = "[AI 사용량 확인 필요]"', 'prefix = "[AI 환율·정책 없음]"',
+                         '$.kubernetes.container_name = \\"document-svc\\"', 'namespace = "Fruition/AIUsage"',
+                         'period = 86400', 'comparison_operator = "GreaterThanOrEqualToThreshold"',
+                         'alarm_actions = [aws_sns_topic.operations.arn]'):
+            self.assertIn(expected, obs)
+
 
 if __name__ == "__main__":
     unittest.main()
