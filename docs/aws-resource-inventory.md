@@ -200,6 +200,13 @@ plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현�
 | 93 | DB를 둘 안쪽 구역을 정해요. | `aws_db_subnet_group.main` | DB 배치용 private subnet 집합 |
 | 94 | EKS 컴퓨터만 DB의 정해진 문으로 오게 해요. | `aws_security_group.rds` | EKS 노드에서 PostgreSQL 5432 접근만 허용 |
 
+RDS PostgreSQL 로그 그룹(`aws_cloudwatch_log_group.rds["access"]`, `["core"]`)도 14일 보존으로 Terraform이 관리합니다. 이미 RDS가 만든 그룹이 있으면 첫 apply 전에 가져와야 합니다.
+
+```
+terraform import 'aws_cloudwatch_log_group.rds["access"]' /aws/rds/instance/<project>-access-postgres/postgresql
+terraform import 'aws_cloudwatch_log_group.rds["core"]' /aws/rds/instance/<project>-core-postgres/postgresql
+```
+
 ## Redis — 8개
 
 | 번호 | 쉬운 설명 | 설정에서 찾을 이름 (운영자용) | 정확한 설정 (운영자용) |

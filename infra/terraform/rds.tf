@@ -46,6 +46,14 @@ resource "aws_db_parameter_group" "postgres16" {
   }
 }
 
+# RDS가 내보내는 로그의 그룹을 먼저 만들어 14일 보관 기간을 건다(없으면 RDS가 만료 없는 그룹을 자동 생성한다).
+# 이미 자동 생성된 그룹이 있으면 `terraform import 'aws_cloudwatch_log_group.rds["access"]' /aws/rds/instance/<project>-access-postgres/postgresql` (core도 같은 방식)로 가져온다.
+resource "aws_cloudwatch_log_group" "rds" {
+  for_each          = toset(["access", "core"])
+  name              = "/aws/rds/instance/${var.project}-${each.key}-postgres/postgresql"
+  retention_in_days = 14
+}
+
 resource "aws_db_instance" "access" {
   identifier     = "${var.project}-access-postgres"
   engine         = "postgres"
@@ -75,6 +83,7 @@ resource "aws_db_instance" "access" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project}-access-postgres-final"
 
+  depends_on                      = [aws_cloudwatch_log_group.rds["access"]]
   enabled_cloudwatch_logs_exports = ["postgresql"]
   performance_insights_enabled    = false
 }
@@ -106,6 +115,7 @@ resource "aws_db_instance" "core" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project}-core-postgres-final"
 
+  depends_on                      = [aws_cloudwatch_log_group.rds["core"]]
   enabled_cloudwatch_logs_exports = ["postgresql"]
   performance_insights_enabled    = false
 }
