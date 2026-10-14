@@ -28,7 +28,7 @@ spec:
       bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9093
       consumerGroup: query-task-worker
       topic: ai.query.command
-      lagThreshold: '5'
+      lagThreshold: '10'
       offsetResetPolicy: earliest
       tls: enable
     authenticationRef:
@@ -46,7 +46,7 @@ spec:
       bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9093
       consumerGroup: agent-task-worker
       topic: ai.agent.command
-      lagThreshold: '5'
+      lagThreshold: '6'
       offsetResetPolicy: earliest
       tls: enable
     authenticationRef:

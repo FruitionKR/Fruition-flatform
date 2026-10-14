@@ -115,7 +115,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "② Saturation — 자원이 한계에 얼마나 가까운가",
-      "description": "Kafka lag은 비동기 파이프라인의 포화도다(왼쪽 축, 건수). 올랐다 0으로 내려오면 정상, 안 내려오면 워커 정지·반복 실패다. 점선은 KEDA 스케일 발동선(5). DB 커넥션 사용률은 오른쪽 축이며 1.0에 붙으면 풀(기본 10개)이 마른 것이다.",
+      "description": "Kafka lag은 비동기 파이프라인의 포화도다(왼쪽 축, 건수). 올랐다 0으로 내려오면 정상, 안 내려오면 워커 정지·반복 실패다. 점선은 KEDA 스케일 발동선(ingest 5, agent 6, query 10). DB 커넥션 사용률은 오른쪽 축이며 1.0에 붙으면 풀(기본 10개)이 마른 것이다.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -148,6 +148,14 @@
               {
                 "color": "orange",
                 "value": 5
+              },
+              {
+                "color": "orange",
+                "value": 6
+              },
+              {
+                "color": "orange",
+                "value": 10
               }
             ]
           }

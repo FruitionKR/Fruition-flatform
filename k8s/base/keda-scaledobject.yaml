@@ -34,7 +34,7 @@ spec:
         bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9092
         consumerGroup: query-task-worker
         topic: ai.query.command
-        lagThreshold: "5"
+        lagThreshold: "10"
         offsetResetPolicy: earliest
 ---
 apiVersion: keda.sh/v1alpha1
@@ -52,7 +52,7 @@ spec:
         bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9092
         consumerGroup: agent-task-worker
         topic: ai.agent.command
-        lagThreshold: "5"
+        lagThreshold: "6"
         offsetResetPolicy: earliest
 ---
 apiVersion: keda.sh/v1alpha1
