@@ -125,6 +125,21 @@ spec:
   config:
     retention.ms: 259200000
 ---
+# PDF 변환 command (key=batch run_id). 한 문서의 batch가 파티션에 퍼져 converter worker가 병렬로 처리한다.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: ai.convert.command
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 12
+  replicas: 1
+  # 소비 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
+---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:

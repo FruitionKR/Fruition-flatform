@@ -22,5 +22,5 @@ converter는 사용자가 올린 신뢰할 수 없는 PDF를 파싱한다. selec
 
 ## 결과
 
-- converter 침해 시 영향은 원장 행 추가·완료 기록으로 제한된다.
+- converter 침해 시 영향은 원장 행 추가·완료 기록과 작업 journal 행 등록·갱신으로 제한된다. PDF 변환 worker(PR #81)가 `ai_converter`에 `ai_task_runs` SELECT·INSERT·UPDATE와 `ai_task_changes`·`ai_purged_scopes` SELECT를 더 받으므로(Fruition-ai ADR 0034), 침해 시 작업 journal 행을 등록·갱신할 수 있다. 자세한 권한 목록은 [data-model.md](../data-model.md)에 있다.
 - 남는 위험: `SELECT(id, status, finished_at)`와 UPDATE 때문에 행 접근은 가능하며 다른 행의 토큰 값 변경을 막으려면 행 수준 보안(RLS)이 필요하다.

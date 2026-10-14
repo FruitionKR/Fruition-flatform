@@ -52,6 +52,7 @@ CONFIG = {
     "account_id": "123456789012",
     "document_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-document-storage",
     "pipeline_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-pipeline-storage",
+    "converter_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-converter-storage",
     "vpc_cidr": "10.0.0.0/16",
     "alb_subnet_cidr_1": "10.0.101.0/24",
     "alb_subnet_cidr_2": "10.0.102.0/24",
@@ -398,7 +399,7 @@ class DeploymentTests(unittest.TestCase):
             env = pod["spec"]["containers"][0]["env"]
             refs = [item["valueFrom"]["secretKeyRef"] for item in env if "valueFrom" in item]
             runtime = "pipeline" if service == "ai" else service
-            # AI는 converter 원장 전용 계정도 확인한다.
+            # AI는 converter 원장·journal 전용 계정도 확인한다.
             converter = {"fruition-converter"} if service == "ai" else set()
             self.assertEqual({f"fruition-{runtime}", f"fruition-{service}-migration"} | converter, {ref["name"] for ref in refs})
             self.assertEqual(2 + len(converter), len(refs))

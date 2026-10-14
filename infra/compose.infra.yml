@@ -121,6 +121,8 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
           --create --if-not-exists --topic ai.maintenance.command --partitions 12 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic ai.convert.command --partitions 12 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
           --create --if-not-exists --topic ai.task.event --partitions 12 --replication-factor 1
         # 문서 편집 outbox 이벤트 (key=document_id)
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \

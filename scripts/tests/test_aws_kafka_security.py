@@ -33,6 +33,13 @@ class KafkaSecurityTests(unittest.TestCase):
     def test_consumers_match_acl_group_and_no_unrelated_topic_write(self):
         groups = {"ingest-worker": "ai.ingest.command", "query-task-worker": "ai.query.command",
                   "agent-task-worker": "ai.agent.command", "maintenance-task-worker": "ai.maintenance.command"}
+        # converter worker의 consumer group은 `{topic}-worker`다.
+        self.assertTrue(self.permits("kafka-converter","topic","ai.convert.command","Read"))
+        self.assertTrue(self.permits("kafka-converter","group","ai.convert.command-worker","Read"))
+        self.assertTrue(self.permits("kafka-converter","topic","ai.task.event","Write"))
+        self.assertFalse(self.permits("kafka-converter","topic","ai.convert.command","Write"))
+        self.assertTrue(self.permits("kafka-document","topic","ai.convert.command","Write"))
+        self.assertTrue(self.permits("kafka-keda","topic","ai.convert.command","Describe"))
         for group, topic in groups.items():
             self.assertTrue(self.permits("kafka-"+group,"topic",topic,"Read"))
             self.assertTrue(self.permits("kafka-"+group,"group",group,"Read"))
@@ -44,7 +51,7 @@ class KafkaSecurityTests(unittest.TestCase):
         self.assertFalse(any("Write" in a["operations"] or "Read" in a["operations"] for a in self.users["kafka-keda"]["authorization"]["acls"]))
 
     def test_each_client_mounts_own_identity_and_trust(self):
-        names = ["document-svc","ingest-worker","query-task-worker","agent-task-worker","maintenance-task-worker","edit-event-consumer"]
+        names = ["document-svc","ingest-worker","query-task-worker","agent-task-worker","maintenance-task-worker","edit-event-consumer","converter"]
         for name in names:
             spec = self.apps[name]
             env = {e["name"]:e for e in spec["containers"][0]["env"]}
@@ -55,8 +62,8 @@ class KafkaSecurityTests(unittest.TestCase):
             self.assertEqual("kafka-cluster-ca-cert",volumes["kafka-ca"]["secret"]["secretName"])
             key = "SPRING_KAFKA_SECURITY_PROTOCOL" if name == "document-svc" else "KAFKA_SECURITY_PROTOCOL"
             self.assertEqual("SSL",env[key]["value"])
-        # Pipeline API/converter do not receive other clients' Kafka certificates.
-        for name in ("access-svc","pipeline-api","converter"):
+        # Pipeline API does not receive other clients' Kafka certificates.
+        for name in ("access-svc","pipeline-api"):
             self.assertNotIn("kafka-client",[v["name"] for v in self.apps[name].get("volumes",[])])
 
     def test_keda_uses_separate_read_only_identity(self):

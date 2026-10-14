@@ -56,11 +56,11 @@ platform은 다섯 번째 독립 저장소 경계다. 각 서비스는 코드·�
 |---|---|---|
 | document → access | `GET /internal/authz/workspaces/{wid}/users/{uid}`, `GET /internal/users/{uid}`, `GET·PUT /internal/workspaces/{wid}/ai-model-settings` (X-Internal-Token) | 권한·표시명·workspace AI 모델 설정 조회/변경 |
 | access → document | `POST /internal/workspaces/{wid}/initial-note` (X-Internal-Token, best-effort, 커밋 후 호출) | 새 워크스페이스 초기 노트 |
-| document → ai-svc | Kafka `ai.ingest.command`(key=document_id), `ai.query.command`, `ai.agent.command`, `ai.maintenance.command` | 비동기 ingest·Query·Agent·Lint·Restore |
+| document → ai-svc | Kafka `ai.ingest.command`(key=document_id), `ai.query.command`, `ai.agent.command`, `ai.maintenance.command`, `ai.convert.command`(key=batch run_id) | 비동기 ingest·Query·Agent·Lint·Restore·PDF 변환 |
 | document → ai-svc | HTTP + X-Internal-Token | 동기 Query, Wiki 현재 상태 조회, pipeline run 폴링, Agent Tool run·승인 인자 인가 |
 | document → ai-svc | HTTP + X-Agent-Service-Token | JWT Skill 관리 요청 중계 |
 | document → ai-svc | `GET /agent/runs/{run_id}` + X-Agent-Service-Token | Skill draft source를 workspace/user scope로 canonical 조회 |
-| document → converter | HTTP (내부 전용, 큐 worker 경유) | PDF→Markdown 변환 (read timeout 900s) |
+| converter → document | 결과 `ai.task.event`, 변환 Markdown은 S3 `tmp/convert/{workspace_id}/{document_id}/{start_page}.md` | converter는 HTTP를 받지 않는 Kafka worker다. 원본(`sources/documents/`)을 S3에서 범위 읽기하고 command 하나는 최대 7200초([AI ADR 0034](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/adr/0034-async-pdf-conversion.md)) |
 | ai-svc → document | Kafka `ai.task.event` | Query 단계 진행 이벤트와 AI 작업 최종 결과 전달 |
 | ai-svc → document | 내부 HTTP + X-Internal-Token | ingest 원본 metadata·core 기여 이력 조회 |
 | ai-svc → document | `POST /internal/agent/tools/{read|execute}/{tool}` + X-Agent-Service-Token | P0 문서·폴더 조회와 승인된 변경 실행. document-svc가 core_db 소유 경계에서 실제 처리 |
@@ -180,7 +180,7 @@ flowchart TB
     alb -->|"api 도메인 · app /api/*"| document
     document -->|"내부 권한 API"| access
     document -->|"내부 HTTP"| pipeline
-    document -->|"파일 변환 HTTP"| converter
+    document -->|"Kafka ai.convert.command"| converter
     document -->|"작업 요청"| kafka
     kafka --> workers
     workers -->|"결과 이벤트"| kafka
@@ -216,8 +216,8 @@ flowchart TB
 
 | 패턴 | 현재 구현과 선택 이유 | 해석의 범위 |
 |---|---|---|
-| 책임별 MSA와 서비스별 데이터 소유권 | Access·Document·AI가 자기 업무와 DB를 소유하고 다른 서비스의 업무는 내부 API·이벤트로 요청한다. Converter는 저장소 없는 변환 서비스다. | 서비스마다 물리 DB 서버나 EKS 클러스터를 따로 두는 구성은 아니다. DB 권한 분리로 데이터 경계를 지킨다. |
-| 동기 HTTP + 이벤트 기반 비동기 처리 | 권한 확인·파일 변환 등은 내부 HTTP, 오래 걸리는 AI 작업은 Kafka command와 결과 이벤트로 처리한다. 요청 처리와 무거운 작업의 실행량을 분리한다. | 내부 주소는 Kubernetes Service DNS를 사용한다. Access·Document·Pipeline의 내부 API는 token 인가를 사용하며, Converter는 token 검증 없이 NetworkPolicy로 호출자를 제한한다. 별도 API Gateway나 service mesh를 도입한 구조는 아니다. |
+| 책임별 MSA와 서비스별 데이터 소유권 | Access·Document·AI가 자기 업무와 DB를 소유하고 다른 서비스의 업무는 내부 API·이벤트로 요청한다. Converter는 자기 업무 DB가 없는 Kafka 변환 worker로, 사용량 원장·작업 journal만 전용 계정으로 기록한다. | 서비스마다 물리 DB 서버나 EKS 클러스터를 따로 두는 구성은 아니다. DB 권한 분리로 데이터 경계를 지킨다. |
+| 동기 HTTP + 이벤트 기반 비동기 처리 | 권한 확인 등은 내부 HTTP, 오래 걸리는 AI 작업(PDF 변환 포함)은 Kafka command와 결과 이벤트로 처리한다. 요청 처리와 무거운 작업의 실행량을 분리한다. | 내부 주소는 Kubernetes Service DNS를 사용한다. Access·Document·Pipeline의 내부 API는 token 인가를 사용하며, Converter는 HTTP 서버가 없어 ingress를 받지 않는다. 별도 API Gateway나 service mesh를 도입한 구조는 아니다. |
 | Transactional Outbox + 멱등 처리 | Document의 업무 변경과 outbox를 같은 DB 트랜잭션에 저장하고 이후 Kafka에 발행한다. 중복 결과는 처리 기록·revision으로 제어한다. | 재전달 가능한 at-least-once 처리다. 전체 시스템의 exactly-once나 서비스 간 단일 ACID 트랜잭션을 뜻하지 않는다. |
 | 최종 일관성 | 문서 저장 후 AI 분석·Wiki 파생 데이터가 비동기로 따라온다. 사용자는 작업 상태를 통해 완료·실패를 구분한다. | 원문 저장과 AI 결과 완성이 같은 순간에 일어나지는 않는다. |
 | 상태 외부화와 역할별 확장 | 업무 상태는 DB, 파일·로그는 S3에 두고 Pod의 작업 디렉터리는 임시 공간으로 쓴다. API와 worker를 따로 늘리거나 재배치할 수 있다. | 프로세스 중단 뒤 복구는 영속 기록·재시도에 의존한다. Spot 중단 시 진행 중 메모리 작업이 그대로 보존되는 것은 아니다. |
@@ -241,9 +241,9 @@ AI 노드 그룹의 초기·최소값은 0이지만 worker의 최소 replica는 
 
 플랫폼 관리자는 Terraform state용 S3 bootstrap → VPC·EKS·RDS·Redis·S3·ECR·IAM 등 인프라 → ALB controller·External Secrets·Strimzi·KEDA·Cluster Autoscaler와 공통 Kubernetes 자원 순으로 준비한다. Terraform state는 S3의 버전 관리·암호화·잠금으로 관리한다.
 
-이미지 게시는 GitHub hosted runner에서 게시 전용 role(OIDC)로 ECR에 올린다. 앱 배포는 GitHub Actions의 전용 runner에서 실행하며, GitHub OIDC로 배포 role을 받아 장기 AWS access key 없이 게시된 ECR 이미지를 확인하고 EKS에 접근한다. 반면 실행 중인 Document·AI가 S3에 접근할 때는 각 Kubernetes ServiceAccount에 연결한 **IRSA** role을 사용한다. 두 경로는 서로 다른 신원과 권한이다. 비밀번호 등 앱 설정은 Secrets Manager → External Secrets → 서비스별 Kubernetes Secret으로 공급한다. [IRSA 공식 설명](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
+이미지 게시는 GitHub hosted runner에서 게시 전용 role(OIDC)로 ECR에 올린다. 앱 배포는 GitHub Actions의 전용 runner에서 실행하며, GitHub OIDC로 배포 role을 받아 장기 AWS access key 없이 게시된 ECR 이미지를 확인하고 EKS에 접근한다. 반면 실행 중인 Document·AI·converter가 S3에 접근할 때는 각 Kubernetes ServiceAccount에 연결한 **IRSA** role을 사용한다. 두 경로는 서로 다른 신원과 권한이다. 비밀번호 등 앱 설정은 Secrets Manager → External Secrets → 서비스별 Kubernetes Secret으로 공급한다. [IRSA 공식 설명](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
 
-workflow가 입력 검증·임시 manifest 렌더와 게시된 release ID 이미지 검증을 수행한다. 배포 스크립트는 실제 계정·클러스터를 대조하고, 새 release에 대해 서비스별 Secret 준비 → DB 소유권·접속 사전검증 → 세 migration Job 완료(`docs/releases/<ID>.json`의 `migration_mode`가 `expand-only`일 때) → Kafka/topic/KafkaUser 준비 → Service·Ingress와 ALB 연결 → converter 우선 rollout 후 나머지 Deployment rollout → KEDA 준비 → API HPA 적용 → 공개 경로 검사(화면 `/healthz`·`/` 200, `/v3/api-docs`·`/internal/` 404) → 검증 계정 로그인·문서 조회 smoke를 확인하고, workflow가 이어서 대용량 PDF 업로드·변환 smoke(`scripts/aws_pdf_smoke.py`)를 실행한다. 성공 시 manifest·설정·DB schema fingerprint를 release 기록으로 남긴다. 기존 성공 SHA 재배포·복구는 현재 schema와 설정 조건을 검사한 뒤 저장된 manifest를 사용하며 migration을 다시 실행하거나 자동으로 되돌리지 않는다. 현재 방식은 Deployment rollout이며 별도 blue/green·canary 전환은 구현하지 않았다.
+workflow가 입력 검증·임시 manifest 렌더와 게시된 release ID 이미지 검증을 수행한다. 배포 스크립트는 실제 계정·클러스터를 대조하고, 새 release에 대해 서비스별 Secret 준비 → DB 소유권·접속 사전검증 → 세 migration Job 완료(`docs/releases/<ID>.json`의 `migration_mode`가 `expand-only`일 때) → Kafka/topic/KafkaUser 준비 → Service·Ingress와 ALB 연결 → converter worker 우선 rollout 후 나머지 Deployment rollout → KEDA 준비 → API HPA 적용 → 공개 경로 검사(화면 `/healthz`·`/` 200, `/v3/api-docs`·`/internal/` 404) → 검증 계정 로그인·문서 조회 smoke를 확인하고, workflow가 이어서 대용량 PDF 업로드·변환 smoke(`scripts/aws_pdf_smoke.py`)를 실행한다. 성공 시 manifest·설정·DB schema fingerprint를 release 기록으로 남긴다. 기존 성공 SHA 재배포·복구는 현재 schema와 설정 조건을 검사한 뒤 저장된 manifest를 사용하며 migration을 다시 실행하거나 자동으로 되돌리지 않는다. 현재 방식은 Deployment rollout이며 별도 blue/green·canary 전환은 구현하지 않았다.
 
 정확한 명령·필수 입력·복구 조건은 [AWS 순차 배포 절차](script.md#aws-순차-배포와-동일-스키마-sha-복구), 관리자의 준비 작업은 [IaC·플랫폼 운영 절차](script.md#aws-iac플랫폼-운영-절차)를 따른다.
 
@@ -275,14 +275,14 @@ Backend는 각 행의 현재 값·후속 참조를 검증하고 원자적으로 
 ### AWS 자격증명과 migration 경계
 
 
-AWS의 Access·Document·AI·converter는 `fruition-access`, `fruition-document`, `fruition-pipeline`, `fruition-converter` Secret/ServiceAccount를 사용한다. AI 실행 역할들은 같은 AI 서비스 계정을 공유한다. ServiceAccount token 자동 마운트는 끈다. ExternalSecret은 Secrets Manager `fruition/app`에서 허용 키만 개별 투영하며 runtime에는 타 서비스 DB 또는 migration 자격증명을 넣지 않는다. Access에는 provider/S3 키를 넣지 않는다. converter는 `ai_runtime`이 아닌 원장 전용 계정 `ai_converter`의 `AI_DATABASE_URL`만 DB 자격증명으로 받는다. Document·AI의 S3는 서로 다른 IRSA role을 사용하고 Access·converter는 S3 권한이 없다.
+AWS의 Access·Document·AI·converter는 `fruition-access`, `fruition-document`, `fruition-pipeline`, `fruition-converter` Secret/ServiceAccount를 사용한다. AI 실행 역할들은 같은 AI 서비스 계정을 공유한다. ServiceAccount token 자동 마운트는 끈다. ExternalSecret은 Secrets Manager `fruition/app`에서 허용 키만 개별 투영하며 runtime에는 타 서비스 DB 또는 migration 자격증명을 넣지 않는다. Access에는 provider/S3 키를 넣지 않는다. converter는 `ai_runtime`이 아닌 사용량 원장·작업 journal 전용 계정 `ai_converter`의 `AI_DATABASE_URL`만 DB 자격증명으로 받는다. Document·AI·converter의 S3는 서로 다른 IRSA role을 사용한다. converter는 원본 `sources/documents/*` 읽기와 변환 결과 `tmp/convert/*` 쓰기만 갖고 삭제 권한은 없으며, Access는 S3 권한이 없다.
 
 DB bootstrap 이후 `access-migration`, `document-migration`, `ai-migration` Job을 실행하고 세 Job의 Complete를 확인한 후 runtime을 rollout한다. Java Job은 동일 bootJar의 `--migrate-only` 분기로 Spring 웹 서버를 시작하지 않고 자기 Flyway만 실행한다. AI Job은 `ai_schema.sql` 전체를 적용한다. production Java runtime은 Flyway를 끄고 Hibernate validate를 수행하며, AI runtime은 migration URL 없이 필수 Wiki·Agent·checkpoint 테이블을 검증한다.
 
 로컬 Compose/kind는 자기 서비스의 startup migration을 유지한다. kind도 Secret 전체 주입 대신 자기 서비스 키만 선택하며, MFA 키는 별도 `fruition-mfa` Secret으로 주입한다. 로컬 startup migration은 AWS runtime 무DDL 자격증명 계약의 개발 환경 예외다. 실제 AWS 순차 배포·Secret 동기화·회전 검증은 별도 배포 gate다.
 
 
-AWS 배포 스크립트는 임시 Kustomize 렌더 입력 검증 → 서비스별 Secret 준비 → 실제 DB 소유권·접속 사전검증 Job → 세 migration Job(`expand-only` 검토 시) → Kafka/topic/KafkaUser → Service·Ingress → converter 우선 후 전체 Deployment → KEDA → API HPA → 공개 경로 차단·화면 확인과 인증 업무 smoke 순서를 강제한다(7.4 참조). 성공 release는 manifest와 실제 public schema fingerprint를 기록하며, 자동 SHA 복구는 현재 schema가 이전 성공 기록과 동일할 때만 허용한다. DB 변경을 자동 되돌리지 않는다. GitHub feedback Environment 승인자/branch 제한은 외부 설정이며 OIDC trust는 동일 Environment subject를 사용한다. 실행 입력과 제한은 [배포 절차](script.md#aws-순차-배포와-동일-스키마-sha-복구)를 따른다.
+AWS 배포 스크립트는 임시 Kustomize 렌더 입력 검증 → 서비스별 Secret 준비 → 실제 DB 소유권·접속 사전검증 Job → 세 migration Job(`expand-only` 검토 시) → Kafka/topic/KafkaUser → Service·Ingress → converter worker 우선 후 전체 Deployment → KEDA → API HPA → 공개 경로 차단·화면 확인과 인증 업무 smoke 순서를 강제한다(7.4 참조). 성공 release는 manifest와 실제 public schema fingerprint를 기록하며, 자동 SHA 복구는 현재 schema가 이전 성공 기록과 동일할 때만 허용한다. DB 변경을 자동 되돌리지 않는다. GitHub feedback Environment 승인자/branch 제한은 외부 설정이며 OIDC trust는 동일 Environment subject를 사용한다. 실행 입력과 제한은 [배포 절차](script.md#aws-순차-배포와-동일-스키마-sha-복구)를 따른다.
 
 
 ### AI 실행 로그와 Pod 확장
@@ -296,13 +296,13 @@ base의 API·ingest scratch는 개별 `emptyDir`이며 Compose도 공유 runs vo
 
 ### AWS 저장소·통신 권한
 
-S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 `sources/documents/*`·`assets/*` 읽기/쓰기/삭제, 회의 녹음 `meetings/*` 읽기/쓰기/삭제, 대용량 직접 업로드용 `tmp/document-uploads/*` 읽기/쓰기(`tmp/`는 7일 lifecycle 삭제)와 `wiki/*` 읽기를 갖는다. AI API·worker는 `sources/documents/*` 읽기, `wiki/*`·`agent-runs/*` 읽기/쓰기/삭제, `pipeline-runs/*` 읽기/쓰기를 갖는다. Document의 취소는 자기 문서·asset 파일만 삭제하고 AI object 복구는 내부 API로 AI에 위임한다. 로그는 취소 복구 대상이 아니므로 AI role에도 로그 삭제 권한을 주지 않고, `pipeline-runs/`는 현재 object 30일 만료 후 이전 버전을 1일 뒤 제거해 약 31일 안에 정리한다. 버전 관리 버킷의 이전 버전·delete marker는 전체 prefix에 30일 만료 규칙을 걸어 정리한다(`tmp/`는 7일). AI command·event Kafka 토픽은 `retention.ms` 72시간이다. 근거: [adr/0023](adr/0023-retention-after-personal-data-purge.md). multipart 업로드의 중단·part 조회는 쓰기 prefix에만 허용한다.
+S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 `sources/documents/*`·`assets/*` 읽기/쓰기/삭제, 회의 녹음 `meetings/*` 읽기/쓰기/삭제, 대용량 직접 업로드용 `tmp/document-uploads/*` 읽기/쓰기(`tmp/`는 7일 lifecycle 삭제)와 `wiki/*`·변환 결과 `tmp/convert/*` 읽기를 갖는다. AI API·worker는 `sources/documents/*` 읽기, `wiki/*`·`agent-runs/*` 읽기/쓰기/삭제, `pipeline-runs/*` 읽기/쓰기를 갖는다. converter는 `sources/documents/*` 읽기와 `tmp/convert/*` 쓰기만 갖고 삭제 권한은 없다. `tmp/convert/`는 1일 lifecycle로 삭제하므로 취소로 남은 변환 결과도 여기서 정리된다. Document의 취소는 자기 문서·asset 파일만 삭제하고 AI object 복구는 내부 API로 AI에 위임한다. 로그는 취소 복구 대상이 아니므로 AI role에도 로그 삭제 권한을 주지 않고, `pipeline-runs/`는 현재 object 30일 만료 후 이전 버전을 1일 뒤 제거해 약 31일 안에 정리한다. 버전 관리 버킷의 이전 버전·delete marker는 전체 prefix에 30일 만료 규칙을 걸어 정리한다(`tmp/`는 7일, `tmp/convert/`는 1일). AI command·event Kafka 토픽은 `retention.ms` 72시간이다. 근거: [adr/0023](adr/0023-retention-after-personal-data-purge.md). multipart 업로드의 중단·part 조회는 쓰기 prefix에만 허용한다.
 
-Document·AI에 해당 앱 bucket의 ListBucket은 허용한다. 없는 객체 GET을 404로 구분해야 신규 object journal/로그 조회가 동작하기 때문이다. 따라서 bucket 내부 key 이름은 공유되는 metadata 예외이며 object 값·쓰기·삭제 권한과 구분한다. 다른 bucket 권한은 없다. [S3 GET의 403/404 계약](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
+Document·AI·converter에 해당 앱 bucket의 ListBucket은 허용한다. 없는 객체 GET을 404로 구분해야 신규 object journal/로그 조회가 동작하기 때문이며, converter도 같은 공통 정책으로 받는다. 따라서 bucket 내부 key 이름은 공유되는 metadata 예외이며 object 값·쓰기·삭제 권한과 구분한다. 다른 bucket 권한은 없다. [S3 GET의 403/404 계약](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
 
 Redis Access는 `auth:mfa:attempts:*`·`auth:email-availability:*` rate limit, `oauth:exchange:*` 일회용 교환 코드, `authz:role:*` 삭제만 허용한다. Document는 `authz:role:*` 적재/조회와 `query:*` 상태·이벤트, `query-events` pub/sub를 소유한다. AI는 `wiki:concept-index:*`만 읽기/쓰기/삭제한다. selectors로 Access의 projection SET을 거부하고 기본 사용자는 비활성화한다. Access의 workspace 단위 무효화에 쓰는 SCAN은 다른 서비스 key 이름까지 열람 가능한 metadata 예외다. 다른 key 값 조회·변경은 계속 거부한다. Concept write lock은 Redis가 아니라 ai_db advisory lock이다.
 
-AWS NetworkPolicy는 앱 Deployment와 migration/preflight Job에만 ingress/egress 기본 거부를 적용한다. Access↔Document, Document→Pipeline/Converter, AI→Access/Document/Converter, query·agent worker→embedding-server(8000)의 실제 target port만 허용한다. ALB public subnet에서 업무 포트와 8082 healthcheck를 허용하고 DNS는 kube-system CoreDNS UDP/TCP 53, DB/Redis는 VPC CIDR의 5432/6379로 제한한다. migration/preflight는 DNS·DB만 갖고 앱은 외부 HTTPS, Access는 동일 설정 SMTP port를 허용한다. private·link-local 목적지는 외부 HTTPS 허용에서 제외한다. Kafka broker는 이 앱 deny 대상에서 제외하므로 Strimzi 내부 통신과 KEDA lag 조회가 유지되며 앱→broker 9093(mTLS 인증·topic/group ACL listener)만 허용한다. VPC CNI `enableNetworkPolicy=true`를 IaC에서 켠다.
+AWS NetworkPolicy는 앱 Deployment와 migration/preflight Job에만 ingress/egress 기본 거부를 적용한다. Access↔Document, Document→Pipeline, AI→Access/Document, query·agent worker→embedding-server(8000)의 실제 target port만 허용한다. ALB public subnet에서 업무 포트와 8082 healthcheck를 허용하고 DNS는 kube-system CoreDNS UDP/TCP 53, DB/Redis는 VPC CIDR의 5432/6379로 제한한다. migration/preflight는 DNS·DB만 갖고 앱은 외부 HTTPS, Access는 동일 설정 SMTP port를 허용한다. private·link-local 목적지는 외부 HTTPS 허용에서 제외한다. Kafka broker는 이 앱 deny 대상에서 제외하므로 Strimzi 내부 통신과 KEDA lag 조회가 유지되며 앱(converter 포함)→broker 9093(mTLS 인증·topic/group ACL listener)만 허용한다. VPC CNI `enableNetworkPolicy=true`를 IaC에서 켠다.
 
 정책은 IP/port 계층이므로 같은 VPC RDS 간의 endpoint별·DB별 구분은 DB role이 최종 경계다. 외부 HTTPS의 provider FQDN·HTTP path까지 제한하지 않는다. L4 허용은 내부 token/JWT 인가를 대체하지 않으며 실제 CNI/ALB/IRSA 연결은 AWS 검증 gate다.
 

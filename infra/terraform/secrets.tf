@@ -52,7 +52,7 @@ resource "aws_secretsmanager_secret_version" "app" {
     # ai-svc runtime 저장소는 core RDS 인스턴스의 ai_db에 격리한다.
     AI_DATABASE_URL     = "postgresql://ai_runtime:${random_password.db_role["ai_runtime"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=require"
     AI_DB_MIGRATION_URL = "postgresql://ai_migration:${random_password.db_role["ai_migration"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=require"
-    # converter는 ai_model_usage 원장 기록 전용 계정만 받는다.
+    # converter는 사용량 원장(ai_model_usage)·작업 journal(ai_task_runs) 기록 전용 계정만 받는다.
     AI_CONVERTER_DATABASE_URL = "postgresql://ai_converter:${random_password.db_role["ai_converter"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=require"
     # --- 스토리지·인증 ---
     ACCESS_REDIS_PASSWORD   = random_password.redis["access"].result

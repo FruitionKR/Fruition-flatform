@@ -110,19 +110,25 @@ class PreflightDatabaseTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError) as failure:
             self.preflight("ai", expected_host="wrong-target.invalid")
         self.assertIn("AI database URI contract failed", failure.exception.stdout)
-        # converter는 원장 테이블 INSERT·열 단위 권한만 허용하고 그보다 넓은 권한은 거부한다.
+        # converter는 원장 INSERT·열 단위 권한과 작업 journal 권한(ai_task_runs SELECT·INSERT·UPDATE, 나머지 SELECT)만 허용하고
+        # 그보다 넓은 권한은 거부한다(ai ADR 0034).
+        allowed = ("GRANT INSERT, UPDATE (status, finished_at) ON public.ai_model_usage TO ai_converter; "
+                   "GRANT SELECT (id, status, finished_at) ON public.ai_model_usage TO ai_converter; "
+                   "GRANT SELECT, INSERT, UPDATE ON public.ai_task_runs TO ai_converter; "
+                   "GRANT SELECT ON public.ai_task_changes, public.ai_purged_scopes TO ai_converter")
         self.sql("SET ROLE ai_migration; CREATE TABLE public.ai_model_usage(id uuid PRIMARY KEY, user_id text, status text, finished_at timestamptz); "
-                 "GRANT INSERT, UPDATE (status, finished_at) ON public.ai_model_usage TO ai_converter; "
-                 "GRANT SELECT (id, status, finished_at) ON public.ai_model_usage TO ai_converter", "ai_db")
+                 "CREATE TABLE public.ai_task_runs(id text PRIMARY KEY); CREATE TABLE public.ai_task_changes(id text PRIMARY KEY); "
+                 "CREATE TABLE public.ai_purged_scopes(id text PRIMARY KEY); " + allowed, "ai_db")
         self.assertRegex(self.preflight("ai"), r"^[0-9a-f]{64}$")
-        for grant in ("UPDATE ON public.ai_model_usage", "DELETE ON public.ai_model_usage", "SELECT ON public.ai_model_usage"):
+        for grant in ("UPDATE ON public.ai_model_usage", "DELETE ON public.ai_model_usage", "SELECT ON public.ai_model_usage",
+                      "DELETE ON public.ai_task_runs", "INSERT ON public.ai_task_changes", "UPDATE ON public.ai_task_changes",
+                      "INSERT ON public.ai_purged_scopes"):
             with self.subTest(grant=grant):
                 self.sql(f"SET ROLE ai_migration; GRANT {grant} TO ai_converter", "ai_db")
                 with self.assertRaises(subprocess.CalledProcessError):
                     self.preflight("ai")
-                self.sql(f"SET ROLE ai_migration; REVOKE {grant} FROM ai_converter; "
-                         "GRANT INSERT, UPDATE (status, finished_at) ON public.ai_model_usage TO ai_converter; "
-                         "GRANT SELECT (id, status, finished_at) ON public.ai_model_usage TO ai_converter", "ai_db")
+                self.sql(f"SET ROLE ai_migration; REVOKE {grant} FROM ai_converter; " + allowed, "ai_db")
+        self.sql("SET ROLE ai_migration; DROP TABLE public.ai_task_runs, public.ai_task_changes, public.ai_purged_scopes", "ai_db")
         self.sql("SET ROLE ai_migration; DROP TABLE public.ai_model_usage", "ai_db")
         self.sql("ALTER DATABASE access_db OWNER TO postgres")
         with self.assertRaises(subprocess.CalledProcessError):

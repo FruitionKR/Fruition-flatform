@@ -1,4 +1,4 @@
-# ingest-worker를 Kafka consumer lag 기준으로 1~4 replica 스케일.
+# ingest-worker 등 worker를 Kafka consumer lag 기준으로 스케일.
 # 사전 조건: KEDA 설치 (README 참조).
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -71,4 +71,24 @@ spec:
         consumerGroup: maintenance-task-worker
         topic: ai.maintenance.command
         lagThreshold: "2"
+        offsetResetPolicy: earliest
+---
+# converter는 command 하나가 길고 CPU·메모리를 많이 쓰므로 pod당 1건(lagThreshold 1)으로 3개까지만 늘린다.
+# consumer group은 worker 기본값(`{topic}-worker`)이다.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: converter
+  namespace: fruition
+spec:
+  scaleTargetRef: {name: converter}
+  minReplicaCount: 1
+  maxReplicaCount: 3
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-kafka-bootstrap.fruition.svc:9092
+        consumerGroup: ai.convert.command-worker
+        topic: ai.convert.command
+        lagThreshold: "1"
         offsetResetPolicy: earliest

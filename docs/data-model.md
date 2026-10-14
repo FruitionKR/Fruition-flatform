@@ -50,7 +50,7 @@ erDiagram
 ## 4. 계정 격리 정책
 
 - DB 계정은 **runtime(DML) / migration(DDL) 분리**: `access_runtime/migration`, `core_runtime/migration`, `ai_runtime/migration` (`infra/postgres/init-db-isolation.sh`).
-- converter 전용 `ai_converter`: ai_db CONNECT·public USAGE만 init이 주고, AI 스키마 적용(`AI_DB_CONVERTER_ROLE`)이 `ai_model_usage`의 INSERT, `finish_call`이 SET하는 컬럼의 UPDATE(귀속 컬럼 `run_id`·`workspace_id`·`user_id` 제외), `id`·`status`·`finished_at` 컬럼 SELECT만 부여한다. DELETE·다른 테이블·기본 권한·다른 DB 접근은 없다. 원장 SQL의 컬럼이 바뀌면 AI 저장소의 부여 목록도 함께 바꾼다. 같은 테이블 다른 행의 사용량 값 변경까지 막으려면 RLS가 필요하다.
+- converter 전용 `ai_converter`: ai_db CONNECT·public USAGE만 init이 주고, AI 스키마 적용(`AI_DB_CONVERTER_ROLE`)이 `ai_model_usage`의 INSERT, `finish_call`이 SET하는 컬럼의 UPDATE(귀속 컬럼 `run_id`·`workspace_id`·`user_id` 제외), `id`·`status`·`finished_at` 컬럼 SELECT만 부여한다. PDF 변환 worker가 쓰는 작업 journal은 `ai_task_runs`의 SELECT·INSERT·UPDATE와 `ai_task_changes`·`ai_purged_scopes`의 SELECT를 더 받는다(AI ADR 0034). DELETE·그 밖의 테이블·기본 권한·다른 DB 접근은 없다. 원장 SQL의 컬럼이 바뀌면 AI 저장소의 부여 목록도 함께 바꾼다. 같은 테이블 다른 행의 사용량 값 변경까지 막으려면 RLS가 필요하다.
 - AWS runtime은 자기 runtime 자격증명만 받고 migration 자격증명은 별도 Job만 받는다. bootstrap 관리자 인증은 runtime/Job에 주입하지 않는다. 로컬 startup migration은 자기 서비스 migration 계정만 사용하는 개발 실행 예외다.
 - 타 서비스 DB write를 금지한다. `ai_runtime`에는 core DB DML 권한과 runtime 연결 설정을 부여하지 않는다.
 - 코드 경계도 컴파일러가 강제: access-svc와 document-svc는 서로의 repository를 import하지 않고 내부 API·Redis projection으로만 연결.
@@ -68,4 +68,4 @@ erDiagram
 AI 실행 진단 로그는 S3 `pipeline-runs/{run_id}/pipeline.log`에 저장한다. 상태·manifest의 소유권은 ai_db에 있으며, 진단 로그는 업무 object 취소 rollback 대상이 아니다. 실행 재시도는 같은 key에 새 시도 로그를 저장한다.
 
 
-AWS Redis는 서비스별 ACL 사용자로 분리한다. Access의 `auth:*`·`oauth:exchange:*`, Document의 `query:*`, AI의 `wiki:concept-index:*` 값 접근을 분리하고 `authz:role:*`는 Access 삭제/Document 적재·조회인 명시적 공유 projection이다. Access SCAN의 key 이름 열람 예외가 있다. S3 Document·AI prefix별 값 접근과 앱 bucket ListBucket metadata 예외는 [아키텍처](architecture.md#aws-저장소통신-권한)를 따른다.
+AWS Redis는 서비스별 ACL 사용자로 분리한다. Access의 `auth:*`·`oauth:exchange:*`, Document의 `query:*`, AI의 `wiki:concept-index:*` 값 접근을 분리하고 `authz:role:*`는 Access 삭제/Document 적재·조회인 명시적 공유 projection이다. Access SCAN의 key 이름 열람 예외가 있다. S3 Document·AI·converter prefix별 값 접근과 앱 bucket ListBucket metadata 예외는 [아키텍처](architecture.md#aws-저장소통신-권한)를 따른다.

@@ -22,7 +22,7 @@ data:
   AI_DB_NAME: "ai_db"
   AI_DB_RUNTIME_USER: "ai_runtime"
   AI_DB_MIGRATION_USER: "ai_migration"
-  # AI 스키마 적용 시 ai_model_usage 원장 권한을 받을 converter 전용 role
+  # AI 스키마 적용 시 사용량 원장(ai_model_usage)·작업 journal(ai_task_runs) 권한을 받을 converter 전용 role
   AI_DB_CONVERTER_ROLE: "ai_converter"
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
@@ -31,6 +31,7 @@ data:
   QUERY_COMMAND_TOPIC: "ai.query.command"
   AGENT_COMMAND_TOPIC: "ai.agent.command"
   MAINTENANCE_COMMAND_TOPIC: "ai.maintenance.command"
+  CONVERT_COMMAND_TOPIC: "ai.convert.command"
   AI_TASK_EVENT_TOPIC: "ai.task.event"
   DOCUMENT_EDIT_EVENT_TOPIC: "document.edit.event"
   S3_ENDPOINT: "http://minio:9000"
@@ -53,8 +54,6 @@ data:
   # AI 사용량 조회·호출 단위 청구. 없으면 localhost:8000 기본값으로 나가 사용량 조회·정산이 실패한다.
   MODEL_USAGE_ENDPOINT: "http://pipeline-api:8000/usage/models"
   MODEL_USAGE_CALLS_ENDPOINT: "http://pipeline-api:8000/internal/model-usage/calls"
-  # PDF → Markdown 변환기(converter Service, ClusterIP) — document-svc가 내부 호출
-  CONVERTER_ENDPOINT: "http://converter:8000"
   # 서비스 간 내부 호출 — document-svc -> access-svc(/internal/authz·users),
   # access-svc -> document-svc(/internal/workspaces/*/initial-note)
   ACCESS_INTERNAL_BASE_URL: "http://access-svc:8081"

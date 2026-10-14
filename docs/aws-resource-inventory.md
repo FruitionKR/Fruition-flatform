@@ -27,6 +27,7 @@ plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현�
 | ALB 이름표를 넣은 뒤 생긴 입구 경보 3개예요. | `aws_cloudwatch_metric_alarm.operations["alb_5xx"]`, `["alb_latency"]`, `["alb_requests"]` |
 | 절전 중 요청이 오면 컴퓨터를 다시 깨우는 장치예요(1분마다 확인). | `aws_dynamodb_table.request_wake[0]`, `aws_iam_role.request_wake[0]`, `aws_iam_role_policy.request_wake[0]`, `aws_cloudwatch_log_group.request_wake[0]`, `aws_lambda_function.request_wake[0]`, `aws_lambda_function_event_invoke_config.request_wake[0]`, `aws_lambda_permission.request_wake[0]`, `aws_cloudwatch_event_rule.request_wake[0]`, `aws_cloudwatch_event_target.request_wake[0]`, `aws_cloudwatch_metric_alarm.request_wake_errors[0]` |
 | 문지기에 화면 주소 API의 접근 코드 확인 규칙과 AWS 관리 규칙이 더해졌어요. 새 준비물이 아니라 185번 설정이 바뀌는 것이에요. | `aws_wafv2_web_acl.cost_guard` (`frontend-access-code`, AWS 관리 규칙 4종) |
+| 파일 변환 서비스만 쓰는 출입증과 허가 규칙이에요. 원본 읽기와 변환 결과 쓰기(`tmp/convert/`)만 되고, 결과는 1일 뒤 지워져요. | `module.storage_irsa["converter"].aws_iam_role.this[0]`, `module.storage_irsa["converter"].aws_iam_role_policy_attachment.this["storage"]`, `aws_iam_policy.storage["converter"]`, `aws_s3_bucket_lifecycle_configuration.storage`(`expire-tmp-convert`) |
 
 ## 어려운 이름은 이렇게 읽어요
 

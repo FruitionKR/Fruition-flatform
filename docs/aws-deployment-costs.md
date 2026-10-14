@@ -72,7 +72,8 @@ flowchart LR
 | access-svc / document-svc / pipeline-api | 각각 2~4개(CPU 70% 기준 HPA), 교체 중 임시 1개 추가 | 일반 컴퓨터 |
 | ingest-worker / query-task-worker / agent-task-worker | 각각 1~4개 | AI 컴퓨터 |
 | maintenance-task-worker | 1~2개 | AI 컴퓨터 |
-| converter / edit-event-consumer / pipeline-agent-worker / embedding-server | 각각 1개 고정 | AI 컴퓨터 |
+| converter | 1~3개(KEDA, 대기 command 1건당 1개) | AI 컴퓨터 |
+| edit-event-consumer / pipeline-agent-worker / embedding-server | 각각 1개 고정 | AI 컴퓨터 |
 | frontend | 2개 고정 | Fargate(컴퓨터 대신 Pod 단위로 빌림) |
 
 **KEDA**는 대기줄에 일이 쌓였는지 보고 일꾼을 늘립니다. **HPA**는 API 일꾼의 CPU 사용량을 보고 늘립니다. **Cluster Autoscaler**는 일꾼이 들어갈 자리가 부족할 때 컴퓨터를 늘립니다. 모두 설치하고 정상 동작을 확인해야 합니다.
