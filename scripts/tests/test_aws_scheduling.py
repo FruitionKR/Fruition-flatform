@@ -26,6 +26,11 @@ class SchedulingTest(unittest.TestCase):
                 name = resource["metadata"]["name"]
                 pod = resource["spec"]["template"]["spec"]
                 self.assertNotIn("podAffinity", pod.get("affinity", {}))
+                if name == "maintenance-task-worker":
+                    # 회의 녹음 전사: 500MiB 녹음 + chunk WAV를 담는 /tmp.
+                    tmp = next(v for v in pod["volumes"] if v["name"] == "tmp")
+                    self.assertEqual(tmp["emptyDir"]["sizeLimit"], "1536Mi")
+                    self.assertIn({"name": "tmp", "mountPath": "/tmp"}, pod["containers"][0]["volumeMounts"])
                 if name in ("pipeline-api", "ingest-worker"):
                     self.assertEqual(next(v for v in pod["volumes"] if v["name"] == "runs"), {"name": "runs", "emptyDir": {}})
                 if overlay == "overlays/aws" and name in WORKERS:
@@ -85,6 +90,14 @@ class SchedulingTest(unittest.TestCase):
             self.assertEqual("ai.convert.command", trigger["metadata"]["topic"])
             self.assertEqual("ai.convert.command-worker", trigger["metadata"]["consumerGroup"])
             self.assertEqual("1", trigger["metadata"]["lagThreshold"])
+
+    def test_maintenance_worker_waits_for_a_whole_meeting_transcription_on_sigterm(self):
+        # 회의 녹음 전사(ai ADR 0035)의 마감은 1500초다. 900초면 rollout·scale-down 때 SIGKILL로 끊겨 재전달된다.
+        for overlay in ("base", "overlays/aws"):
+            output = subprocess.check_output(["kubectl", "kustomize", str(ROOT / "k8s" / overlay)], text=True)
+            worker = next(r for r in yaml.safe_load_all(output)
+                          if r and r["kind"] == "Deployment" and r["metadata"]["name"] == "maintenance-task-worker")
+            self.assertGreaterEqual(worker["spec"]["template"]["spec"]["terminationGracePeriodSeconds"], 1500 + 300)
 
     def test_security_preserves_converter_and_enforces_namespace_before_addons(self):
         output = subprocess.check_output(["kubectl", "kustomize", str(ROOT / "k8s/overlays/aws")], text=True)

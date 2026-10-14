@@ -191,6 +191,9 @@ spec:
       labels:
         app: maintenance-task-worker
     spec:
+      # SIGTERM 뒤에도 진행 중인 작업을 끝내고 종료한다. 회의 녹음 전사 마감(MEETING_TRANSCRIPTION_DEADLINE_SECONDS 1500초)에
+      # 종료·정리 여유 300초를 더한 값(= worker max_poll_interval 1800초)이다. 짧으면 rollout·scale-down 때 전사가 끊겨 재전달된다.
+      terminationGracePeriodSeconds: 1800
       containers:
         - name: maintenance-task-worker
           image: fruition-mvp-dev-pipeline-api:latest
@@ -264,3 +267,11 @@ spec:
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits: {memory: 1Gi}
+          # 회의 녹음 전사: 녹음(최대 500MiB) 다운로드와 디코딩한 chunk WAV를 /tmp에 둔다.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1536Mi

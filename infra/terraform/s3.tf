@@ -72,7 +72,7 @@ resource "aws_s3_bucket_cors_configuration" "document_upload" {
   }
 }
 
-# 임시 파일 lifecycle (tmp/ prefix 7일, 변환 결과 tmp/convert/ 1일 후 삭제)
+# 임시 파일 lifecycle (tmp/ prefix 7일, 변환 결과 tmp/convert/ 1일, 회의 전사 checkpoint 1일 후 삭제)
 resource "aws_s3_bucket_lifecycle_configuration" "storage" {
   bucket = aws_s3_bucket.storage.id
 
@@ -84,6 +84,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
       days_after_initiation = 7
     }
   }
+  # 회의 녹음(meetings/)의 미완료 multipart도 위 버킷 전체 규칙이 7일 뒤 정리한다.
 
   rule {
     id     = "expire-tmp"
@@ -105,6 +106,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
     status = "Enabled"
     filter {
       prefix = "tmp/convert/"
+    }
+    expiration {
+      days = 1
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  # 회의 전사 chunk checkpoint는 전사문(개인정보)을 담는다. 정상 종료 시 ai가 지우고, 남은 것은 여기서 지운다.
+  rule {
+    id     = "expire-meeting-transcription-checkpoints"
+    status = "Enabled"
+    filter {
+      prefix = "pipeline-runs/meeting-transcription/"
     }
     expiration {
       days = 1
@@ -154,9 +170,10 @@ locals {
       delete = ["sources/documents/*", "assets/*", "meetings/*"]
     }
     pipeline = {
-      read   = ["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*"]
+      # meetings/*는 회의 녹음 전사용 읽기 전용, 전사 chunk checkpoint는 pipeline-runs/meeting-transcription/*에 쓰고 지운다.
+      read   = ["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*", "meetings/*"]
       write  = ["wiki/*", "agent-runs/*", "pipeline-runs/*"]
-      delete = ["wiki/*", "agent-runs/*"]
+      delete = ["wiki/*", "agent-runs/*", "pipeline-runs/meeting-transcription/*"]
     }
     # converter: 원본 PDF 범위 읽기와 변환 결과 쓰기만 한다. 삭제 권한은 없다.
     converter = {

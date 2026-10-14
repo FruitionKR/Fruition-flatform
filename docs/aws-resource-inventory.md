@@ -228,7 +228,7 @@ plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현�
 | 111 | document 서비스가 S3의 정해진 이름 범위에서 읽고 쓰고 지우게 해요. | `aws_iam_policy.storage["document"]` | document 서비스별 S3 prefix 읽기·쓰기·삭제 권한 |
 | 112 | pipeline 서비스가 S3의 정해진 이름 범위에서 읽고 쓰고 지우게 해요. | `aws_iam_policy.storage["pipeline"]` | pipeline 서비스별 S3 prefix 읽기·쓰기·삭제 권한 |
 | 113 | 문서와 AI 파일을 넣을 보관함이에요. | `aws_s3_bucket.storage` | 문서·AI 파일 저장용 버킷, 전용 KMS 키(SSE-KMS)로 암호화 |
-| 114 | 임시 파일과 끝내지 못한 업로드를 7일 기준으로 정리해요. 예전 파일은 남을 수 있어요. | `aws_s3_bucket_lifecycle_configuration.storage` | tmp/ 현재 버전 7일 만료·미완료 multipart 7일 정리 |
+| 114 | 임시 파일과 끝내지 못한 업로드를 7일 기준으로 정리해요. 예전 파일은 남을 수 있어요. | `aws_s3_bucket_lifecycle_configuration.storage` | tmp/ 현재 버전 7일 만료·미완료 multipart 7일 정리, 회의 전사 checkpoint(`pipeline-runs/meeting-transcription/`) 1일 만료(`expire-meeting-transcription-checkpoints`) |
 | 115 | 파일 보관함을 누구나 열지 못하게 해요. | `aws_s3_bucket_public_access_block.storage` | 앱 버킷 public access 모두 차단 |
 | 116 | 파일을 고쳐도 예전 모습을 남겨요. | `aws_s3_bucket_versioning.storage` | 파일 이전 버전 보존 활성화 |
 
