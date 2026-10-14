@@ -89,7 +89,10 @@ CONVERTER_ENV_FILE="$ENV_FILE" CONVERTER_E2E_SKIP_START=true \
   "$ROOT_DIR/scripts/converter-e2e.sh" "$PDF_FILE" "$CONVERTER_OUTPUT"
 
 log "공개 API로 ingest·query·agent·lint 작업을 실행합니다."
-python3 - "$OUTPUT_DIR" "$RUN_KEY" "$FIXTURE_DIR" <<'PY'
+# access 가입은 만 18세 확인과 현재 이용약관 버전 동의가 필요하다(Fruition-access#21·#23).
+TERMS_VERSION="${LEGAL_TERMS_VERSION:-$(grep -oE 'LEGAL_TERMS_VERSION:[0-9-]+' "$ROOT_DIR/../Access/src/main/resources/application.properties" | head -1 | cut -d: -f2)}"
+[[ -n "$TERMS_VERSION" ]] || fail "이용약관 버전을 찾을 수 없습니다. LEGAL_TERMS_VERSION을 지정하세요."
+python3 - "$OUTPUT_DIR" "$RUN_KEY" "$FIXTURE_DIR" "$TERMS_VERSION" <<'PY'
 import json
 import sys
 import time
@@ -101,6 +104,7 @@ from pathlib import Path
 output_dir = Path(sys.argv[1])
 run_key = sys.argv[2]
 fixture_dir = Path(sys.argv[3])
+terms_version = sys.argv[4]
 access_base = "http://localhost:8081"
 document_base = "http://localhost:8080"
 
@@ -164,6 +168,8 @@ request(
         "password": password,
         "display_name": "AI E2E",
         "verification_token": confirmed["verification_token"],
+        "age_confirmed": True,
+        "terms_version": terms_version,
     },
     expected=(201,),
 )
@@ -234,13 +240,17 @@ session = request(
     expected=(201,),
 )
 session_id = session["id"]
+# 종료 모델이 카탈로그에서 빠지면 하드코딩한 모델은 INVALID_AI_MODEL이 된다. 카탈로그의 첫 Gemini 모델을 쓴다.
+catalog = request("GET", f"{document_base}/api/ai-models", token=token)
+e2e_model = next(m["model"] for m in catalog["models"] if m["provider"] == "gemini")
+print(f"[ai-e2e] query·agent 모델: gemini/{e2e_model}", flush=True)
 query = request(
     "POST",
     f"{document_base}/api/workspaces/{workspace_id}/chat/sessions/{session_id}/query/runs",
     {
         "question": "스마트팜 관수 제어에서 센서 데이터는 어떻게 쓰이나요?",
         "provider": "gemini",
-        "model": "gemini-3.1-flash-lite",
+        "model": e2e_model,
         "allow_web_search": False,
     },
     token,
@@ -259,7 +269,7 @@ agent = request(
         "session_id": session_id,
         "message": "방금 답변을 한 문장으로 요약해줘.",
         "provider": "gemini",
-        "model": "gemini-3.1-flash-lite",
+        "model": e2e_model,
         "allow_web_search": False,
     },
     token,
@@ -321,8 +331,17 @@ result = {
 (output_dir / "ai-tasks.json").write_text(
     json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )
-if not promotions:
-    raise RuntimeError("lint 결과에 materialized 또는 merged promotion이 없습니다.")
+# 누적 언급이 많은 개념은 lint 승격을 기다리지 않고 편입 단계에서 바로 concept 페이지가 될 수 있다.
+# 그래서 lint 승격이 없으면 위키 그래프에 "과습 관리" concept 페이지가 있는지 대신 확인한다.
+graph = request("GET", f"{document_base}/api/workspaces/{workspace_id}/wiki/graph", token=token)
+(output_dir / "wiki-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+concept_present = "과습 관리" in json.dumps(
+    [node for node in graph.get("nodes", []) if node.get("page_type") == "concept"],
+    ensure_ascii=False,
+)
+(output_dir / "concept-present").write_text("1\n" if concept_present else "0\n", encoding="utf-8")
+if not promotions and not concept_present:
+    raise RuntimeError("lint 승격도 없고 위키 그래프에 과습 관리 concept도 없습니다.")
 print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
 PY
 
@@ -343,7 +362,15 @@ for artifact in result["lint_task_result"].get("operation_artifacts", []):
         print(artifact["markdown_key"])
 PY
 )
-grep -Fxq '# 과습 관리' "$PROMOTION_OUTPUT" || fail "과습 관리 promotion 문서를 찾지 못했습니다."
+# 어떤 개념이 승격되는지는 모델 출력에 따라 달라진다(같은 입력에서 "과습 관리"·"배액률" 등).
+# 그래서 특정 제목이 아니라 lint가 만든 concept 승격 문서를 저장소에서 실제로 읽었는지로 판단한다.
+if grep -Fxq 'type: concept' "$PROMOTION_OUTPUT"; then
+  log "lint 승격: $(grep -m1 '^# ' "$PROMOTION_OUTPUT" | sed 's/^# //') concept 문서를 저장소에서 확인했습니다."
+elif [[ "$(cat "$OUTPUT_DIR/concept-present")" == "1" ]]; then
+  log "lint 승격 없음: 과습 관리가 편입 단계에서 이미 concept 페이지로 만들어졌습니다(wiki-graph.json)."
+else
+  fail "lint 승격 문서도, 과습 관리 concept 페이지도 찾지 못했습니다."
+fi
 
 "${COMPOSE[@]}" ps --format json >"$OUTPUT_DIR/compose-ps.json"
 log "전체 AI E2E를 완료했습니다: $OUTPUT_DIR"
