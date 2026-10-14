@@ -129,6 +129,37 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
       noncurrent_days = 1
     }
   }
+
+  # 버전 관리 버킷에서 삭제해도 남는 이전 버전·delete marker를 정리한다(ADR 0023).
+  # 규칙이 겹치면 tmp/는 더 짧은 expire-tmp(7일)가 먼저 적용된다.
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+    filter {}
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+    expiration {
+      expired_object_delete_marker = true
+    }
+  }
+
+  # AI 실행 로그는 사용자별로 지우지 않고 기간 만료로 정리한다(AI role에 로그 삭제 권한 없음).
+  rule {
+    id     = "expire-pipeline-runs"
+    status = "Enabled"
+    filter {
+      prefix = "pipeline-runs/"
+    }
+    expiration {
+      days = 30
+    }
+    # 만료로 생긴 delete marker와 덮어쓴 이전 버전이 남지 않게 1일 뒤 제거한다.
+    # 겹치는 규칙은 더 짧은 기간(1일)이 먼저 적용되고, delete marker는 전체 규칙이 정리한다.
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
 }
 
 locals {

@@ -24,6 +24,8 @@
 | [ADR-0020](adr/0020-platform-and-document-ownership.md) | 플랫폼과 서비스 문서 관리 결정 |
 | [ADR-0021](adr/0021-aws-observability-and-operations.md) | CloudWatch 중심 관측과 운영 준비 결정 |
 | [ADR-0022](adr/0022-realtime-speech-transcription.md) | 음성 기능 서비스 책임과 실시간 전사 WebSocket 중계 결정 |
+| [ADR-0023](adr/0023-retention-after-personal-data-purge.md) | 개인정보 파기 후 S3 이전 버전·AI 로그·Kafka 보관 기간 |
+| [ADR-0024](adr/0024-converter-least-privilege-db-account.md) | converter 전용 최소 권한 DB 계정 |
 | [backlog/](backlog/README.md) | 과거 통합 설계·이슈·다이어그램, 완료된 계획·일회성 점검 기록 보관 |
 
 서비스별 문서: [frontend](https://github.com/FruitionKR/Fruition-frontend/blob/main/docs/README.md) · [Access](https://github.com/FruitionKR/Fruition-access/blob/main/docs/README.md) · [Document](https://github.com/FruitionKR/Fruition-document/blob/main/docs/README.md) · [AI](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/README.md)
