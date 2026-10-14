@@ -128,6 +128,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn('"s3:ListMultipartUploadParts"', source)
         self.assertIn('"s3:GetObjectVersion"', source)
         self.assertIn("wiki/*",scopes["document"]["read"])
+        self.assertIn("meetings/*",scopes["document"]["read"])
         self.assertIn("sources/documents/*",scopes["pipeline"]["read"])
         self.assertEqual(["wiki/*","agent-runs/*","pipeline-runs/meeting-transcription/*"],scopes["pipeline"]["delete"])
         # converter(ai ADR 0034)는 원본 읽기와 변환 결과 쓰기만 하고, document는 그 결과를 읽는다.
@@ -135,6 +136,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn("tmp/convert/*",scopes["document"]["read"])
         self.assertRegex(re.sub(r"\s+"," ",source),r'prefix = "tmp/convert/" } expiration \{ days = 1 \}')
         self.assertIn("pipeline-runs/*",scopes["pipeline"]["write"])
+        self.assertNotIn("pipeline-runs/*",scopes["pipeline"]["delete"])
         # 회의 녹음 직접 업로드(document)와 전사(ai): 녹음은 ai 읽기 전용, checkpoint prefix만 ai 삭제 가능.
         for action in ("read","write","delete"):
             self.assertIn("meetings/*",scopes["document"][action])
