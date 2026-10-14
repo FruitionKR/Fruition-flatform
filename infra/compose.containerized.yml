@@ -100,6 +100,8 @@ services:
       WIKI_SCHEMA_ENDPOINT: http://pipeline-api:8000/wiki-schema
       WIKI_PAGE_ENDPOINT: http://pipeline-api:8000/wiki/pages
       WIKI_STATE_ENDPOINT: http://pipeline-api:8000/wiki
+      MODEL_USAGE_ENDPOINT: http://pipeline-api:8000/usage/models
+      MODEL_USAGE_CALLS_ENDPOINT: http://pipeline-api:8000/internal/model-usage/calls
       # PDF → Markdown 변환기(compose.converter.yml의 markitdown) — 컨테이너 네트워크 경유
       CONVERTER_ENDPOINT: http://markitdown:8000
       AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-local-agent-internal}
