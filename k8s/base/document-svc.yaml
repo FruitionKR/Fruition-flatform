@@ -63,6 +63,11 @@ spec:
                 secretKeyRef:
                   name: fruition-secret
                   key: S3_SECRET_KEY
+            - name: KOREAEXIM_AUTH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fruition-secret
+                  key: KOREAEXIM_AUTH_KEY
             - name: MANAGEMENT_PORT
               value: "8082"
           envFrom:
