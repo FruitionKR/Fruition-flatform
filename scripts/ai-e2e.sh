@@ -332,8 +332,17 @@ result = {
 (output_dir / "ai-tasks.json").write_text(
     json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )
-if not promotions:
-    raise RuntimeError("lint 결과에 materialized 또는 merged promotion이 없습니다.")
+# 누적 언급이 많은 개념은 lint 승격을 기다리지 않고 편입 단계에서 바로 concept 페이지가 될 수 있다.
+# 그래서 lint 승격이 없으면 위키 그래프에 "과습 관리" concept 페이지가 있는지 대신 확인한다.
+graph = request("GET", f"{document_base}/api/workspaces/{workspace_id}/wiki/graph", token=token)
+(output_dir / "wiki-graph.json").write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+concept_present = "과습 관리" in json.dumps(
+    [node for node in graph.get("nodes", []) if node.get("page_type") == "concept"],
+    ensure_ascii=False,
+)
+(output_dir / "concept-present").write_text("1\n" if concept_present else "0\n", encoding="utf-8")
+if not promotions and not concept_present:
+    raise RuntimeError("lint 승격도 없고 위키 그래프에 과습 관리 concept도 없습니다.")
 print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
 PY
 
@@ -354,7 +363,15 @@ for artifact in result["lint_task_result"].get("operation_artifacts", []):
         print(artifact["markdown_key"])
 PY
 )
-grep -Fxq '# 과습 관리' "$PROMOTION_OUTPUT" || fail "과습 관리 promotion 문서를 찾지 못했습니다."
+# 어떤 개념이 승격되는지는 모델 출력에 따라 달라진다(같은 입력에서 "과습 관리"·"배액률" 등).
+# 그래서 특정 제목이 아니라 lint가 만든 concept 승격 문서를 저장소에서 실제로 읽었는지로 판단한다.
+if grep -Fxq 'type: concept' "$PROMOTION_OUTPUT"; then
+  log "lint 승격: $(grep -m1 '^# ' "$PROMOTION_OUTPUT" | sed 's/^# //') concept 문서를 저장소에서 확인했습니다."
+elif [[ "$(cat "$OUTPUT_DIR/concept-present")" == "1" ]]; then
+  log "lint 승격 없음: 과습 관리가 편입 단계에서 이미 concept 페이지로 만들어졌습니다(wiki-graph.json)."
+else
+  fail "lint 승격 문서도, 과습 관리 concept 페이지도 찾지 못했습니다."
+fi
 
 "${COMPOSE[@]}" ps --format json >"$OUTPUT_DIR/compose-ps.json"
 log "전체 AI E2E를 완료했습니다: $OUTPUT_DIR"
