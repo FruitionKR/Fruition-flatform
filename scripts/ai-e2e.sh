@@ -90,7 +90,10 @@ CONVERTER_ENV_FILE="$ENV_FILE" CONVERTER_E2E_SKIP_START=true \
   "$ROOT_DIR/scripts/converter-e2e.sh" "$PDF_FILE" "$CONVERTER_OUTPUT"
 
 log "공개 API로 ingest·query·agent·lint 작업을 실행합니다."
-python3 - "$OUTPUT_DIR" "$RUN_KEY" "$FIXTURE_DIR" <<'PY'
+# access 가입은 만 18세 확인과 현재 이용약관 버전 동의가 필요하다(Fruition-access#21·#23).
+TERMS_VERSION="${LEGAL_TERMS_VERSION:-$(grep -oE 'LEGAL_TERMS_VERSION:[0-9-]+' "$ROOT_DIR/../Access/src/main/resources/application.properties" | head -1 | cut -d: -f2)}"
+[[ -n "$TERMS_VERSION" ]] || fail "이용약관 버전을 찾을 수 없습니다. LEGAL_TERMS_VERSION을 지정하세요."
+python3 - "$OUTPUT_DIR" "$RUN_KEY" "$FIXTURE_DIR" "$TERMS_VERSION" <<'PY'
 import json
 import sys
 import time
@@ -102,6 +105,7 @@ from pathlib import Path
 output_dir = Path(sys.argv[1])
 run_key = sys.argv[2]
 fixture_dir = Path(sys.argv[3])
+terms_version = sys.argv[4]
 access_base = "http://localhost:8081"
 document_base = "http://localhost:8080"
 
@@ -165,6 +169,8 @@ request(
         "password": password,
         "display_name": "AI E2E",
         "verification_token": confirmed["verification_token"],
+        "age_confirmed": True,
+        "terms_version": terms_version,
     },
     expected=(201,),
 )
@@ -235,13 +241,17 @@ session = request(
     expected=(201,),
 )
 session_id = session["id"]
+# 종료 모델이 카탈로그에서 빠지면 하드코딩한 모델은 INVALID_AI_MODEL이 된다. 카탈로그의 첫 Gemini 모델을 쓴다.
+catalog = request("GET", f"{document_base}/api/ai-models", token=token)
+e2e_model = next(m["model"] for m in catalog["models"] if m["provider"] == "gemini")
+print(f"[ai-e2e] query·agent 모델: gemini/{e2e_model}", flush=True)
 query = request(
     "POST",
     f"{document_base}/api/workspaces/{workspace_id}/chat/sessions/{session_id}/query/runs",
     {
         "question": "스마트팜 관수 제어에서 센서 데이터는 어떻게 쓰이나요?",
         "provider": "gemini",
-        "model": "gemini-3.1-flash-lite",
+        "model": e2e_model,
         "allow_web_search": False,
     },
     token,
@@ -260,7 +270,7 @@ agent = request(
         "session_id": session_id,
         "message": "방금 답변을 한 문장으로 요약해줘.",
         "provider": "gemini",
-        "model": "gemini-3.1-flash-lite",
+        "model": e2e_model,
         "allow_web_search": False,
     },
     token,
