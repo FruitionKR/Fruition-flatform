@@ -81,6 +81,8 @@ resource "aws_secretsmanager_secret_version" "app" {
     TYPESAFE_API_KEY     = ""
     LANGSMITH_API_KEY    = ""
     TAVILY_API_KEY       = ""
+    # 한국수출입은행 환율 OpenAPI 인증키(document-svc). 비우면 환율 수집 작업이 꺼진다.
+    KOREAEXIM_AUTH_KEY = ""
     # 화면 접근 코드. 비우면 게이트가 꺼진다. 바꾸면 WAF 해시(cost-guards.tf)를 위해 apply한다.
     ACCESS_CODE = ""
   })
