@@ -187,6 +187,14 @@ spec:
                 name: access-svc
                 port:
                   number: 8081
+          # 프로필 사진 조회만 access다. /api/users/me/credits 등 나머지 /api/users 경로는 document이므로 /api/users/*로 넓히지 않는다
+          - path: /api/users/*/avatar
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
           # 7. 나머지 API(ai-models, query SSE, 회의 WebSocket)는 document
           - path: /api/*
             pathType: ImplementationSpecific
