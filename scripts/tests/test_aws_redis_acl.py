@@ -69,6 +69,25 @@ class RedisAclTest(unittest.TestCase):
         relay.unsubscribe(); relay.close()
 
 
+    def test_access_auth_limiters_and_oauth_flows(self):
+        # Fruition-access 실제 호출: Login/PasswordChangeAttemptLimiter(INCR·EXPIRE·GET Lua + DEL),
+        # OAuthExchangeCodeStore의 link/link-code/signup(SET EX + GETDEL).
+        access = self.clients["access"]
+        incr = "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n"
+        read = "return tonumber(redis.call('GET',KEYS[1]) or '0')"
+        for key in ("auth:login:ip:h", "auth:login:fail:e:h", "auth:password-change:fail:u:h"):
+            self.assertEqual(1, access.eval(incr, 1, key, 300))
+            self.assertEqual(1, access.eval(read, 1, key, 300))
+            self.assertEqual(1, access.delete(key))
+        for key in ("oauth:link:t", "oauth:link-code:c", "oauth:signup:t"):
+            access.set(key, "v", ex=600)
+            self.assertEqual("v", access.getdel(key))
+        # 추가한 selector도 최소 권한: 값 GET/SET 경로가 다른 prefix로 새지 않는다.
+        for command in (lambda: access.get("oauth:link:t"), lambda: access.set("auth:login:ip:h", "0"),
+                        lambda: access.get("auth:mfa:attempts:u"), lambda: access.delete("oauth:signup:t")):
+            with self.assertRaises(redis.ResponseError): command()
+
+
     def test_spring_health_info_without_administrative_permissions(self):
         # Spring Boot RedisReactiveHealthIndicator uses INFO after connecting.
         for service in ("access", "document"):

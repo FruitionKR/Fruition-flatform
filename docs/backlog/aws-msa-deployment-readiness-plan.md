@@ -36,7 +36,7 @@
 - 새로운 라이브러리 도입 전 설치된 MinIO Java/Python credential provider를 확인한다. 현재 두 SDK 모두 AWS 환경변수·IAM/web identity 공급자를 포함한다.
 - NetworkPolicy와 EKS VPC CNI의 `enableNetworkPolicy` 설정을 함께 검증한다. Kubernetes 표준 정책의 L4/IP 허용 범위와 FQDN 제한의 한계를 명시하고, 실제 차단 검증 없이 집행 완료로 기록하지 않는다.
 - 단계 3 DB 사전검증 Job은 `app.kubernetes.io/component=db-preflight`, Pod `app=<access|document|ai>-db-preflight`로 식별한다. 단계 5의 네트워크 허용 목록에는 이 Job과 migration Job의 DB 연결도 포함한다. rollback은 성공 release의 실제 schema fingerprint와 현재 값을 대조하고, 이미지 태그는 immutable로 관리한다.
-- 단계 5에서는 runtime·migration의 PostgreSQL TLS 설정과 Redis 사용자/TLS 설정도 함께 대조한다. DB 사전검증 Job의 `PGSSLMODE=require`만으로 runtime의 TLS 설정을 검증했다고 보지 않는다. Redis ACL은 Access의 `auth:*`·`oauth:exchange:*`, Document의 `query:*`, AI의 `wiki:concept-index:*`와 Access·Document 공유 `authz:role:*` 계약을 실제 호출 코드에 맞춰 확인한다.
+- 단계 5에서는 runtime·migration의 PostgreSQL TLS 설정과 Redis 사용자/TLS 설정도 함께 대조한다. DB 사전검증 Job의 `PGSSLMODE=require`만으로 runtime의 TLS 설정을 검증했다고 보지 않는다. Redis ACL은 Access의 `auth:*`·`oauth:*`(exchange·link·link-code·signup), Document의 `query:*`, AI의 `wiki:concept-index:*`와 Access·Document 공유 `authz:role:*` 계약을 실제 호출 코드에 맞춰 확인한다.
 
 설계 기준은 [AWS database-per-service](https://docs.aws.amazon.com/prescriptive-guidance/latest/modernization-data-persistence/database-per-service.html), [EKS workload identity](https://docs.aws.amazon.com/eks/latest/best-practices/identity-and-access-management.html), [Terraform S3 backend locking](https://developer.hashicorp.com/terraform/language/backend/s3), [EKS 버전 지원 일정](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html)을 참조한다. 실제 배포 시점의 지원 버전과 계정별 설정은 별도 확인한다.
 
