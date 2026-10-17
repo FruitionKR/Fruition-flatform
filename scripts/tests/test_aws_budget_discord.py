@@ -41,6 +41,23 @@ class BudgetDiscordTests(unittest.TestCase):
                 self.assertIn(state, payload["content"])
                 self.assertEqual({"parse": []}, payload["allowed_mentions"])
 
+    def test_operational_alarm_explains_state_and_description_in_korean(self):
+        topic = TOPIC.replace("budget", "operations")
+        reason = "Threshold Crossed: no datapoints were received for 1 period"
+        with patch.dict(os.environ, {"OPERATIONS_TOPIC_ARN": topic}):
+            content = notifier.discord_payload({"TopicArn": topic, "Message": json.dumps({
+                "AlarmName": "fruition-ops-ai_fx_refresh_failed", "OldStateValue": "INSUFFICIENT_DATA",
+                "NewStateValue": "OK", "AlarmDescription": "일일 환율 갱신이 실패했습니다.",
+                "NewStateReason": reason})})["content"]
+            self.assertIn("상태: 데이터 없음 → 정상", content)
+            self.assertIn("설명: 일일 환율 갱신이 실패했습니다.", content)
+            self.assertTrue(content.endswith(f"원문 사유: {reason}"))
+
+            content = notifier.discord_payload({"TopicArn": topic, "Message": json.dumps({
+                "AlarmName": "fruition-ops-node_cpu", "NewStateValue": "ALARM"})})["content"]
+            self.assertIn("상태: 경보", content)
+            self.assertNotIn("설명:", content)
+
     def test_malformed_operational_alarm_fails_before_secret_read(self):
         topic = TOPIC.replace("budget", "operations")
         for message in ("not-json", "[]", "{}", '{"AlarmName":"test","NewStateValue":"invalid"}'):
