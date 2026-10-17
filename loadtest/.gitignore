@@ -1,0 +1,5 @@
+# 시험 계정·접근 코드·결과는 커밋하지 않는다
+accounts.json
+.env
+results/
+*.summary.json
