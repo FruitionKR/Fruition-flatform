@@ -10,6 +10,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 WEBHOOK = re.compile(r"https://discord\.com/api(?:/v[0-9]+)?/webhooks/[0-9]+/[A-Za-z0-9_-]+")
+STATE_LABELS = {"ALARM": "경보", "OK": "정상", "INSUFFICIENT_DATA": "데이터 없음"}
 
 
 class DeliveryError(RuntimeError):
@@ -48,10 +49,16 @@ def discord_payload(sns):
             raise DeliveryError("invalid_cloudwatch_message")
         state = alarm["NewStateValue"]
         title = "복구" if state == "OK" else "경보"
+        # AWS writes NewStateReason in English only; lead with a Korean summary, keep the original last.
+        transition = STATE_LABELS[state]
+        if alarm.get("OldStateValue") in STATE_LABELS:
+            transition = f"{STATE_LABELS[alarm['OldStateValue']]} → {transition}"
+        description = f"설명: {alarm['AlarmDescription']}\n" if alarm.get("AlarmDescription") else ""
         content = (f"AWS 운영 {title} [{state}]\n{alarm['AlarmName']}\n"
+                   f"상태: {transition}\n{description}"
                    f"계정: {alarm.get('AWSAccountId', 'unknown')}\n"
                    f"시각: {alarm.get('StateChangeTime', 'unknown')}\n"
-                   f"사유: {alarm.get('NewStateReason', 'unknown')}")
+                   f"원문 사유: {alarm.get('NewStateReason', 'unknown')}")
     else:
         # Budget notifications contain text, not a guaranteed JSON schema.
         content = "AWS 예산 알림\n" + str(sns.get("Subject") or "Budget notification") + "\n\n" + message
