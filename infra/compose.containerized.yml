@@ -151,6 +151,8 @@ services:
       DOCUMENT_INTERNAL_BASE_URL: http://document-svc:8080
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       OAUTH_FRONTEND_REDIRECT_URI: ${OAUTH_FRONTEND_REDIRECT_URI:-http://localhost:3000/oauth/callback}
+      # 약관 확정 전이라 배포 환경과 같이 동의 단계를 끈다(.env.example 참고).
+      LEGAL_CONSENT_REQUIRED: ${LEGAL_CONSENT_REQUIRED:-false}
     ports:
       - "${ACCESS_PORT:-8081}:8081"
     healthcheck:

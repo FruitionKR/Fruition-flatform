@@ -66,6 +66,9 @@ data:
   CORS_ALLOWED_ORIGINS: "http://localhost:3000"
   OAUTH_FRONTEND_REDIRECT_URI: "http://localhost:3000/oauth/callback"
   AUTH_REFRESH_COOKIE_SECURE: "false"
+  # access-svc 약관 동의 단계(app.legal.consent-required). 약관 문안 확정 전이라 끈다 — 가입 때 동의를 요구·기록하지 않고
+  # consent_required는 항상 false다. 확정되면 LEGAL_TERMS_VERSION을 확정 버전으로 맞추고 "true"로 바꾼다(기존 회원은 재동의 대상).
+  LEGAL_CONSENT_REQUIRED: "false"
   # --- pipeline-api / ingest-worker ---
   LANGSMITH_TRACING: "false"
   LANGSMITH_PROJECT: "local-pilot-dev"
