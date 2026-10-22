@@ -24,5 +24,8 @@ data:
   S3_CREDENTIALS_MODE: "aws"
   AWS_REGION: "ap-northeast-2"
   REDIS_SSL: "true"
-  PGSSLMODE: "require"
+  PGSSLMODE: "verify-full"
+  PGSSLROOTCERT: "/etc/rds-ca/root.crt"
+  # JDBC does not consume the libpq environment variable itself.
+  SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_SSLROOTCERT: "/etc/rds-ca/root.crt"
   SPRING_MAIL_PORT: "REPLACE_ME_SMTP_PORT"

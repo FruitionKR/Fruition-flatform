@@ -47,16 +47,16 @@ variable "app_domain" {
   }
 }
 
-# The frontend pod reads ACCESS_CODE from the same secret. Reading it here keeps the WAF hash from
-# drifting from the pod; after changing ACCESS_CODE in Secrets Manager, run terraform apply again.
-data "aws_secretsmanager_secret_version" "app_current" {
-  secret_id  = aws_secretsmanager_secret.app.id
-  depends_on = [aws_secretsmanager_secret_version.app]
+# Never read the current app payload into Terraform: it contains the JWT private key.
+# Copy only ACCESS_CODE with scripts/aws_waf_access_code.py before planning WAF changes.
+data "aws_secretsmanager_secret_version" "waf_access_code_current" {
+  secret_id  = aws_secretsmanager_secret.waf_access_code.id
+  depends_on = [aws_secretsmanager_secret_version.waf_access_code]
 }
 
 locals {
   # Same as the frontend: trimmed code, cookie = lowercase hex SHA-256 (hashAccessCode).
-  waf_access_code = trimspace(try(jsondecode(data.aws_secretsmanager_secret_version.app_current.secret_string).ACCESS_CODE, ""))
+  waf_access_code = trimspace(try(jsondecode(data.aws_secretsmanager_secret_version.waf_access_code_current.secret_string).ACCESS_CODE, ""))
   # The frontend middleware no longer sees /api/* once the ALB routes it, so WAF enforces the same gate.
   # Whether a code is set is not secret; for_each cannot take a sensitive value.
   waf_access_code_enabled = var.app_domain != "" && nonsensitive(local.waf_access_code != "")
