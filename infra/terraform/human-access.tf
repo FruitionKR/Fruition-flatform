@@ -83,10 +83,29 @@ resource "aws_iam_user_policy" "human_mfa_only" {
         Resource = local.human_operator_arn
       },
       {
+        Sid      = "ChangeOwnConsolePassword"
+        Effect   = "Allow"
+        Action   = "iam:ChangePassword"
+        Resource = local.human_operator_arn
+      },
+      {
+        Sid         = "DenyOtherUserPasswordChange"
+        Effect      = "Deny"
+        Action      = "iam:ChangePassword"
+        NotResource = local.human_operator_arn
+      },
+      {
+        Sid      = "ReadPasswordRequirements"
+        Effect   = "Allow"
+        Action   = "iam:GetAccountPasswordPolicy"
+        Resource = "*"
+      },
+      {
         Sid    = "DenyDirectServiceAccess"
         Effect = "Deny"
         NotAction = ["sts:AssumeRole", "sts:GetSessionToken", "sts:GetCallerIdentity",
-        "iam:GetUser", "iam:ListMFADevices", "iam:ResyncMFADevice"]
+          "iam:GetUser", "iam:ListMFADevices", "iam:ResyncMFADevice",
+        "iam:ChangePassword", "iam:GetAccountPasswordPolicy"]
         Resource = "*"
       }
     ]
