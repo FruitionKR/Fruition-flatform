@@ -88,6 +88,21 @@ class RedisAclTest(unittest.TestCase):
             with self.assertRaises(redis.ResponseError): command()
 
 
+    def test_email_verification_request_buckets(self):
+        # EmailAvailabilityRateLimiter separates availability and verification request buckets.
+        access = self.clients["access"]
+        script = "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n"
+        for prefix in ("auth:email-availability:", "auth:email-verification-request:"):
+            for scope in ("ip:", "email:"):
+                key = prefix + scope + "audit-hash"
+                self.assertEqual(1, access.eval(script, 1, key, 60))
+                self.assertEqual(2, access.eval(script, 1, key, 60))
+                self.assertGreater(access.ttl(key), 0)
+                for command in (lambda: access.get(key), lambda: access.set(key, "0"), lambda: access.delete(key)):
+                    with self.assertRaises(redis.ResponseError): command()
+        with self.assertRaises(redis.ResponseError):
+            access.eval(script, 1, "auth:email-verification-other:ip:audit-hash", 60)
+
     def test_spring_health_info_without_administrative_permissions(self):
         # Spring Boot RedisReactiveHealthIndicator uses INFO after connecting.
         for service in ("access", "document"):
