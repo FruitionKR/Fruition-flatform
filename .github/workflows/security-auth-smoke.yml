@@ -1,0 +1,32 @@
+name: Security authentication smoke
+on:
+  workflow_dispatch:
+    inputs:
+      expected_algorithm:
+        description: Expected access token signing algorithm
+        type: choice
+        options: [RS256, HS512]
+        default: RS256
+permissions:
+  contents: read
+concurrency:
+  group: security-authentication-smoke
+  cancel-in-progress: false
+jobs:
+  smoke:
+    if: github.ref == 'refs/heads/main'
+    environment: feedback
+    runs-on: [self-hosted, linux, x64, fruition-feedback]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify authentication without changing application data
+        env:
+          DEPLOY_CONFIG: ${{ vars.AWS_DEPLOY_CONFIG_JSON }}
+          AWS_SMOKE_EMAIL: ${{ secrets.AWS_SMOKE_EMAIL }}
+          AWS_SMOKE_PASSWORD: ${{ secrets.AWS_SMOKE_PASSWORD }}
+          AWS_SMOKE_WORKSPACE_ID: ${{ vars.AWS_SMOKE_WORKSPACE_ID }}
+          EXPECTED_ALGORITHM: ${{ inputs.expected_algorithm }}
+        run: python3.12 scripts/aws_security_auth_smoke.py
