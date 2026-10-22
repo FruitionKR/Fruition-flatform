@@ -160,8 +160,9 @@ services:
       - minio-data:/data
 
   minio-init:
-    # mc 이미지가 사라져 AWS CLI(public ECR, digest 고정)로 버킷을 만든다. 새 버킷은 기본이 비공개라 anonymous 설정은 필요 없다.
-    image: public.ecr.aws/aws-cli/aws-cli@sha256:37458ae4e84ce11cdd92da543e72ece6d75ca73c35a0bcd3fe4571ccc882cf98
+    # Public ECR의 익명 다운로드 한도로 CI가 실패해 공식 Docker Hub AWS CLI 2.37.4 이미지를 digest로 고정한다.
+    # 새 버킷은 기본이 비공개라 anonymous 설정은 필요 없다.
+    image: amazon/aws-cli@sha256:fdd8d1fcbea9c371678dee5a40df8b178c7a781b4586605756ee28114c97ead6
     container_name: fruition-minio-init-dev
     depends_on:
       minio:
