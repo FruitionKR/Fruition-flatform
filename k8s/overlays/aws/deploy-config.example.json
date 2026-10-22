@@ -1,4 +1,5 @@
 {
+  "analytics_enabled": "false",
   "account_id": "REPLACE_ME_ACCOUNT_ID",
   "access_rds_endpoint": "REPLACE_ME_ACCESS_RDS_ENDPOINT",
   "core_rds_endpoint": "REPLACE_ME_CORE_RDS_ENDPOINT",

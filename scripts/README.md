@@ -34,3 +34,7 @@
 - `github-deployment-protection.py`: GitHub feedback 환경 승인·main 전용 보호 준비/적용
 
 상세 사용법은 [`docs/script.md`](../docs/script.md)를 참고한다.
+
+## 선택적 로컬 분석
+
+PostHog는 기본 off이며 `LOCAL_ANALYTICS_ENABLED`·`LOCAL_POSTHOG_PROJECT_TOKEN`·`LOCAL_POSTHOG_HOST`로만 로컬 검증을 켭니다. native 스크립트는 명령 환경의 LOCAL_* 값을, Compose는 명령 환경 또는 infra 설정의 LOCAL_* 값을 사용합니다. 운영 토큰을 복사하지 마세요. [mock 검증 및 배포 절차](../docs/posthog-operations.md)를 참고하세요.

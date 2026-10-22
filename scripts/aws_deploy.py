@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from aws_release_safety import validate_review, smoke_settings, authenticated_smoke
-from aws_image_release import validate_manifest
+from aws_image_release import validate_manifest, SERVICES
 
 import yaml
 
@@ -44,8 +44,10 @@ def kubectl(*args, input=None):
 
 
 def validate(config, sha):
-    if set(config) != KEYS:
+    if not KEYS <= set(config) or set(config) - KEYS - {"analytics_enabled"}:
         raise ValueError("배포 JSON에는 문서의 비밀 아닌 입력 키만 모두 필요합니다")
+    if config.get("analytics_enabled", "false") not in ("true", "false"):
+        raise ValueError("analytics_enabled는 true 또는 false 문자열이어야 합니다")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("image SHA는 게시된 릴리스의 소문자 40자리 ID여야 합니다")
     for key, value in config.items():
@@ -144,6 +146,18 @@ def render(config, sha, manifest):
         path.write_text(yaml.safe_dump(data, sort_keys=False))
         content = run(["kubectl", "kustomize", str(overlay)])
     documents = list(yaml.safe_load_all(content))
+    # Version is the effective source commit, never the multi-repository release ID.
+    for document in documents:
+        if document["kind"] != "Deployment":
+            continue
+        name = document["metadata"]["name"]
+        for container in document["spec"]["template"]["spec"]["containers"]:
+            env = {item["name"]: item for item in container.get("env", [])}
+            if "APP_VERSION" not in env:
+                continue
+            service = name if name in SERVICES else "pipeline"
+            env["APP_VERSION"]["value"] = manifest["sources"][SERVICES[service][0]]
+            env["ANALYTICS_ENABLED"]["value"] = config.get("analytics_enabled", "false")
     check_manifest(documents, sha, images)
     return documents
 
@@ -205,6 +219,12 @@ def preflight_job(service, config, *, require_empty=False):
     db = {"access": "access", "document": "core", "ai": "ai"}[service]
     runtime_secret = "fruition-" + ("pipeline" if service == "ai" else service)
     env = [{"name": "PGCONNECT_TIMEOUT", "value": "15"}, {"name": "PGSSLMODE", "value": "require"}]
+    analytics_check = ""
+    if service == "access" and config.get("analytics_enabled", "false") == "true":
+        env.append({"name": "POSTHOG_PROJECT_TOKEN", "valueFrom": {"secretKeyRef": {
+            "name": "fruition-analytics", "key": "POSTHOG_PROJECT_TOKEN", "optional": True}}})
+        analytics_check = ('case "${POSTHOG_PROJECT_TOKEN:-}" in phc_?*) ;; *) echo "analytics token missing or invalid" >&2; exit 1 ;; esac\n'
+                           'case "$POSTHOG_PROJECT_TOKEN" in *[!a-zA-Z0-9_-]*) echo "analytics token invalid" >&2; exit 1 ;; esac\n')
     for role in ("runtime", "migration"):
         key = ("AI_DATABASE_URL" if role == "runtime" else "AI_DB_MIGRATION_URL") if service == "ai" else f"{prefix}_DB_{role.upper()}_PASSWORD"
         env.append({"name": role.upper() + "_CREDENTIAL", "valueFrom": {"secretKeyRef": {
@@ -218,7 +238,7 @@ def preflight_job(service, config, *, require_empty=False):
     host = config["access_rds_endpoint" if service == "access" else "core_rds_endpoint"]
     # credential은 Secret에서만 주입한다. shell trace와 DB client 오류 출력은 비활성화한다.
     script = f"""set -eu
-export PGHOST={host} PGPORT=5432
+{analytics_check}export PGHOST={host} PGPORT=5432
 for role in {roles}; do
   export PGUSER={db}_"$role"
   export PGDATABASE={db}_db

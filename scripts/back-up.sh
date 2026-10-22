@@ -11,6 +11,7 @@ DOCUMENT_PID=""
 ACCESS_PID=""
 
 source "$ROOT_DIR/scripts/lib/runtime.sh"
+source "$ROOT_DIR/scripts/lib/analytics.sh"
 
 log() {
   printf '[back-up] %s\n' "$*"
@@ -151,6 +152,7 @@ main() {
   log "document-svc를 시작합니다. Java 21: $java21_home"
   (
     cd "$ROOT_DIR/../Document"
+    local_analytics_env "$PWD"
     SERVICE_ENV_FILE="$ENV_FILE" JAVA_HOME="$java21_home" ./gradlew bootRun -Porg.gradle.java.installations.paths="$java21_home"
   ) &
   DOCUMENT_PID="$!"
@@ -160,6 +162,7 @@ main() {
   log "access-svc를 시작합니다. Java 21: $java21_home"
   (
     cd "$ROOT_DIR/../Access"
+    local_analytics_env "$PWD"
     SERVICE_ENV_FILE="$ENV_FILE" JAVA_HOME="$java21_home" ./gradlew bootRun -Porg.gradle.java.installations.paths="$java21_home"
   ) &
   ACCESS_PID="$!"
