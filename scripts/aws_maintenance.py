@@ -53,11 +53,53 @@ def items(api, resource):
     return json.loads(api.kubectl("get", resource, "-o", "json"))["items"]
 
 
+CLUSTER_OPERATOR = "strimzi-cluster-operator"
+CLUSTER_OPERATOR_ENV_NAMES = set("""STRIMZI_NAMESPACE STRIMZI_FULL_RECONCILIATION_INTERVAL_MS
+STRIMZI_OPERATION_TIMEOUT_MS STRIMZI_DEFAULT_KAFKA_EXPORTER_IMAGE
+STRIMZI_DEFAULT_CRUISE_CONTROL_IMAGE STRIMZI_KAFKA_IMAGES STRIMZI_KAFKA_CONNECT_IMAGES
+STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES STRIMZI_DEFAULT_TOPIC_OPERATOR_IMAGE
+STRIMZI_DEFAULT_USER_OPERATOR_IMAGE STRIMZI_DEFAULT_KAFKA_INIT_IMAGE
+STRIMZI_DEFAULT_KAFKA_BRIDGE_IMAGE STRIMZI_DEFAULT_KANIKO_EXECUTOR_IMAGE
+STRIMZI_DEFAULT_BUILDAH_IMAGE STRIMZI_DEFAULT_MAVEN_BUILDER STRIMZI_OPERATOR_NAMESPACE
+STRIMZI_FEATURE_GATES STRIMZI_LEADER_ELECTION_ENABLED STRIMZI_LEADER_ELECTION_LEASE_NAME
+STRIMZI_LEADER_ELECTION_LEASE_NAMESPACE STRIMZI_LEADER_ELECTION_IDENTITY""".split())
+
+
+def cluster_operator_pod(metadata, spec):
+    """Recognize only the reviewed Strimzi runtime, never a label-only exemption."""
+    labels = metadata.get("labels", {})
+    containers = spec.get("containers", [])
+    return (labels.get("name") == CLUSTER_OPERATOR
+            and labels.get("strimzi.io/kind") == "cluster-operator"
+            and spec.get("serviceAccountName") == CLUSTER_OPERATOR
+            and not spec.get("initContainers") and not spec.get("ephemeralContainers")
+            and len(containers) == 1
+            and containers[0].get("name") == CLUSTER_OPERATOR
+            and containers[0].get("image") == "quay.io/strimzi/operator:1.1.0"
+            and containers[0].get("command", []) in ([], ["/opt/strimzi/bin/cluster_operator_run.sh"])
+            and not containers[0].get("args")
+            and not containers[0].get("envFrom")
+            and all(e.get("name") in CLUSTER_OPERATOR_ENV_NAMES for e in containers[0].get("env", [])))
+
+
+def cluster_operator_deployment(deployment):
+    metadata = deployment["metadata"]
+    labels = metadata.get("labels", {})
+    template = deployment.get("spec", {}).get("template", {})
+    return (metadata.get("name") == CLUSTER_OPERATOR
+            and all(labels.get(k) == v for k, v in {
+                "app": "strimzi", "app.kubernetes.io/managed-by": "Helm",
+                "chart": "strimzi-kafka-operator-1.1.0", "component": "deployment",
+                "heritage": "Helm", "release": "strimzi"}.items())
+            and cluster_operator_pod(template.get("metadata", {}), template.get("spec", {})))
+
+
 def assert_quiescent(api, documents):
     expected = {d["metadata"]["name"] for d in documents if d["kind"] == "Deployment"}
     deployments = items(api, "deployments")
-    # Strimzi's controller does not connect to application databases.
-    deployments = [d for d in deployments if not (
+    # Both reviewed Strimzi controllers are Kafka infrastructure, not app DB writers.
+    cluster_operator_present = any(cluster_operator_deployment(d) for d in deployments)
+    deployments = [d for d in deployments if not cluster_operator_deployment(d) and not (
         d["metadata"]["name"] == "kafka-entity-operator"
         and d["metadata"].get("labels", {}).get("strimzi.io/cluster") == "kafka"
         and d["metadata"].get("labels", {}).get("strimzi.io/kind") == "Kafka")]
@@ -87,6 +129,15 @@ def assert_quiescent(api, documents):
                 and labels.get("strimzi.io/name") == "kafka-entity-operator"
                 and any(o.get("kind") == "ReplicaSet" and o.get("name", "").startswith("kafka-entity-operator-")
                         for o in pod["metadata"].get("ownerReferences", []))):
+            continue
+        owners = pod["metadata"].get("ownerReferences", [])
+        if (cluster_operator_present
+                and re.fullmatch(CLUSTER_OPERATOR + r"-[a-z0-9]+-[a-z0-9]+", pod["metadata"].get("name", ""))
+                and cluster_operator_pod(pod["metadata"], pod.get("spec", {}))
+                and len(owners) == 1 and owners[0].get("kind") == "ReplicaSet"
+                and owners[0].get("controller") is True
+                and re.fullmatch(CLUSTER_OPERATOR + r"-[a-z0-9]+", owners[0].get("name", ""))
+                and pod["metadata"]["name"].startswith(owners[0]["name"] + "-")):
             continue
         raise ValueError("maintenance requires all application/Job Pods terminated")
     for job in items(api, "jobs"):

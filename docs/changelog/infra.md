@@ -2,6 +2,9 @@
 
 ## 2026-10-22
 
+- maintenance inventory가 실제 Strimzi cluster operator를 앱 writer로 오인하던 문제를 수정했다. 검증된 Helm labels·Pod labels·service account·단일 operator 이미지와 실행 설정, 대응 ReplicaSet 소유 Pod만 제외해 전체 14 Deployment 중 기존 entity operator와 함께 정확히 12개 앱을 검사한다.
+- 이름 변경·위장 labels·다른 이미지/계정·추가 컨테이너·잘못된 Pod owner·활성 앱을 거부하는 회귀를 추가했다. 기존 성공 audit·fingerprint·DB session·scaler·503 검사를 유지하며 AWS 계약 244개, Kustomize 3경로와 Terraform 두 root 검증을 통과했다. 운영 변경과 이미지 release recipe 변경은 수행하지 않았다.
+
 - 기존 설치의 비가산 pending migration을 위한 `maintenance-cutover`를 추가했다. 이전 성공 release 전체 해시·현재 이미지 digest·DB 전후 fingerprint와 실제 리허설/복원/중단 근거를 묶고, 기존 expand-only/none/initial-install 및 rollback 검사를 유지한다.
 - 503 Ingress, 기존 ALB binding 제거, 전체 앱 중지, scaler·CronJob·writer Pod/세션 부재를 확인한 뒤 실제 migration을 실행한다. 실패/중단 시 시작 기록을 보존해 후속 배포를 차단하며 정상 종료 후 scaler 복구는 운영자가 수행한다. 앱 deployer 권한은 CronJob 조회만 추가했다.
 - AWS 계약 240개(실제 로컬 PostgreSQL 세션 차단 포함), Terraform 두 root fmt/init(backend=false)/validate, Kustomize 3경로, shell 30개 문법과 변경 preflight 3종 ShellCheck를 통과했다. 전체 ShellCheck의 기존 경고와 release 문서 SHA 오탐 8개는 별도 확인했으며 새 비밀정보는 발견하지 않았다.
