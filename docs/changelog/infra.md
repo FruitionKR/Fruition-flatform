@@ -2,6 +2,10 @@
 
 ## 2026-10-22
 
+- 통합 `dev-up.sh`에서도 Document·Access·frontend 실행 직전에 `local_analytics_env`를 적용한다. 개별 실행 스크립트와 동일하게 기본 수집 off·운영 설정 격리·명시적 LOCAL_* 설정·서비스별 Git SHA를 보장하며 기존 `SERVICE_ENV_FILE` 전달 순서는 유지한다.
+- 실제 launch 함수를 임시 Git 저장소와 가짜 실행 파일로 검증하는 회귀 테스트 5개를 추가했다. 기존 184개를 포함한 AWS 계약 테스트 189개, Bash 문법, Kustomize 3개 경로 렌더링을 통과했다. 신규 테스트는 수정 전 코드에서 모두 실패하며 실제 서비스·AWS·analytics 호출은 수행하지 않는다.
+- ShellCheck는 기존 `docker rm $container_ids`의 SC2086 외 추가 경고가 없음을 확인했다.
+
 - PostHog 알파의 frontend·Access·Document·AI 런타임 환경을 추가했다. 기본 수집 off, 빈 토큰, production 환경과 서비스별 source SHA를 사용하며 토큰은 전용 ExternalSecret의 단일 키로만 주입한다.
 - 수집 활성화 시 토큰 누락·잘못된 형식을 배포 preflight에서 차단하고, local native/Compose 실행은 별도 LOCAL_* 설정으로 운영 토큰 상속을 막는다. 기존 expand-only migration·fingerprint gate와 다른 Secret 키는 유지한다.
 - AWS 계약 테스트, Terraform/Kustomize 및 shell 검증을 수행했다. [운영 절차](../posthog-operations.md)에 안전한 Secret 병합·승인 배포·중지·mock 검증을 정리했다. 실제 토큰 저장·analytics 송신·운영 배포는 실행하지 않았다.

@@ -1,5 +1,9 @@
 """Offline analytics deployment contracts; no analytics or AWS requests."""
+import json
 import os
+import shutil
+import sys
+import tempfile
 import subprocess
 import unittest
 from pathlib import Path
@@ -51,6 +55,118 @@ class LocalAnalyticsTests(unittest.TestCase):
                 self.assertEqual(env["POSTHOG_PROJECT_TOKEN"], "${LOCAL_POSTHOG_PROJECT_TOKEN:-}", name)
                 self.assertEqual(env["ANALYTICS_ENVIRONMENT"], "local", name)
 
+
+
+class CombinedLauncherAnalyticsTests(unittest.TestCase):
+    """Execute the real launch functions with offline service executables."""
+
+    def run_launchers(self, **overrides):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            platform = root / "platform"
+            (platform / "scripts/lib").mkdir(parents=True)
+            (platform / "logs").mkdir()
+            for name in ("runtime.sh", "analytics.sh"):
+                shutil.copy(ROOT / "scripts/lib" / name, platform / "scripts/lib" / name)
+            # Keep the real functions/source order, excluding infrastructure startup.
+            script = (ROOT / "scripts/dev-up.sh").read_text()
+            self.assertTrue(script.endswith('main "$@"\n'))
+            script = script.removesuffix('main "$@"\n') + r'''
+wait_for_url() { wait "$4"; }
+start_backend /fixture/java21
+start_frontend
+'''
+            launcher = platform / "scripts/dev-up.sh"
+            launcher.write_text(script)
+            env = {"PATH": os.environ["PATH"], "HOME": str(root),
+                   "ANALYTICS_ENABLED": "true", "ANALYTICS_ENVIRONMENT": "production",
+                   "POSTHOG_PROJECT_TOKEN": "production-fixture-must-not-propagate",
+                   "POSTHOG_HOST": "https://production.invalid", "APP_VERSION": "wrong-source"}
+            env.update(overrides)
+            versions = {}
+            # Each source has a different real Git HEAD; no service checkout is touched.
+            for name, relative in (("document", "Document"), ("access", "Access"),
+                                   ("frontend", "frontend/web")):
+                source = root / relative
+                source.mkdir(parents=True)
+                for args in (("init", "-q"),
+                             ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                              "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                              "commit", "-q", "--allow-empty", "-m", name)):
+                    subprocess.run(["git", "-C", str(source), *args], env=env,
+                                   check=True, capture_output=True)
+                versions[name] = subprocess.check_output(
+                    ["git", "-C", str(source), "rev-parse", "HEAD"], env=env, text=True).strip()
+                executable = source / ("npm" if name == "frontend" else "gradlew")
+                executable.write_text(f"#!{sys.executable}\n" +
+                    "import json, os, pathlib, sys\n" +
+                    "keys = ('ANALYTICS_ENABLED', 'ANALYTICS_ENVIRONMENT', "
+                    "'POSTHOG_PROJECT_TOKEN', 'POSTHOG_HOST', 'APP_VERSION', "
+                    "'SERVICE_ENV_FILE', 'JAVA_HOME', 'SPRING_PROFILES_ACTIVE')\n" +
+                    f"pathlib.Path({str(root / (name + '.json'))!r}).write_text(" +
+                    "json.dumps({'env': {key: os.environ.get(key) for key in keys}, "
+                    "'args': sys.argv[1:]}))\n")
+                executable.chmod(0o755)
+                if name == "frontend":
+                    (source / "node_modules").mkdir()
+                    (source / "node").write_text("#!/bin/sh\nexit 0\n")
+                    (source / "node").chmod(0o755)
+                    env["PATH"] = str(source) + os.pathsep + env["PATH"]
+            # A shell-loaded dotenv would replace the explicit local gate. It must
+            # remain delegated through SERVICE_ENV_FILE, never sourced by dev-up.
+            (platform / "infra").mkdir()
+            (platform / "infra/.env").write_text(
+                "LOCAL_ANALYTICS_ENABLED=true\nLOCAL_POSTHOG_PROJECT_TOKEN=dotenv-fixture\n"
+                "ANALYTICS_ENABLED=true\nANALYTICS_ENVIRONMENT=production\n")
+            result = subprocess.run(["bash", str(launcher)], env=env,
+                                    capture_output=True, text=True, timeout=15)
+            records = {name: json.loads((root / (name + ".json")).read_text())
+                       for name in versions if (root / (name + ".json")).exists()}
+            return result, records, versions, str(platform / "infra/.env")
+
+    def assert_launches(self, overrides, enabled, token, host):
+        result, records, versions, env_file = self.run_launchers(**overrides)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(set(records), {"document", "access", "frontend"})
+        self.assertEqual(len(set(versions.values())), 3)
+        for name, record in records.items():
+            env = record["env"]
+            self.assertEqual(env["ANALYTICS_ENABLED"], enabled, name)
+            self.assertEqual(env["ANALYTICS_ENVIRONMENT"], "local", name)
+            self.assertEqual(env["POSTHOG_PROJECT_TOKEN"], token, name)
+            self.assertEqual(env["POSTHOG_HOST"], host, name)
+            self.assertEqual(env["APP_VERSION"], versions[name], name)
+            if name != "frontend":
+                self.assertEqual(env["SERVICE_ENV_FILE"], env_file)
+                self.assertEqual(env["JAVA_HOME"], "/fixture/java21")
+                self.assertEqual(env["SPRING_PROFILES_ACTIVE"], "local")
+                self.assertEqual(record["args"][0], "bootRun")
+            else:
+                self.assertEqual(record["args"], ["run", "dev"])
+
+    def test_combined_launcher_defaults_off_and_isolates_production(self):
+        self.assert_launches({}, "false", "", "http://127.0.0.1:18080")
+
+    def test_combined_launcher_explicit_local_opt_in(self):
+        self.assert_launches({"LOCAL_ANALYTICS_ENABLED": "true",
+                              "LOCAL_POSTHOG_PROJECT_TOKEN": "mock-only",
+                              "LOCAL_POSTHOG_HOST": "http://127.0.0.1:19090"},
+                             "true", "mock-only", "http://127.0.0.1:19090")
+
+    def test_combined_launcher_explicit_off_survives_dotenv(self):
+        self.assert_launches({"LOCAL_ANALYTICS_ENABLED": "false"},
+                             "false", "", "http://127.0.0.1:18080")
+
+    def test_combined_launcher_blank_local_token_stays_blank(self):
+        self.assert_launches({"LOCAL_ANALYTICS_ENABLED": "true",
+                              "LOCAL_POSTHOG_PROJECT_TOKEN": ""},
+                             "true", "", "http://127.0.0.1:18080")
+
+    def test_combined_launcher_invalid_gate_prevents_service_execution(self):
+        result, records, _, _ = self.run_launchers(LOCAL_ANALYTICS_ENABLED="yes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(records, {})
+        self.assertIn("LOCAL_ANALYTICS_ENABLED must be true or false", result.stderr)
 
 
 class DeploymentAnalyticsTests(unittest.TestCase):
