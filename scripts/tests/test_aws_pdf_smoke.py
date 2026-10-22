@@ -13,6 +13,13 @@ import aws_pdf_smoke as smoke
 
 
 class PdfSmokeTests(unittest.TestCase):
+    def test_pdf_preview_requires_explicit_storage_frame_origin(self):
+        url = 'https://bucket.s3.ap-northeast-2.amazonaws.com/object?signature=secret'
+        smoke.require_pdf_frame_origin("frame-src 'self' blob: https://bucket.s3.ap-northeast-2.amazonaws.com; object-src 'none'", url)
+        for policy in ("", "frame-src 'self' blob:", "frame-src *", "connect-src https://bucket.s3.ap-northeast-2.amazonaws.com", "frame-src 'none'; frame-src https://bucket.s3.ap-northeast-2.amazonaws.com"):
+            with self.subTest(policy=policy), self.assertRaisesRegex(ValueError, 'frame-src'):
+                smoke.require_pdf_frame_origin(policy, url)
+
     def test_api_failure_preserves_status_without_sensitive_http_details(self):
         probe = smoke.Probe({'domain': 'example.test'}, {'AWS_SMOKE_WORKSPACE_ID': 'ws_test'})
         probe.opener = Mock()
@@ -81,9 +88,9 @@ class PdfSmokeTests(unittest.TestCase):
 
     PARENT = 'doc_' + 'b' * 32
 
-    def _run_conversion(self, documents):
+    def _run_conversion(self, documents, after_ingest=None):
         bucket = 'example-storage'
-        probe = smoke.Probe({'domain': 'example.test', 's3_bucket': bucket}, {'AWS_SMOKE_WORKSPACE_ID': 'ws_' + '0' * 32})
+        probe = smoke.Probe({'domain': 'example.test', 's3_bucket': bucket, 'app_domain': 'web.example.test'}, {'AWS_SMOKE_WORKSPACE_ID': 'ws_' + '0' * 32})
         probe.login = lambda: None
         signed = f'https://{bucket}.s3.ap-northeast-2.amazonaws.com/object?signature=secret'
         responses = {'/uploads': {'ticket': 't', 'part_count': 2, 'part_size': 1024},
@@ -92,12 +99,19 @@ class PdfSmokeTests(unittest.TestCase):
                      '/original-url': {'url': signed},
                      '/convert-markdown': {'id': self.PARENT},
                      '': {'documents': documents}}
+        probe.ingest_calls = []
         def api(method, url, payload=None, **kwargs):
             path = url[len(probe.base):]
+            if path.endswith('/ingest'):
+                probe.ingest_calls.append((method, path, kwargs))
+                if after_ingest is not None:
+                    responses[''] = {'documents': after_ingest}
+                return {'status': 'processing'}
             return next(body for suffix, body in responses.items() if path.endswith(suffix))
         probe.api = api
         def storage(req, timeout):
-            response = Mock(status=200 if req.get_method() == 'PUT' else 206)
+            response = Mock(status=200 if isinstance(req, str) or req.get_method() == 'PUT' else 206)
+            response.headers = {'Content-Security-Policy': f"frame-src 'self' blob: https://{bucket}.s3.ap-northeast-2.amazonaws.com"}
             response.read.return_value = b'%PDF-'
             context = Mock()
             context.__enter__ = Mock(return_value=response)
@@ -120,6 +134,18 @@ class PdfSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'split documents'):
             self._run_conversion([{'id': self.PARENT, 'status': 'completed', 'pipeline_run_id': 'run_1'},
                                   {'id': part, 'source_document_id': self.PARENT}])
+
+    def test_conversion_explicitly_ingests_only_created_parent_when_auto_ingest_is_off(self):
+        with patch.object(smoke.time, 'sleep'):
+            probe, report = self._run_conversion(
+                [{'id': self.PARENT, 'status': 'completed', 'pipeline_run_id': 'convert:q1'}],
+                after_ingest=[{'id': self.PARENT, 'status': 'completed', 'pipeline_run_id': 'run_1'}])
+        self.assertEqual(probe.ingest_calls, [('POST', '/' + self.PARENT + '/ingest', {'expected': (202,)})])
+        self.assertEqual(report['ai_processing'], 'completed')
+
+    def test_already_ingested_document_is_not_requested_again(self):
+        probe, _ = self._run_conversion([{'id': self.PARENT, 'status': 'completed', 'pipeline_run_id': 'run_1'}])
+        self.assertEqual(probe.ingest_calls, [])
 
     def test_conversion_waits_until_ai_replaces_convert_run(self):
         with self.assertRaisesRegex(ValueError, 'timed out'), patch.object(smoke.time, 'sleep'):
