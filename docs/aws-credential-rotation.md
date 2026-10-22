@@ -77,6 +77,16 @@ rtk proxy python3 scripts/aws_jwt_keys.py retire-previous --consumers-verified
 
 ## 내부 토큰과 외부 API 키
 
+WAF 접근 코드는 앱 Secret의 `ACCESS_CODE`를 프런트엔드가 읽지만 Terraform은 전용 Secret `${project}/waf-access-code`만 읽는다.
+앱 Secret의 현재 버전에는 JWT 개인키가 있으므로 Terraform datasource가 전체 값을 읽지 않도록 분리했다.
+최초에는 `aws_secretsmanager_secret.waf_access_code`와 해당 version 리소스를 대상으로 생성한 뒤 아래 명령으로 접근 코드만 복사한다.
+접근 코드를 변경할 때도 복사 후 WAF 계획을 검토·적용하고 프런트엔드 Secret 동기화와 Pod 교체까지 함께 수행한다.
+복사 도구는 프런트엔드 값 자체를 바꾸지 않는다. 빈 접근 코드는 기존 WAF 사전 조건에 따라 배포를 중단한다.
+
+```sh
+rtk proxy python3 scripts/aws_waf_access_code.py
+```
+
 `INTERNAL_CALLBACK_TOKEN`, `AGENT_INTERNAL_TOKEN`은 발신·수신 서비스 전체와 queue 재시도를 조사한다.
 수신자의 구·신 토큰 동시 검증이 구현되어 있지 않으면 점검시간에 전체 소비자를 전환한다.
 새 토큰 정상 요청 성공과 이전 토큰 거부를 검증한 뒤 폐기를 기록한다. 단순 Secret 변경 후 성공으로 간주하지 않는다.
