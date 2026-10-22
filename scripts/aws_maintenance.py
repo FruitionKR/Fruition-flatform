@@ -76,8 +76,12 @@ def cluster_operator_pod(metadata, spec):
             and len(containers) == 1
             and containers[0].get("name") == CLUSTER_OPERATOR
             and containers[0].get("image") == "quay.io/strimzi/operator:1.1.0"
-            and containers[0].get("command", []) in ([], ["/opt/strimzi/bin/cluster_operator_run.sh"])
-            and not containers[0].get("args")
+            # Helm supplies the launcher as args to the image entrypoint.
+            # Keep the reviewed default/explicit-command forms; never mix them.
+            and (containers[0].get("command", []), containers[0].get("args", [])) in (
+                ([], []),
+                (["/opt/strimzi/bin/cluster_operator_run.sh"], []),
+                ([], ["/opt/strimzi/bin/cluster_operator_run.sh"]))
             and not containers[0].get("envFrom")
             and all(e.get("name") in CLUSTER_OPERATOR_ENV_NAMES for e in containers[0].get("env", [])))
 
