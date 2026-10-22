@@ -51,8 +51,13 @@ def render(path: str) -> list[dict]:
 class CredentialsTest(unittest.TestCase):
     def test_aws_runtime_allowlists_and_migration_jobs(self) -> None:
         manifests = render("k8s/overlays/aws")
-        secrets = {m["spec"]["target"]["name"]: {d["secretKey"] for d in m["spec"]["data"]}
+        secrets = {m["spec"]["target"]["name"]: {d["secretKey"] for d in m["spec"].get("data", [])}
                    for m in manifests if m["kind"] == "ExternalSecret"}
+        analytics = next(m for m in manifests if m["kind"] == "ExternalSecret" and m["metadata"]["name"] == "fruition-analytics")
+        template = analytics["spec"]["target"]["template"]
+        self.assertEqual(template["mergePolicy"], "Replace")
+        self.assertEqual(set(template["data"]), {"POSTHOG_PROJECT_TOKEN"})
+        secrets["fruition-analytics"] = set(template["data"])
         access = next(m for m in manifests if m["kind"] == "ExternalSecret" and m["spec"]["target"]["name"] == "fruition-access")
         mappings = {item["secretKey"]: item["remoteRef"] for item in access["spec"]["data"]}
         for provider in ("GOOGLE", "NAVER", "KAKAO"):
@@ -80,6 +85,11 @@ class CredentialsTest(unittest.TestCase):
                 for env in container.get("env", []):
                     if "secretKeyRef" in env.get("valueFrom", {}):
                         ref = env["valueFrom"]["secretKeyRef"]
+                        if ref["name"] == "fruition-analytics":
+                            self.assertNotIn(name, {"converter", "embedding-server"})
+                            self.assertEqual(ref["key"], "POSTHOG_PROJECT_TOKEN")
+                            self.assertTrue(ref["optional"])
+                            continue
                         if name == "document-svc" and ref["name"] in {"kafka-document", "kafka-cluster-ca-cert"}:
                             self.assertEqual(ref["key"], "user.password" if ref["name"] == "kafka-document" else "ca.password")
                             continue

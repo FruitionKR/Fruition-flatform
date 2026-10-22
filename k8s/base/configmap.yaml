@@ -7,6 +7,11 @@ metadata:
   name: fruition-config
   namespace: fruition
 data:
+  ANALYTICS_ENABLED: "false"
+  ANALYTICS_ENVIRONMENT: "local"
+  POSTHOG_PROJECT_TOKEN: ""
+  POSTHOG_HOST: "http://127.0.0.1:18080"
+  APP_VERSION: "local"
   # --- document-svc / access-svc ---
   SPRING_PROFILES_ACTIVE: "local"
   POSTGRES_HOST: "postgresql"
