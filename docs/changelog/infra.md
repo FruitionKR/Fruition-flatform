@@ -2,6 +2,8 @@
 
 ## 2026-10-22
 
+- PostHog 실제 수집·실패/재시도·PDF·초대·내보내기·복원 검증과 운영 DB 격리 복원/실제 이미지 migration 리허설 결과를 기록했다. 세 DB의 정확한 전후 schema hash, 기존 immutable audit 전체 hash와 12개 live image digest를 묶은 release 검토를 추가했으며 reset/repair 없이 기존 main 점검 배포 경로를 사용한다.
+
 - maintenance inventory가 실제 Strimzi cluster operator를 앱 writer로 오인하던 문제를 수정했다. 검증된 Helm labels·Pod labels·service account·단일 operator 이미지와 실행 설정, 대응 ReplicaSet 소유 Pod만 제외해 전체 14 Deployment 중 기존 entity operator와 함께 정확히 12개 앱을 검사한다.
 - 이름 변경·위장 labels·다른 이미지/계정·추가 컨테이너·잘못된 Pod owner·활성 앱을 거부하는 회귀를 추가했다. 기존 성공 audit·fingerprint·DB session·scaler·503 검사를 유지하며 AWS 계약 244개, Kustomize 3경로와 Terraform 두 root 검증을 통과했다. 운영 변경과 이미지 release recipe 변경은 수행하지 않았다.
 
