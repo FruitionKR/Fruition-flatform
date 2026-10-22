@@ -59,6 +59,19 @@ def storage_url(url, bucket):
     return url
 
 
+def require_pdf_frame_origin(policy, signed_url):
+    # 직접 읽기 성공만으로 브라우저 미리보기 성공을 판단하지 않는다.
+    directives = {}
+    for entry in policy.split(';'):
+        words = entry.split()
+        if words and words[0] not in directives:
+            directives[words[0]] = words[1:]
+    origin = urlsplit(signed_url)
+    expected = f"{origin.scheme}://{origin.netloc}"
+    if expected not in directives.get('frame-src', []):
+        raise ValueError('PDF storage origin missing from frontend frame-src')
+
+
 class ApiStatusError(ValueError):
     def __init__(self, status):
         super().__init__('Unexpected PDF smoke API status')
@@ -171,6 +184,10 @@ class Probe:
             raise
         self.stage = 'range-preview'
         signed = storage_url(self.api('GET', self.base + '/' + original + '/original-url')['url'], self.config['s3_bucket'])
+        self.stage = 'preview-csp'
+        with self.opener.open(f"https://{self.config['app_domain']}/home", timeout=30) as response:
+            require_pdf_frame_origin(response.headers.get('Content-Security-Policy', ''), signed)
+        self.stage = 'range-preview'
         req = request.Request(signed, headers={'Range': 'bytes=0-4'}, method='GET')
         with self.opener.open(req, timeout=30) as response:
             if response.status != 206 or response.read(6) != b'%PDF-':
@@ -180,6 +197,7 @@ class Probe:
                                       expected=(202,), key=str(uuid.uuid4())))
         # 11페이지는 10페이지 묶음 2개로 변환되고, 5MB 이하라 원본 문서 하나에 이어 붙는다(Document ADR-0024).
         deadline = time.monotonic() + timeout
+        ingest_requested = False
         while time.monotonic() < deadline:
             rows = self.api('GET', self.base).get('documents', [])
             parts = [row for row in rows if row.get('source_document_id') == parent]
@@ -193,6 +211,13 @@ class Probe:
                 return {'status': 'passed', 'bytes': path.stat().st_size, 'upload_parts': started['part_count'],
                         'converted_documents': 1, 'range_read': 'passed', 'completion_replay': 'passed',
                         'ai_processing': 'completed'}
+            # 자동 편입을 끈 검증 워크스페이스에서도 이번 probe가 만든 변환 문서만 명시적으로 편입한다.
+            if (not ingest_requested and document and document.get('status') == 'completed'
+                    and (document.get('pipeline_run_id') or '').startswith('convert:')):
+                self.stage = 'explicit-ai-ingest'
+                self.api('POST', self.base + '/' + parent + '/ingest', expected=(202,))
+                ingest_requested = True
+                self.stage = 'conversion-and-ai'
             # Converter retries can briefly mark failed; allow its checkpoint retry window.
             time.sleep(5)
         raise ValueError('PDF conversion/AI smoke timed out')
