@@ -194,6 +194,40 @@ class DeploymentAnalyticsTests(unittest.TestCase):
                                  {"name": "fruition-analytics", "key": "POSTHOG_PROJECT_TOKEN", "optional": True})
             self.assertEqual(len(seen), 10)
 
+    def test_hardened_runtime_and_optional_analytics_coexist(self):
+        from test_aws_deploy import deploy, CONFIG, CURRENT, CURRENT_SHA
+        docs = deploy.render(CONFIG, CURRENT_SHA, CURRENT)
+        secrets = {d["spec"]["target"]["name"]: {e["secretKey"] for e in d["spec"].get("data", [])}
+                   for d in docs if d["kind"] == "ExternalSecret"}
+        for service in ("access", "document"):
+            keys = secrets["fruition-" + service]
+            self.assertTrue({"JWT_PUBLIC_KEY", "JWT_KEY_ID"} <= keys)
+            self.assertNotIn("JWT_SECRET", keys)
+            self.assertEqual("JWT_PRIVATE_KEY" in keys, service == "access")
+            doc = next(d for d in docs if d["kind"] == "Deployment"
+                       and d["metadata"]["name"] == service + "-svc")
+            container = doc["spec"]["template"]["spec"]["containers"][0]
+            self.assertIn({"secretRef": {"name": "fruition-" + service}}, container["envFrom"])
+            env = {e["name"]: e for e in container.get("env", [])}
+            self.assertNotIn("JWT_SECRET", env)
+            self.assertTrue(env["POSTHOG_PROJECT_TOKEN"]["valueFrom"]["secretKeyRef"]["optional"])
+            self.assertEqual(env["ANALYTICS_ENABLED"]["value"], "false")
+            self.assertTrue(any(m["mountPath"] == "/etc/rds-ca" and m["readOnly"]
+                                for m in container["volumeMounts"]))
+
+    def test_analytics_preflight_preserves_verified_tls_for_every_database(self):
+        from test_aws_deploy import deploy, CONFIG
+        for enabled in ("false", "true"):
+            for service in ("access", "document", "ai"):
+                pod = deploy.preflight_job(service, {**CONFIG, "analytics_enabled": enabled})["spec"]["template"]["spec"]
+                container = pod["containers"][0]
+                env = {e["name"]: e for e in container["env"]}
+                self.assertEqual(env["PGSSLMODE"]["value"], "verify-full")
+                self.assertEqual(env["PGSSLROOTCERT"]["value"], "/etc/rds-ca/root.crt")
+                self.assertIn({"name": "rds-ca", "configMap": {"name": "fruition-rds-ca"}}, pod["volumes"])
+                self.assertIn({"name": "rds-ca", "mountPath": "/etc/rds-ca", "readOnly": True}, container["volumeMounts"])
+                self.assertEqual("POSTHOG_PROJECT_TOKEN" in env, service == "access" and enabled == "true")
+
     def test_default_off_and_invalid_flags(self):
         from test_aws_deploy import deploy, CONFIG, CURRENT, CURRENT_SHA
         docs = deploy.render(CONFIG, CURRENT_SHA, CURRENT)

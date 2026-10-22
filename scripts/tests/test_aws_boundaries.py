@@ -78,7 +78,7 @@ class BoundaryTests(unittest.TestCase):
                 self.assertFalse(self.allows(app,"egress",443,ip="52.1.2.3"))
         jobs=[d for d in self.docs if d["kind"]=="Job"]
         for job in jobs:
-            self.assertIn({"name":"PGSSLMODE","value":"require"},job["spec"]["template"]["spec"]["containers"][0]["env"])
+            self.assertIn({"name":"PGSSLMODE","value":"verify-full"},job["spec"]["template"]["spec"]["containers"][0]["env"])
 
     def test_upgrade_removes_existing_broad_policy_after_restrictive_apply(self):
         fake=FakeCluster()
@@ -107,7 +107,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertNotIn("S3_ACCESS_KEY",json.dumps(secrets));self.assertNotIn("S3_SECRET_KEY",json.dumps(secrets))
         self.assertNotIn("SPRING_MAIL_PORT",json.dumps(secrets))
         config=next(d["data"] for d in self.docs if d["kind"]=="ConfigMap")
-        self.assertEqual("require",config["PGSSLMODE"]);self.assertEqual("true",config["REDIS_SSL"])
+        self.assertEqual("verify-full",config["PGSSLMODE"]);self.assertEqual("true",config["REDIS_SSL"])
         self.assertEqual("aws",config["S3_CREDENTIALS_MODE"])
         self.assertTrue(self.allows("access-svc","egress",int(config["SPRING_MAIL_PORT"]),ip="52.1.2.3"))
         for key,value in [("smtp_port","0587"),("alb_subnet_cidr_1",CONFIG["vpc_cidr"]),

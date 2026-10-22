@@ -18,11 +18,6 @@ resource "aws_secretsmanager_secret" "app" {
   kms_key_id = aws_kms_key.secrets.arn
 }
 
-resource "random_password" "jwt_secret" {
-  length  = 64
-  special = false
-}
-
 resource "random_password" "internal_callback_token" {
   length  = 48
   special = false
@@ -50,15 +45,20 @@ resource "aws_secretsmanager_secret_version" "app" {
     AI_DB_MIGRATION_PASSWORD     = random_password.db_role["ai_migration"].result
     AI_DB_CONVERTER_PASSWORD     = random_password.db_role["ai_converter"].result
     # ai-svc runtime 저장소는 core RDS 인스턴스의 ai_db에 격리한다.
-    AI_DATABASE_URL     = "postgresql://ai_runtime:${random_password.db_role["ai_runtime"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=require"
-    AI_DB_MIGRATION_URL = "postgresql://ai_migration:${random_password.db_role["ai_migration"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=require"
+    AI_DATABASE_URL     = "postgresql://ai_runtime:${random_password.db_role["ai_runtime"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=verify-full"
+    AI_DB_MIGRATION_URL = "postgresql://ai_migration:${random_password.db_role["ai_migration"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=verify-full"
     # converter는 사용량 원장(ai_model_usage)·작업 journal(ai_task_runs) 기록 전용 계정만 받는다.
-    AI_CONVERTER_DATABASE_URL = "postgresql://ai_converter:${random_password.db_role["ai_converter"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=require"
+    AI_CONVERTER_DATABASE_URL = "postgresql://ai_converter:${random_password.db_role["ai_converter"].result}@${aws_db_instance.core.address}:5432/ai_db?sslmode=verify-full"
     # --- 스토리지·인증 ---
     ACCESS_REDIS_PASSWORD   = random_password.redis["access"].result
     DOCUMENT_REDIS_PASSWORD = random_password.redis["document"].result
     PIPELINE_REDIS_PASSWORD = random_password.redis["pipeline"].result
-    JWT_SECRET              = random_password.jwt_secret.result
+    # Seed RSA material with scripts/aws_jwt_keys.py; private keys never enter Terraform state.
+    JWT_PRIVATE_KEY         = ""
+    JWT_PUBLIC_KEY          = ""
+    JWT_KEY_ID              = ""
+    JWT_PREVIOUS_PUBLIC_KEY = ""
+    JWT_PREVIOUS_KEY_ID     = ""
     MFA_ENCRYPTION_KEY      = random_id.mfa_encryption_key.b64_std
     SPRING_MAIL_HOST        = var.smtp_host
     SPRING_MAIL_USERNAME    = var.smtp_username
@@ -83,7 +83,7 @@ resource "aws_secretsmanager_secret_version" "app" {
     TAVILY_API_KEY       = ""
     # 한국수출입은행 환율 OpenAPI 인증키(document-svc). 비우면 환율 수집 작업이 꺼진다.
     KOREAEXIM_AUTH_KEY = ""
-    # 화면 접근 코드. 비우면 게이트가 꺼진다. 바꾸면 WAF 해시(cost-guards.tf)를 위해 apply한다.
+    # 변경 후 aws_waf_access_code.py로 전용 Secret에 복사하고 WAF plan/apply를 수행한다.
     ACCESS_CODE = ""
   })
 

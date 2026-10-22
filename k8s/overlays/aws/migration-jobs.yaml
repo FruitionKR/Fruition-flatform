@@ -33,7 +33,7 @@ spec:
         - name: ACCESS_DB_MIGRATION_USER
           value: access_migration
         - name: PGSSLMODE
-          value: require
+          value: verify-full
         envFrom:
         - secretRef:
             name: fruition-access-migration
@@ -79,7 +79,7 @@ spec:
         - name: CORE_DB_MIGRATION_USER
           value: core_migration
         - name: PGSSLMODE
-          value: require
+          value: verify-full
         envFrom:
         - secretRef:
             name: fruition-document-migration
@@ -128,7 +128,7 @@ spec:
             memory: 1Gi
         env:
         - name: PGSSLMODE
-          value: require
+          value: verify-full
         # 스키마 적용과 같은 트랜잭션에서 converter role에 사용량 원장(ai_model_usage)·작업 journal(ai_task_runs 등) 권한만 부여한다.
         - name: AI_DB_CONVERTER_ROLE
           value: ai_converter

@@ -218,7 +218,8 @@ def preflight_job(service, config, *, require_empty=False):
     prefix = {"access": "ACCESS", "document": "CORE", "ai": "AI"}[service]
     db = {"access": "access", "document": "core", "ai": "ai"}[service]
     runtime_secret = "fruition-" + ("pipeline" if service == "ai" else service)
-    env = [{"name": "PGCONNECT_TIMEOUT", "value": "15"}, {"name": "PGSSLMODE", "value": "require"}]
+    env = [{"name": "PGCONNECT_TIMEOUT", "value": "15"}, {"name": "PGSSLMODE", "value": "verify-full"},
+           {"name": "PGSSLROOTCERT", "value": "/etc/rds-ca/root.crt"}]
     analytics_check = ""
     if service == "access" and config.get("analytics_enabled", "false") == "true":
         env.append({"name": "POSTHOG_PROJECT_TOKEN", "valueFrom": {"secretKeyRef": {
@@ -250,9 +251,10 @@ for role in {roles}; do
 """
     if service == "ai":
         # Terraform이 생성하는 단일 endpoint URI 계약만 허용한다. query의 host/sslmode 재정의를 거부한다.
-        script += '''  # Terraform URI의 명시적 TLS 옵션만 허용한다. 실제 TLS는 PGSSLMODE=require로 유지.
+        script += '''  # Strip only the permitted URI option; the verified environment enforces TLS identity.
   case "$credential" in
     *\\?sslmode=require) credential=${credential%\\?sslmode=require} ;;
+    *\\?sslmode=verify-full) credential=${credential%\\?sslmode=verify-full} ;;
   esac
   prefix="postgresql://$PGUSER:"
   suffix="@$PGHOST:$PGPORT/$PGDATABASE"
@@ -315,11 +317,13 @@ SQL
                 "metadata": {"labels": labels},
                 "spec": {"restartPolicy": "Never", "serviceAccountName": f"fruition-{service}-migration",
                          "automountServiceAccountToken": False,
+                         "volumes": [{"name": "rds-ca", "configMap": {"name": "fruition-rds-ca"}}],
                          "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001,
                                              "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}},
                          "containers": [{"name": "preflight", "image": "postgres:16-alpine",
                                          "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
-                                         "command": ["sh", "-c", script], "env": env}]}}}}
+                                         "command": ["sh", "-c", script], "env": env,
+                                         "volumeMounts": [{"name": "rds-ca", "mountPath": "/etc/rds-ca", "readOnly": True}]}]}}}}
 
 
 def fingerprints(config, *, require_empty=False):
