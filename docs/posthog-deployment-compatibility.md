@@ -61,3 +61,9 @@ AI에는 Flyway식 순차 버전 이력이 없다. `IF NOT EXISTS`가 있어도 
 - 기존 통합 AWS 계약 228개 통과 후, RSA/TLS와 optional analytics 동시 유지 회귀 2개를 추가했다.
 - 최종 AWS 계약 230개 통과. Terraform 두 root fmt/init(backend=false)/validate, Kustomize base/aws/platform 3경로, tracked shell 29개 bash 문법 및 변경 shell ShellCheck 통과.
 - tracked tree Gitleaks 발견 8개는 모두 dev에서 변경되지 않은 release 문서의 Access 소스 SHA 오탐으로 확인했다. 실제 비밀정보는 발견하지 않았다. 테스트는 fake CLI 및 격리된 로컬 PostgreSQL/Redis를 사용하며 실제 AWS/analytics를 호출하지 않는다.
+
+## 후속 유지보수 경로
+
+명시적 중단 전환 구현과 검토 입력은 [유지보수 전환 절차](aws-maintenance-cutover.md)에 정의한다.
+이 경로는 위 감사 당시 없던 `maintenance-cutover` 모드이며 실제 pending migration을 실행한다.
+과거의 현재 도구 미지원 설명은 감사 시점의 상태이고, 새로운 모드 자체가 실제 리허설/운영 승인 증거는 아니다.
