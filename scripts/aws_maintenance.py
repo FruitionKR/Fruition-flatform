@@ -208,7 +208,9 @@ def guarded_deploy(api, config, sha, documents, **kwargs):
     if items(api, "targetgroupbindings"):
         raise ValueError("wait for maintenance ingress to remove old ALB target bindings before Pod admission")
     for host in ("access." + config["domain"], "api." + config["domain"], config["app_domain"]):
-        if api.http_status("https://" + host + "/") != "503":
+        # 503 is the expected maintenance response, not a transient HTTP failure.
+        # Retrying it can make curl fail while truncating its /dev/null output.
+        if api.http_status("https://" + host + "/", "--retry", "0") != "503":
             raise ValueError("maintenance public route is not returning 503")
     api.smoke_settings()
     if api.fingerprints(config, require_quiescent=True) != review["before_fingerprints"]:
