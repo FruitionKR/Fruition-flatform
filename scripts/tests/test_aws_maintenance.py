@@ -9,6 +9,38 @@ from test_aws_deploy import CONFIG, SHA, MANIFEST, REVIEW, FakeCluster, deploy
 import aws_maintenance as maintenance
 
 
+# Sanitized live Helm installation identity; no credentials or cluster endpoints.
+OPERATOR_ENV_NAMES = """STRIMZI_NAMESPACE STRIMZI_FULL_RECONCILIATION_INTERVAL_MS
+STRIMZI_OPERATION_TIMEOUT_MS STRIMZI_DEFAULT_KAFKA_EXPORTER_IMAGE
+STRIMZI_DEFAULT_CRUISE_CONTROL_IMAGE STRIMZI_KAFKA_IMAGES STRIMZI_KAFKA_CONNECT_IMAGES
+STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES STRIMZI_DEFAULT_TOPIC_OPERATOR_IMAGE
+STRIMZI_DEFAULT_USER_OPERATOR_IMAGE STRIMZI_DEFAULT_KAFKA_INIT_IMAGE
+STRIMZI_DEFAULT_KAFKA_BRIDGE_IMAGE STRIMZI_DEFAULT_KANIKO_EXECUTOR_IMAGE
+STRIMZI_DEFAULT_BUILDAH_IMAGE STRIMZI_DEFAULT_MAVEN_BUILDER STRIMZI_OPERATOR_NAMESPACE
+STRIMZI_FEATURE_GATES STRIMZI_LEADER_ELECTION_ENABLED STRIMZI_LEADER_ELECTION_LEASE_NAME
+STRIMZI_LEADER_ELECTION_LEASE_NAMESPACE STRIMZI_LEADER_ELECTION_IDENTITY""".split()
+
+
+def strimzi_controllers():
+    template = {"metadata": {"labels": {"name": "strimzi-cluster-operator",
+                "strimzi.io/kind": "cluster-operator"}},
+                "spec": {"serviceAccountName": "strimzi-cluster-operator", "containers": [{
+                    "name": "strimzi-cluster-operator", "image": "quay.io/strimzi/operator:1.1.0",
+                    "env": [{"name": name, "value": "sanitized"} for name in OPERATOR_ENV_NAMES]}]}}
+    controller = {"kind": "Deployment", "metadata": {"name": "strimzi-cluster-operator",
+        "labels": {"app": "strimzi", "app.kubernetes.io/managed-by": "Helm",
+                   "chart": "strimzi-kafka-operator-1.1.0", "component": "deployment",
+                   "heritage": "Helm", "release": "strimzi"}},
+        "spec": {"replicas": 1, "template": template}, "status": {"replicas": 1}}
+    pod = copy.deepcopy(template)
+    pod["metadata"].update({"name": "strimzi-cluster-operator-6d7846b9b9-abcde",
+        "ownerReferences": [{"kind": "ReplicaSet", "name": "strimzi-cluster-operator-6d7846b9b9", "controller": True}]})
+    pod["status"] = {"phase": "Running"}
+    entity = {"kind": "Deployment", "metadata": {"name": "kafka-entity-operator", "labels": {
+        "strimzi.io/cluster": "kafka", "strimzi.io/kind": "Kafka"}}, "spec": {"replicas": 1}}
+    return controller, pod, entity
+
+
 class MaintenanceCluster(FakeCluster):
     def __init__(self, documents, **kwargs):
         super().__init__(**kwargs)
@@ -69,6 +101,92 @@ class MaintenanceTests(unittest.TestCase):
 
     def perform(self, review=None, **kwargs):
         deploy.deploy(CONFIG, SHA, self.documents, review=review or self.fake.review(), **kwargs)
+
+    def test_live_fourteen_deployments_leave_exact_twelve_apps_and_preserve_audit(self):
+        review = self.fake.review()
+        controller, pod, entity = strimzi_controllers()
+        self.fake.resources["deployments"] += [controller, entity]
+        self.fake.resources["pods"] = [pod]
+        self.assertEqual(14, len(self.fake.resources["deployments"]))
+        apps = maintenance.assert_quiescent(deploy, self.documents)
+        self.assertEqual(12, len(apps))
+        self.assertEqual({d["metadata"]["name"] for d in self.documents if d["kind"] == "Deployment"},
+                         {d["metadata"]["name"] for d in apps})
+        before = copy.deepcopy(self.fake.predecessor)
+        self.perform(review)
+        self.assertEqual(before, self.fake.predecessor)
+        self.assertTrue(any(d["metadata"]["name"] == deploy.release_name(SHA)
+                            for d in self.fake.applied("ConfigMap")))
+        self.assertFalse(any("strimzi" in " ".join(args) and any(a in args for a in ("patch", "delete", "scale"))
+                             for args, _ in self.fake.events))
+
+    def test_unknown_renamed_or_spoofed_controller_deployment_is_rejected(self):
+        controller, _, _ = strimzi_controllers()
+        variants = []
+        for path, value in (
+                (("metadata", "name"), "unrelated-writer"),
+                (("metadata", "labels", "release"), "other"),
+                (("spec", "template", "metadata", "labels", "name"), "writer"),
+                (("spec", "template", "spec", "serviceAccountName"), "default"),
+                (("spec", "template", "spec", "containers", 0, "image"), "example/writer:1"),
+                (("spec", "template", "spec", "containers", 0, "envFrom"), [{"secretRef": {"name": "database"}}]),
+                (("spec", "template", "spec", "containers", 0, "env"), [{"name": "DATABASE_URL", "value": "placeholder"}]),
+                (("spec", "template", "spec", "containers", 0, "command"), ["sh", "-c", "writer"]),
+                (("spec", "template", "spec", "containers", 0, "args"), ["writer"]),
+                (("spec", "template", "spec", "containers", 0, "env"), [{"name": "STRIMZI_UNREVIEWED", "value": "placeholder"}]),
+                (("spec", "template", "spec", "initContainers"), [{"name": "writer", "image": "example/writer:1"}])):
+            candidate = copy.deepcopy(controller)
+            target = candidate
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            variants.append(candidate)
+        sidecar = copy.deepcopy(controller)
+        sidecar["spec"]["template"]["spec"]["containers"].append({"name": "writer", "image": "example/writer:1"})
+        variants.append(sidecar)
+        for candidate in variants:
+            with self.subTest(candidate=candidate):
+                self.fake.resources["deployments"].append(candidate)
+                with self.assertRaisesRegex(ValueError, "inventory differs"):
+                    maintenance.assert_quiescent(deploy, self.documents)
+                self.fake.resources["deployments"].pop()
+
+    def test_unrelated_spoofed_or_orphan_operator_pods_are_rejected(self):
+        controller, pod, _ = strimzi_controllers()
+        self.fake.resources["deployments"].append(controller)
+        for path, value in (
+                (("metadata", "name"), "unrelated-writer"),
+                (("metadata", "labels", "strimzi.io/kind"), "writer"),
+                (("metadata", "ownerReferences"), []),
+                (("metadata", "ownerReferences", 0, "name"), "unrelated-writer-6d7846b9b9"),
+                (("metadata", "ownerReferences", 0, "kind"), "Job"),
+                (("metadata", "ownerReferences", 0, "controller"), False),
+                (("spec", "serviceAccountName"), "default"),
+                (("spec", "containers", 0, "image"), "example/writer:1"),
+                (("spec", "ephemeralContainers"), [{"name": "writer", "image": "example/writer:1"}])):
+            candidate = copy.deepcopy(pod)
+            target = candidate
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            self.fake.resources["pods"] = [candidate]
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "Pods terminated"):
+                maintenance.assert_quiescent(deploy, self.documents)
+        self.fake.resources["deployments"].pop()
+        self.fake.resources["pods"] = [pod]
+        with self.assertRaisesRegex(ValueError, "Pods terminated"):
+            maintenance.assert_quiescent(deploy, self.documents)
+
+    def test_cluster_operator_exemption_never_exempts_active_app(self):
+        controller, pod, entity = strimzi_controllers()
+        self.fake.resources["deployments"] += [controller, entity]
+        self.fake.resources["pods"] = [pod]
+        for app in self.fake.resources["deployments"][:-2]:
+            with self.subTest(app=app["metadata"]["name"]):
+                app["spec"]["replicas"] = 1
+                with self.assertRaisesRegex(ValueError, "zero replicas"):
+                    maintenance.assert_quiescent(deploy, self.documents)
+                app["spec"]["replicas"] = 0
 
     def test_review_is_strict_and_never_uses_compatibility_or_installation_claim(self):
         review = self.fake.review()
