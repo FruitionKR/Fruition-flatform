@@ -2,6 +2,9 @@
 
 ## 2026-10-22
 
+- Strimzi Helm 1.1.0의 실제 실행 형태인 `command` 생략 + 단일 launcher `args`를 maintenance inventory에서 인식한다. 기존 기본/명시적 command 실행 형태를 유지하고 임의 command·추가 args·두 launcher 혼합은 거부한다.
+- 실제 Deployment·Pod 실행 형태를 반영한 fixture로 14개 Deployment에서 정확히 12개 앱을 검사하며, 위조 실행 8종을 Deployment/Pod 각각에서 차단하는 회귀를 추가했다. maintenance 15개·전체 AWS 246개 테스트를 통과했고 source secret scan의 기존 SHA/fingerprint 오탐 10건을 확인했다. 이미지·계정·owner·labels 및 DB session·scaler·503·fingerprint gate는 유지한다.
+
 - PostHog 실제 수집·실패/재시도·PDF·초대·내보내기·복원 검증과 운영 DB 격리 복원/실제 이미지 migration 리허설 결과를 기록했다. 세 DB의 정확한 전후 schema hash, 기존 immutable audit 전체 hash와 12개 live image digest를 묶은 release 검토를 추가했으며 reset/repair 없이 기존 main 점검 배포 경로를 사용한다.
 
 - maintenance inventory가 실제 Strimzi cluster operator를 앱 writer로 오인하던 문제를 수정했다. 검증된 Helm labels·Pod labels·service account·단일 operator 이미지와 실행 설정, 대응 ReplicaSet 소유 Pod만 제외해 전체 14 Deployment 중 기존 entity operator와 함께 정확히 12개 앱을 검사한다.

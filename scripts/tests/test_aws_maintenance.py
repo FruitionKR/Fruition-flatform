@@ -26,6 +26,7 @@ def strimzi_controllers():
                 "strimzi.io/kind": "cluster-operator"}},
                 "spec": {"serviceAccountName": "strimzi-cluster-operator", "containers": [{
                     "name": "strimzi-cluster-operator", "image": "quay.io/strimzi/operator:1.1.0",
+                    "args": ["/opt/strimzi/bin/cluster_operator_run.sh"],
                     "env": [{"name": name, "value": "sanitized"} for name in OPERATOR_ENV_NAMES]}]}}
     controller = {"kind": "Deployment", "metadata": {"name": "strimzi-cluster-operator",
         "labels": {"app": "strimzi", "app.kubernetes.io/managed-by": "Helm",
@@ -119,6 +120,47 @@ class MaintenanceTests(unittest.TestCase):
                             for d in self.fake.applied("ConfigMap")))
         self.assertFalse(any("strimzi" in " ".join(args) and any(a in args for a in ("patch", "delete", "scale"))
                              for args, _ in self.fake.events))
+
+    def test_reviewed_operator_invocations_leave_exact_twelve_apps(self):
+        launcher = "/opt/strimzi/bin/cluster_operator_run.sh"
+        for invocation in ({"args": [launcher]}, {"command": [launcher]}, {}):
+            with self.subTest(invocation=invocation):
+                controller, pod, entity = strimzi_controllers()
+                for spec in (controller["spec"]["template"]["spec"], pod["spec"]):
+                    container = spec["containers"][0]
+                    container.pop("args")
+                    container.update(invocation)
+                self.fake.resources["deployments"] += [controller, entity]
+                self.fake.resources["pods"] = [pod]
+                self.assertEqual(12, len(maintenance.assert_quiescent(deploy, self.documents)))
+                del self.fake.resources["deployments"][-2:]
+
+    def test_forged_operator_invocations_fail_deployment_and_pod_quiescence(self):
+        launcher = "/opt/strimzi/bin/cluster_operator_run.sh"
+        invocations = (
+            {"args": ["/tmp/writer.sh"]},
+            {"args": [launcher, "--extra"]},
+            {"args": [launcher + " --extra"]},
+            {"command": ["/bin/sh", "-c"], "args": [launcher]},
+            {"command": ["/tmp/writer.sh"], "args": [launcher]},
+            {"command": [launcher, "--extra"]},
+            {"command": [launcher], "args": ["--extra"]},
+            {"command": [launcher], "args": [launcher]},
+        )
+        for target in ("deployment", "pod"):
+            for invocation in invocations:
+                with self.subTest(target=target, invocation=invocation):
+                    controller, pod, entity = strimzi_controllers()
+                    spec = controller["spec"]["template"]["spec"] if target == "deployment" else pod["spec"]
+                    container = spec["containers"][0]
+                    container.pop("args")
+                    container.update(invocation)
+                    self.fake.resources["deployments"] += [controller, entity]
+                    self.fake.resources["pods"] = [pod]
+                    error = "inventory differs" if target == "deployment" else "Pods terminated"
+                    with self.assertRaisesRegex(ValueError, error):
+                        maintenance.assert_quiescent(deploy, self.documents)
+                    del self.fake.resources["deployments"][-2:]
 
     def test_unknown_renamed_or_spoofed_controller_deployment_is_rejected(self):
         controller, _, _ = strimzi_controllers()
