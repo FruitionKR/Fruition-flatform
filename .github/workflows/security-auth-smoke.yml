@@ -18,6 +18,8 @@ jobs:
     environment: feedback
     runs-on: [self-hosted, linux, x64, fruition-feedback]
     timeout-minutes: 5
+    env:
+      AWS_EC2_METADATA_DISABLED: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
