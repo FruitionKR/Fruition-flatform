@@ -1,0 +1,8 @@
+{
+  "path_regex": "(^|/)([.]git(config|-credentials)?|[.]env(rc|[._~-][^/;]*)?)(/|;|$)",
+  "transformations": [
+    "URL_DECODE",
+    "NORMALIZE_PATH",
+    "LOWERCASE"
+  ]
+}

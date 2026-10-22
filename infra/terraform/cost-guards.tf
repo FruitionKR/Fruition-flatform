@@ -25,8 +25,20 @@ variable "waf_emergency_block" {
   default     = false
 }
 
+variable "waf_sensitive_paths_block" {
+  description = "Set false only for the initial Count verification; true blocks .git and .env path segments on all hosts."
+  type        = bool
+  default     = true
+}
+
+variable "waf_access_code_required" {
+  description = "Fail closed if frontend gate inputs are missing. Set false only for an intentional deployment without an access-code gate."
+  type        = bool
+  default     = true
+}
+
 variable "app_domain" {
-  description = "Host serving the frontend and same-origin API on the shared ALB (e.g. web.fruitiontest.accesscam.org). Empty disables the access-code rule."
+  description = "Host serving the frontend and same-origin API on the shared ALB (e.g. web.example.com). Required with ACCESS_CODE unless waf_access_code_required=false is intentional."
   type        = string
   default     = ""
   validation {
@@ -51,6 +63,7 @@ locals {
   # Paths open without the code, mirroring OPEN_API_PATTERNS in the frontend middleware.ts.
   waf_access_code_open_path_regex = "^/api/(auth/|invitations/|workspaces$|workspaces/[^/]+$)"
   waf_document_content_contracts  = jsondecode(file("${path.module}/../waf/document-content-contracts.json"))
+  waf_sensitive_paths             = jsondecode(file("${path.module}/../waf/sensitive-paths.json"))
   waf_content_body_overrides = {
     AWSManagedRulesCommonRuleSet = {
       SizeRestrictions_BODY   = "awswaf:managed:aws:core-rule-set:SizeRestrictions_Body"
@@ -58,7 +71,8 @@ locals {
       CrossSiteScripting_BODY = "awswaf:managed:aws:core-rule-set:CrossSiteScripting_Body"
     }
     AWSManagedRulesSQLiRuleSet = {
-      SQLi_BODY = "awswaf:managed:aws:sql-database:SQLi_Body"
+      SQLi_BODY                 = "awswaf:managed:aws:sql-database:SQLi_Body"
+      SQLiExtendedPatterns_BODY = "awswaf:managed:aws:sql-database:SQLiExtendedPatterns_Body"
     }
   }
 }
@@ -66,6 +80,12 @@ locals {
 resource "aws_wafv2_web_acl" "cost_guard" {
   name  = "${var.project}-cost-guard"
   scope = "REGIONAL"
+  lifecycle {
+    precondition {
+      condition     = !var.waf_access_code_required || (var.app_domain != "" && nonsensitive(local.waf_access_code != ""))
+      error_message = "접근 코드 게이트가 필수입니다. 현재 Ingress의 app_domain과 비어 있지 않은 ACCESS_CODE를 지정하세요. 의도적으로 끄는 배포만 waf_access_code_required=false를 설정하세요."
+    }
+  }
   default_action {
     allow {}
   }
@@ -143,6 +163,47 @@ resource "aws_wafv2_web_acl" "cost_guard" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "fruition-not-public-paths"
+      sampled_requests_enabled   = false
+    }
+  }
+
+  # Host routing does not protect requests that supply a valid service Host.
+  # Keep this URI-only rule independent of the document BODY exceptions below.
+  rule {
+    name     = "sensitive-file-paths"
+    priority = 3
+    action {
+      dynamic "block" {
+        for_each = var.waf_sensitive_paths_block ? [1] : []
+        content {
+          custom_response {
+            response_code = 404
+          }
+        }
+      }
+      dynamic "count" {
+        for_each = var.waf_sensitive_paths_block ? [] : [1]
+        content {}
+      }
+    }
+    statement {
+      regex_match_statement {
+        regex_string = local.waf_sensitive_paths.path_regex
+        field_to_match {
+          uri_path {}
+        }
+        dynamic "text_transformation" {
+          for_each = local.waf_sensitive_paths.transformations
+          content {
+            priority = text_transformation.key
+            type     = text_transformation.value
+          }
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "fruition-sensitive-file-paths"
       sampled_requests_enabled   = false
     }
   }
