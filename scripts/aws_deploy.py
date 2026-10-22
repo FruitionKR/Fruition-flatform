@@ -10,12 +10,13 @@ import shutil
 import subprocess
 import tempfile
 import time
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from aws_release_safety import validate_review, smoke_settings, authenticated_smoke
-from aws_image_release import validate_manifest
+from aws_image_release import validate_manifest, SERVICES
 
 import yaml
 
@@ -44,8 +45,10 @@ def kubectl(*args, input=None):
 
 
 def validate(config, sha):
-    if set(config) != KEYS:
+    if not KEYS <= set(config) or set(config) - KEYS - {"analytics_enabled"}:
         raise ValueError("배포 JSON에는 문서의 비밀 아닌 입력 키만 모두 필요합니다")
+    if config.get("analytics_enabled", "false") not in ("true", "false"):
+        raise ValueError("analytics_enabled는 true 또는 false 문자열이어야 합니다")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("image SHA는 게시된 릴리스의 소문자 40자리 ID여야 합니다")
     for key, value in config.items():
@@ -144,6 +147,18 @@ def render(config, sha, manifest):
         path.write_text(yaml.safe_dump(data, sort_keys=False))
         content = run(["kubectl", "kustomize", str(overlay)])
     documents = list(yaml.safe_load_all(content))
+    # Version is the effective source commit, never the multi-repository release ID.
+    for document in documents:
+        if document["kind"] != "Deployment":
+            continue
+        name = document["metadata"]["name"]
+        for container in document["spec"]["template"]["spec"]["containers"]:
+            env = {item["name"]: item for item in container.get("env", [])}
+            if "APP_VERSION" not in env:
+                continue
+            service = name if name in SERVICES else "pipeline"
+            env["APP_VERSION"]["value"] = manifest["sources"][SERVICES[service][0]]
+            env["ANALYTICS_ENABLED"]["value"] = config.get("analytics_enabled", "false")
     check_manifest(documents, sha, images)
     return documents
 
@@ -200,12 +215,18 @@ def job(document):
     wait(document, "Complete")
 
 
-def preflight_job(service, config, *, require_empty=False):
+def preflight_job(service, config, *, require_empty=False, require_quiescent=False):
     prefix = {"access": "ACCESS", "document": "CORE", "ai": "AI"}[service]
     db = {"access": "access", "document": "core", "ai": "ai"}[service]
     runtime_secret = "fruition-" + ("pipeline" if service == "ai" else service)
     env = [{"name": "PGCONNECT_TIMEOUT", "value": "15"}, {"name": "PGSSLMODE", "value": "verify-full"},
            {"name": "PGSSLROOTCERT", "value": "/etc/rds-ca/root.crt"}]
+    analytics_check = ""
+    if service == "access" and config.get("analytics_enabled", "false") == "true":
+        env.append({"name": "POSTHOG_PROJECT_TOKEN", "valueFrom": {"secretKeyRef": {
+            "name": "fruition-analytics", "key": "POSTHOG_PROJECT_TOKEN", "optional": True}}})
+        analytics_check = ('case "${POSTHOG_PROJECT_TOKEN:-}" in phc_?*) ;; *) echo "analytics token missing or invalid" >&2; exit 1 ;; esac\n'
+                           'case "$POSTHOG_PROJECT_TOKEN" in *[!a-zA-Z0-9_-]*) echo "analytics token invalid" >&2; exit 1 ;; esac\n')
     for role in ("runtime", "migration"):
         key = ("AI_DATABASE_URL" if role == "runtime" else "AI_DB_MIGRATION_URL") if service == "ai" else f"{prefix}_DB_{role.upper()}_PASSWORD"
         env.append({"name": role.upper() + "_CREDENTIAL", "valueFrom": {"secretKeyRef": {
@@ -219,7 +240,7 @@ def preflight_job(service, config, *, require_empty=False):
     host = config["access_rds_endpoint" if service == "access" else "core_rds_endpoint"]
     # credential은 Secret에서만 주입한다. shell trace와 DB client 오류 출력은 비활성화한다.
     script = f"""set -eu
-export PGHOST={host} PGPORT=5432
+{analytics_check}export PGHOST={host} PGPORT=5432
 for role in {roles}; do
   export PGUSER={db}_"$role"
   export PGDATABASE={db}_db
@@ -290,6 +311,15 @@ SQL
 [ "$empty" = t ] || { echo 'Initial install requires an empty database'; exit 1; }
 """
         script = script.replace('# 같은 PostgreSQL client', empty_check + '# 같은 PostgreSQL client')
+    if require_quiescent:
+        quiet_check = """quiet=$(psql --dbname="$PGDATABASE" -X -A -t -v ON_ERROR_STOP=1 2>/dev/null <<'SQL'
+SELECT NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+ AND pid<>pg_backend_pid() AND usename IS NOT NULL);
+SQL
+)
+[ "$quiet" = t ] || { echo 'Maintenance requires no other DB clients'; exit 1; }
+"""
+        script = script.replace('# 같은 PostgreSQL client', quiet_check + '# 같은 PostgreSQL client')
     labels = {"app.kubernetes.io/component": "db-preflight", "app": f"{service}-db-preflight"}
     return {"apiVersion": "batch/v1", "kind": "Job",
             "metadata": {"name": f"{service}-db-preflight", "namespace": NAMESPACE, "labels": labels},
@@ -306,10 +336,10 @@ SQL
                                          "volumeMounts": [{"name": "rds-ca", "mountPath": "/etc/rds-ca", "readOnly": True}]}]}}}}
 
 
-def fingerprints(config, *, require_empty=False):
+def fingerprints(config, *, require_empty=False, require_quiescent=False):
     results = {}
     for service in ("access", "document", "ai"):
-        document = preflight_job(service, config, require_empty=require_empty)
+        document = preflight_job(service, config, require_empty=require_empty, require_quiescent=require_quiescent)
         job(document)
         digest = kubectl("logs", "job/" + document["metadata"]["name"]).strip()
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
@@ -564,7 +594,7 @@ def install_record(name, data):
             "immutable": True, "data": data}
 
 
-def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False, images=None):
+def validate_deploy_inputs(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False, images=None):
     validate(config, sha)
     check_manifest(documents, sha, images)
     if not rollback:
@@ -579,9 +609,18 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
                            or probe_recovery or mail_health_recovery):
         raise ValueError("OAuth 복구는 다른 복구 옵션 없는 initial-install deploy 전용입니다")
     settings = None if bootstrap else smoke_settings()
+    return settings
+
+
+def _deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False, images=None):
+    settings = validate_deploy_inputs(config, sha, documents, rollback=rollback, review=review,
+                                     bootstrap=bootstrap, probe_recovery=probe_recovery,
+                                     mail_health_recovery=mail_health_recovery, oauth_recovery=oauth_recovery, images=images)
     verify_target(config)
     verify_alb_log_destination(config)
     initial = not rollback and review["migration_mode"] == "initial-install"
+    if review and review["migration_mode"] == "maintenance-cutover" and bootstrap:
+        raise ValueError("maintenance-cutover는 deploy 전용입니다")
     if initial:
         initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery, mail_health_recovery, oauth_recovery, images)
     if bootstrap:
@@ -640,15 +679,26 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         if document["kind"] == "ExternalSecret":
             wait(document)
     if not existing.strip():
-        current = fingerprints(config, require_empty=initial and needs_empty_check)
+        if review["migration_mode"] == "maintenance-cutover":
+            current = fingerprints(config, require_quiescent=True)
+            if current != review["before_fingerprints"]:
+                raise ValueError("maintenance before schema changed after foundation preflight")
+        else:
+            current = fingerprints(config, require_empty=initial and needs_empty_check)
         if initial and needs_empty_check:
             # Persist proof only AFTER all three databases passed the empty/ownership gate.
             apply([install_record("fruition-bootstrap", initial_data)])
-        if review["migration_mode"] == "expand-only" or (initial and bootstrap):
+        if review["migration_mode"] in {"expand-only", "maintenance-cutover"} or (initial and bootstrap):
             for document in documents:
                 if document["kind"] == "Job":
+                    if review["migration_mode"] == "maintenance-cutover":
+                        from aws_maintenance import assert_quiescent
+                        fingerprints(config, require_quiescent=True)
+                        assert_quiescent(SimpleNamespace(**globals()), documents)
                     job(document)
         current = fingerprints(config)
+        if review["migration_mode"] == "maintenance-cutover" and current != review["after_fingerprints"]:
+            raise ValueError("maintenance after fingerprints differ from rehearsed schema")
     event_kinds = {"KafkaNodePool", "Kafka", "KafkaTopic"}
     apply([d for d in documents if d["kind"] in event_kinds])
     for document in documents:
@@ -658,10 +708,13 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     for document in documents:
         if document["kind"] == "KafkaUser":
             wait(document)
-    # The ALB controller must create bindings before admission creates application Pods.
+    # Online rollout needs ALB bindings before Pod admission. Maintenance keeps fixed
+    # 503 routes until application readiness, then rebinds and checks public traffic.
     routing = {"Service", "Ingress"}
-    apply([d for d in documents if d["kind"] in routing])
-    wait_alb_bindings()
+    maintenance = bool(review and review["migration_mode"] == "maintenance-cutover")
+    apply([d for d in documents if d["kind"] in routing and (not maintenance or d["kind"] == "Service")])
+    if not maintenance:
+        wait_alb_bindings()
     workloads = [d for d in documents if d["kind"] not in foundation | event_kinds | routing | SCALING_KINDS |
                  {"Namespace", "Job", "ScaledObject", "KafkaUser", "TriggerAuthentication"}]
     # New document-svc publishes ai.convert.command. Roll the converter worker out and
@@ -675,14 +728,19 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
     for document in workloads:
         if document["kind"] == "Deployment" and document not in converter:
             kubectl("rollout", "status", "deployment/" + document["metadata"]["name"], "--timeout=600s")
-    apply([d for d in documents if d["kind"] == "TriggerAuthentication"])
-    apply([d for d in documents if d["kind"] == "ScaledObject"])
-    for document in documents:
-        if document["kind"] == "ScaledObject":
-            wait(document)
-    # Deployment rollout이 끝난 뒤에 건다. 앞서 적용한 Deployment의 replicas가 HPA의
-    # 현재 판단을 잠시 덮으므로, 교체가 끝난 다음 확장 정책을 올려 되돌림을 줄인다.
-    apply([d for d in documents if d["kind"] in SCALING_KINDS])
+    if not review or review["migration_mode"] != "maintenance-cutover":
+        apply([d for d in documents if d["kind"] == "TriggerAuthentication"])
+        apply([d for d in documents if d["kind"] == "ScaledObject"])
+        for document in documents:
+            if document["kind"] == "ScaledObject":
+                wait(document)
+        # Deployment rollout이 끝난 뒤에 건다. 앞서 적용한 Deployment의 replicas가 HPA의
+        # 현재 판단을 잠시 덮으므로, 교체가 끝난 다음 확장 정책을 올려 되돌림을 줄인다.
+        apply([d for d in documents if d["kind"] in SCALING_KINDS])
+    if maintenance:
+        # Keep 503 until every new workload is ready; no mixed-version public traffic.
+        apply([d for d in documents if d["kind"] == "Ingress"])
+        wait_alb_bindings()
     check_public_routes(config)
     if bootstrap:
         if initial:
@@ -696,6 +754,12 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
                                              "manifest": yaml.safe_dump_all(pinned(documents), sort_keys=False),
                                              "review": json.dumps(review)}}
         apply([record])
+
+
+def deploy(config, sha, documents, **kwargs):
+    from aws_maintenance import guarded_deploy
+    return guarded_deploy(SimpleNamespace(**globals()),
+                          config, sha, documents, **kwargs)
 
 
 def main():

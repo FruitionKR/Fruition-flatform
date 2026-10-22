@@ -6,6 +6,11 @@ x-ai-task-worker: &ai-task-worker
   command: ["python", "-m", "app.workers.task_worker"]
   environment: &ai-task-environment
     AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+    ANALYTICS_ENABLED: "${LOCAL_ANALYTICS_ENABLED:-false}"
+    POSTHOG_PROJECT_TOKEN: "${LOCAL_POSTHOG_PROJECT_TOKEN:-}"
+    ANALYTICS_ENVIRONMENT: "local"
+    POSTHOG_HOST: "${LOCAL_POSTHOG_HOST:-http://host.docker.internal:18080}"
+    APP_VERSION: "${LOCAL_APP_VERSION:-local}"
     DOCUMENT_INTERNAL_BASE_URL: http://host.docker.internal:8080
     ACCESS_INTERNAL_BASE_URL: http://host.docker.internal:8081
     KAFKA_BOOTSTRAP_SERVERS: kafka:19092
@@ -56,6 +61,11 @@ services:
     environment:
       # AI runtime 저장소는 모두 ai_db가 소유한다.
       AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      ANALYTICS_ENABLED: "${LOCAL_ANALYTICS_ENABLED:-false}"
+      POSTHOG_PROJECT_TOKEN: "${LOCAL_POSTHOG_PROJECT_TOKEN:-}"
+      ANALYTICS_ENVIRONMENT: "local"
+      POSTHOG_HOST: "${LOCAL_POSTHOG_HOST:-http://host.docker.internal:18080}"
+      APP_VERSION: "${LOCAL_APP_VERSION:-local}"
       DOCUMENT_INTERNAL_BASE_URL: http://host.docker.internal:8080
       ACCESS_INTERNAL_BASE_URL: http://host.docker.internal:8081
       AGENT_BACKEND_URL: http://host.docker.internal:8080
@@ -112,6 +122,11 @@ services:
     environment:
       # ingest는 ai_db와 document-svc 내부 API만 사용한다.
       AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      ANALYTICS_ENABLED: "${LOCAL_ANALYTICS_ENABLED:-false}"
+      POSTHOG_PROJECT_TOKEN: "${LOCAL_POSTHOG_PROJECT_TOKEN:-}"
+      ANALYTICS_ENVIRONMENT: "local"
+      POSTHOG_HOST: "${LOCAL_POSTHOG_HOST:-http://host.docker.internal:18080}"
+      APP_VERSION: "${LOCAL_APP_VERSION:-local}"
       DOCUMENT_INTERNAL_BASE_URL: http://host.docker.internal:8080
       ACCESS_INTERNAL_BASE_URL: http://host.docker.internal:8081
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
@@ -207,6 +222,11 @@ services:
     environment:
       # document.edit.event → ai_db document_derived_state 추적 (core_db 접속 없음)
       AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      ANALYTICS_ENABLED: "${LOCAL_ANALYTICS_ENABLED:-false}"
+      POSTHOG_PROJECT_TOKEN: "${LOCAL_POSTHOG_PROJECT_TOKEN:-}"
+      ANALYTICS_ENVIRONMENT: "local"
+      POSTHOG_HOST: "${LOCAL_POSTHOG_HOST:-http://host.docker.internal:18080}"
+      APP_VERSION: "${LOCAL_APP_VERSION:-local}"
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       DOCUMENT_EDIT_EVENT_TOPIC: ${DOCUMENT_EDIT_EVENT_TOPIC:-document.edit.event}
     depends_on:
@@ -224,6 +244,11 @@ services:
     command: ["python", "agent_worker.py"]
     environment:
       AI_DATABASE_URL: postgresql://${AI_DB_RUNTIME_USER:-ai_runtime}:${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}@postgresql:5432/${AI_DB_NAME:-ai_db}
+      ANALYTICS_ENABLED: "${LOCAL_ANALYTICS_ENABLED:-false}"
+      POSTHOG_PROJECT_TOKEN: "${LOCAL_POSTHOG_PROJECT_TOKEN:-}"
+      ANALYTICS_ENVIRONMENT: "local"
+      POSTHOG_HOST: "${LOCAL_POSTHOG_HOST:-http://host.docker.internal:18080}"
+      APP_VERSION: "${LOCAL_APP_VERSION:-local}"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

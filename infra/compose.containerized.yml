@@ -66,6 +66,11 @@ services:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      ANALYTICS_ENABLED: "${LOCAL_ANALYTICS_ENABLED:-false}"
+      POSTHOG_PROJECT_TOKEN: "${LOCAL_POSTHOG_PROJECT_TOKEN:-}"
+      ANALYTICS_ENVIRONMENT: "local"
+      POSTHOG_HOST: "${LOCAL_POSTHOG_HOST:-http://host.docker.internal:18080}"
+      APP_VERSION: "${LOCAL_APP_VERSION:-local}"
       POSTGRES_HOST: postgresql
       POSTGRES_PORT: "5432"
       # document-svc는 core_db 전용 계정으로 접속한다 (runtime=DML, migration=flyway)
@@ -132,6 +137,11 @@ services:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      ANALYTICS_ENABLED: "${LOCAL_ANALYTICS_ENABLED:-false}"
+      POSTHOG_PROJECT_TOKEN: "${LOCAL_POSTHOG_PROJECT_TOKEN:-}"
+      ANALYTICS_ENVIRONMENT: "local"
+      POSTHOG_HOST: "${LOCAL_POSTHOG_HOST:-http://host.docker.internal:18080}"
+      APP_VERSION: "${LOCAL_APP_VERSION:-local}"
       # 데이터 파기 시 ai-svc(pipeline-api) 파기 API 호출
       AI_INTERNAL_BASE_URL: http://pipeline-api:8000
       POSTGRES_HOST: postgresql

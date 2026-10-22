@@ -1,0 +1,30 @@
+# Runtime only: never embed a project token in a frontend image/build argument.
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: ANALYTICS_ENABLED
+    value: "false"
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: ANALYTICS_ENVIRONMENT
+    value: production
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: APP_VERSION
+    value: REPLACE_ME_ANALYTICS_SOURCE_SHA
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: POSTHOG_HOST
+    value: https://us.i.posthog.com
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: POSTHOG_PROJECT_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: fruition-analytics
+        key: POSTHOG_PROJECT_TOKEN
+        optional: true

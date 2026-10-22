@@ -56,9 +56,9 @@ class PreflightDatabaseTests(unittest.TestCase):
     def sql(cls, sql, database="postgres"):
         return cls.command(["docker", "exec", cls.container, "psql", "-U", "postgres", "-d", database, "-v", "ON_ERROR_STOP=1", "-Atc", sql])
 
-    def preflight(self, service="access", runtime="runtime_test_password", migration="migration_test_password", converter="converter_test_password", *, uri_replace=None, expected_host="127.0.0.1", require_empty=False):
+    def preflight(self, service="access", runtime="runtime_test_password", migration="migration_test_password", converter="converter_test_password", *, uri_replace=None, expected_host="127.0.0.1", require_empty=False, require_quiescent=False):
         # 운영 SQL과 shell을 그대로 실행하되 TLS 없는 임시 DB 연결만 치환한다.
-        document = deploy.preflight_job(service, {"access_rds_endpoint": "127.0.0.1", "core_rds_endpoint": expected_host}, require_empty=require_empty)
+        document = deploy.preflight_job(service, {"access_rds_endpoint": "127.0.0.1", "core_rds_endpoint": expected_host}, require_empty=require_empty, require_quiescent=require_quiescent)
         script = document["spec"]["template"]["spec"]["containers"][0]["command"][2]
         if service == "ai":
             runtime = f"postgresql://ai_runtime:{runtime}@127.0.0.1:5432/ai_db"
@@ -72,6 +72,27 @@ class PreflightDatabaseTests(unittest.TestCase):
                          "-e", f"RUNTIME_CREDENTIAL={runtime}", "-e", f"MIGRATION_CREDENTIAL={migration}",
                          "-e", f"CONVERTER_CREDENTIAL={converter}",
                          self.container, "sh", "-s"], input=script)
+
+    def test_000_quiescence_detects_other_user_sessions_without_stats_role(self):
+        self.assertRegex(self.preflight(require_quiescent=True), r"^[0-9a-f]{64}$")
+        client = subprocess.Popen(["docker", "exec", self.container, "psql", "-U", "postgres", "-d", "access_db",
+                                   "-c", "SET application_name='maintenance-test-writer'; SELECT pg_sleep(60)"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(30):
+                if self.sql("SELECT count(*) FROM pg_stat_activity WHERE application_name='maintenance-test-writer'", "access_db") == "1":
+                    break
+                time.sleep(0.1)
+            else:
+                self.fail("test writer session did not start")
+            with self.assertRaises(subprocess.CalledProcessError) as failure:
+                self.preflight(require_quiescent=True)
+            self.assertIn("Maintenance requires no other DB clients", failure.exception.stdout)
+            self.assertRegex(self.preflight(), r"^[0-9a-f]{64}$")
+        finally:
+            self.sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name='maintenance-test-writer'", "access_db")
+            client.wait(timeout=10)
+        self.assertRegex(self.preflight(require_quiescent=True), r"^[0-9a-f]{64}$")
 
     def test_actual_bootstrap_roles_passwords_owners_and_fingerprints(self):
         for service in ("access", "document", "ai"):
