@@ -1,5 +1,10 @@
 # 인프라 변경 기록
 
+## 2026-10-23
+
+- 점검 전환의 예상 HTTP 503 검사에서만 curl 재시도를 끈다. 503 재시도 중 `/dev/null` 출력 재설정 오류(exit 23)로 DB 변경 전에 배포가 중단되던 문제를 해결하며, 세 공개 경로의 정확한 503 검사와 기존 DB·감사 gate는 유지한다.
+- 재시도가 활성화되면 exit 23으로 실패하는 회귀 조건으로 점검 배포 성공을 검증한다.
+
 ## 2026-10-22
 
 - Strimzi Helm 1.1.0의 실제 실행 형태인 `command` 생략 + 단일 launcher `args`를 maintenance inventory에서 인식한다. 기존 기본/명시적 command 실행 형태를 유지하고 임의 command·추가 args·두 launcher 혼합은 거부한다.

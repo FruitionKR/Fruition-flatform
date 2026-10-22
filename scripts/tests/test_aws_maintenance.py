@@ -103,6 +103,16 @@ class MaintenanceTests(unittest.TestCase):
     def perform(self, review=None, **kwargs):
         deploy.deploy(CONFIG, SHA, self.documents, review=review or self.fake.review(), **kwargs)
 
+    def test_expected_maintenance_503_does_not_retry_http_failure(self):
+        def probe(url, *extra):
+            if extra != ("--retry", "0"):
+                raise subprocess.CalledProcessError(23, ["curl", url])
+            return "503"
+
+        with patch.object(deploy, "http_status", side_effect=probe) as check:
+            self.perform()
+        self.assertEqual(3, check.call_count)
+
     def test_live_fourteen_deployments_leave_exact_twelve_apps_and_preserve_audit(self):
         review = self.fake.review()
         controller, pod, entity = strimzi_controllers()
