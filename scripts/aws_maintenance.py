@@ -176,6 +176,89 @@ def create_record(api, name, data):
     api.kubectl("create", "-f", "-", input=yaml.safe_dump(api.install_record(name, data)))
 
 
+def complete_migrated_release(api, config, sha, documents, *, review, plan, images=None):
+    """Explicit reviewed forward completion; no migration, rollback, or audit rewrite."""
+    settings = api.validate_deploy_inputs(config, sha, documents, review=review, images=images)
+    if review["migration_mode"] != "maintenance-cutover":
+        raise ValueError("recovery requires the original maintenance review")
+    required = {"release_sha", "mode", "started_data_sha256", "failed_data_sha256", "incident_url"}
+    if (not isinstance(plan, dict) or set(plan) != required or plan["release_sha"] != sha
+            or plan["mode"] != "complete-after-migrations"
+            or any(not isinstance(plan[k], str) or not re.fullmatch(r"[0-9a-f]{64}", plan[k])
+                   for k in ("started_data_sha256", "failed_data_sha256"))
+            or not isinstance(plan["incident_url"], str)
+            or not re.fullmatch(r"https://github\.com/FruitionKR/Fruition-flatform/actions/runs/[0-9]+", plan["incident_url"])):
+        raise ValueError("invalid reviewed forward-completion plan")
+    api.verify_target(config)
+    api.verify_alb_log_destination(config)
+    records = {r["metadata"]["name"]: r for r in items(api, "configmaps")}
+    prefix = PREFIX + sha
+    if api.release_name(sha) in records or prefix + "-recovery-started" in records:
+        raise ValueError("recovery cannot repeat or overwrite a completed release")
+    for name in records:
+        if name.startswith(PREFIX) and name.endswith("-started") and name != prefix + "-started":
+            other = name[len(PREFIX):-len("-started")]
+            if api.release_name(other) not in records:
+                raise ValueError("another unresolved maintenance attempt exists")
+    for suffix, key in (("-started", "started_data_sha256"), ("-failed", "failed_data_sha256")):
+        record = records.get(prefix + suffix, {})
+        if record.get("immutable") is not True or digest(record.get("data", {})) != plan[key]:
+            raise ValueError("recovery audit does not match the reviewed incident")
+    started = records[prefix + "-started"]["data"]
+    if (json.loads(started["config"]) != config or json.loads(started["review"]) != review
+            or list(yaml.safe_load_all(started["manifest"])) != documents):
+        raise ValueError("recovery must use the exact original target config, review and manifest")
+    predecessor = records.get(api.release_name(review["expected_predecessor_release"]), {})
+    if (predecessor.get("immutable") is not True
+            or digest(predecessor.get("data", {})) != review["predecessor_record_sha256"]
+            or canonical(predecessor["data"]) != started["predecessor_record"]):
+        raise ValueError("recovery predecessor audit changed")
+    deployments = assert_quiescent(api, documents)
+    expected_images = {d["metadata"]["name"] + "/" + c["name"]: c["image"]
+                       for d in documents if d["kind"] == "Deployment"
+                       for c in d["spec"]["template"]["spec"]["containers"]}
+    live_images = {d["metadata"]["name"] + "/" + c["name"]: c["image"]
+                   for d in deployments for c in d["spec"]["template"]["spec"]["containers"]}
+    if live_images != expected_images:
+        raise ValueError("recovery requires the already rolled out target images")
+    jobs = {j["metadata"]["name"]: j for j in items(api, "jobs")}
+    for target in (d for d in documents if d["kind"] == "Job"):
+        job = jobs.get(target["metadata"]["name"], {})
+        expected = target["spec"]["template"]["spec"]["containers"]
+        actual = job.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        if (job.get("status", {}).get("succeeded") != 1 or job.get("status", {}).get("failed", 0)
+                or [(c["name"], c["image"]) for c in actual] != [(c["name"], c["image"]) for c in expected]):
+            raise ValueError("recovery requires successful original target migration jobs")
+    routes = maintenance_routes(api)
+    if items(api, "targetgroupbindings"):
+        raise ValueError("recovery requires maintenance routing without ALB bindings")
+    for host in ("access." + config["domain"], "api." + config["domain"], config["app_domain"]):
+        if api.http_status("https://" + host + "/", "--retry", "0") != "503":
+            raise ValueError("recovery public route is not under maintenance")
+    current = api.fingerprints(config, require_quiescent=True)
+    if current != review["after_fingerprints"]:
+        raise ValueError("recovery requires all three rehearsed after schemas; no SQL repair is allowed")
+    assert_quiescent(api, documents)
+    create_record(api, prefix + "-recovery-started", {"plan": canonical(plan), "fingerprints": canonical(current)})
+    try:
+        api.complete_rollout(config, sha, documents, current=current, review=review, settings=settings)
+    except BaseException:
+        cleanup_failed = False
+        try:
+            api.apply(routes)
+        except Exception:
+            cleanup_failed = True
+        for d in deployments:
+            try:
+                api.kubectl("patch", "deployment", d["metadata"]["name"], "--type=merge",
+                            "-p", '{"spec":{"replicas":0}}')
+            except Exception:
+                cleanup_failed = True
+        create_record(api, prefix + "-recovery-failed", {
+            "state": "operator-recovery-required", "containment": "unverified" if cleanup_failed else "requested"})
+        raise
+
+
 def guarded_deploy(api, config, sha, documents, **kwargs):
     api.validate_deploy_inputs(config, sha, documents, **kwargs)
     review = kwargs.get("review")
@@ -188,6 +271,8 @@ def guarded_deploy(api, config, sha, documents, **kwargs):
     for name in by_name:
         if name.startswith(PREFIX) and name.endswith("-started"):
             release = name[len(PREFIX):-len("-started")]
+            if release.endswith("-recovery"):
+                release = release[:-len("-recovery")]
             if api.release_name(release) not in by_name:
                 raise ValueError("unfinished maintenance attempt: keep downtime; explicit reviewed recovery required")
     if not maintenance:

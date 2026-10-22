@@ -387,8 +387,12 @@ def wait_alb_bindings():
 
 def http_status(url, *extra):
     # --retry는 연결 실패와 408/429/5xx만 다시 시도한다. 404·401은 그대로 돌려준다.
-    return run(["curl", "--silent", "--show-error", "--output", "/dev/null", "--write-out", "%{http_code}",
-                "--retry", "8", "--retry-all-errors", "--retry-delay", "5", "--max-time", "30", *extra, url]).strip()
+    # curl retries truncate the output file; /dev/null does not support that on
+    # the deployment runner. A private temporary regular file is seekable.
+    with tempfile.TemporaryDirectory(prefix="fruition-http-") as directory:
+        return run(["curl", "--silent", "--show-error", "--output", str(Path(directory) / "body"),
+                    "--write-out", "%{http_code}", "--retry", "8", "--retry-all-errors",
+                    "--retry-delay", "5", "--max-time", "30", *extra, url]).strip()
 
 
 def wait_status(url, expected, *extra, attempts=24):
@@ -699,6 +703,15 @@ def _deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fa
         current = fingerprints(config)
         if review["migration_mode"] == "maintenance-cutover" and current != review["after_fingerprints"]:
             raise ValueError("maintenance after fingerprints differ from rehearsed schema")
+    complete_rollout(config, sha, documents, current=current, review=review, settings=settings,
+                     existing=existing, bootstrap=bootstrap, initial=initial,
+                     initial_data=initial_data if initial else None)
+
+
+def complete_rollout(config, sha, documents, *, current, review, settings, existing="",
+                     bootstrap=False, initial=False, initial_data=None):
+    """Roll out already validated schemas; never execute a migration Job."""
+    foundation = {"ServiceAccount", "ConfigMap", "ExternalSecret", "NetworkPolicy"}
     event_kinds = {"KafkaNodePool", "Kafka", "KafkaTopic"}
     apply([d for d in documents if d["kind"] in event_kinds])
     for document in documents:
@@ -764,11 +777,12 @@ def deploy(config, sha, documents, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("render", "bootstrap", "deploy", "rollback"))
+    parser.add_argument("action", choices=("render", "bootstrap", "deploy", "rollback", "recover"))
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--sha", required=True)
     parser.add_argument("--manifest", type=Path, required=True, help="aws_image_release.py fetch로 받은 게시 release manifest")
     parser.add_argument("--review", type=Path, help="검토된 릴리스별 migration/복원 시험 기록 JSON")
+    parser.add_argument("--recovery-plan", type=Path, help="완료된 migration 이후 실패의 감사 해시를 고정한 명시적 복구 계획")
     parser.add_argument("--bootstrap-probe-recovery", action="store_true", help="검토된 Access probe timeout 1→5초 복구만 허용")
     parser.add_argument("--bootstrap-mail-health-recovery", action="store_true", help="SMTP 반복 health 인증 제외 복구만 허용")
     parser.add_argument("--bootstrap-oauth-recovery", action="store_true", help="준비 완료된 최초 deploy에서 Access OAuth Secret 연결 6개 추가만 허용")
@@ -782,6 +796,15 @@ def main():
     else:
         review = json.loads(args.review.read_text()) if args.review and args.action != "rollback" else None
         report_image_changes(documents)
+        if args.action == "recover":
+            if not args.recovery_plan or any((args.bootstrap_probe_recovery, args.bootstrap_mail_health_recovery,
+                                              args.bootstrap_oauth_recovery)):
+                raise ValueError("recover requires an explicit recovery plan and no bootstrap options")
+            from aws_maintenance import complete_migrated_release
+            return complete_migrated_release(SimpleNamespace(**globals()), config, args.sha, documents,
+                review=review, plan=json.loads(args.recovery_plan.read_text()), images=release_images(config, manifest))
+        if args.recovery_plan:
+            raise ValueError("recovery plan is recover-only")
         deploy(config, args.sha, documents, rollback=args.action == "rollback", review=review,
                bootstrap=args.action == "bootstrap", probe_recovery=args.bootstrap_probe_recovery,
                mail_health_recovery=args.bootstrap_mail_health_recovery, oauth_recovery=args.bootstrap_oauth_recovery,

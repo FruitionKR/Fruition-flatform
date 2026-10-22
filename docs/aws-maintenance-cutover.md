@@ -172,6 +172,27 @@ normal same-schema `none` 재배포도 기존 fingerprint gate를 통과하면 s
 
 ## 실패와 남은 차단 조건
 
+### 세 DB migration 완료 뒤 공개 검증 실패의 명시적 복구
+
+`recover`는 일반 실패 재시도가 아니다. 실제 migration Job 3개가 대상 이미지로 성공했고,
+세 DB가 검토한 `after_fingerprints`와 같으며 모든 앱과 scaler가 중지된 경우에만 사용한다.
+`docs/releases/<SHA>.recovery.json`에 `mode=complete-after-migrations`, 원본 immutable 시작/실패
+기록의 data SHA256 및 실패 workflow URL을 고정해 main에 검토·반영한 뒤 기존 Deploy workflow의
+`recover`를 선택한다. GitHub Environment 승인·ECR digest·정확한 원본 config/review/manifest 검증을 유지한다.
+
+SQL·foundation을 재적용하지 않고 원래 대상 앱과 라우팅·업무 smoke만 완료한다. 원본 시작/실패와 이전
+성공 기록은 수정·삭제하지 않는다. 별도 `-recovery-started`를 create하고 중단/실패 시 `-recovery-failed`와
+503/앱 중지를 유지한다. 같은 복구의 자동 재실행은 거부한다. 업무 smoke 성공 후에만 성공 release를 기록하고,
+workflow의 PDF 검증까지 통과한 뒤 운영자가 target scaler를 복구한다. 부분 migration·다른 이미지·다른
+스키마·활성 writer는 이 경로로 복구할 수 없다.
+
+2026-10-23 대상 `bc90ee595728f60defc3cf45517af33903ff4ddf`는
+[실행 39808347893](https://github.com/FruitionKR/Fruition-flatform/actions/runs/39808347893)에서
+Access→AI→Document migration 및 리허설 after 스키마 대조와 새 앱 rollout을 통과한 뒤,
+공개 health의 일시적 503을 curl이 재시도하면서 `/dev/null` 출력 재설정 오류(exit 23)로 중단됐다.
+복구 계획은 이 실제 시작/실패 감사 기록의 해시를 고정한다. 공개 HTTP 재시도 출력은 임시 일반 파일로 수정하며
+이 문서만으로 복구 배포가 성공했다고 주장하지 않는다.
+
 - migration/rollout/smoke 예외 시 maintenance Ingress를 다시 적용하고 모든 앱 replicas=0을 요청한다.
   `-failed` immutable 기록은 containment가 `requested`인지 `unverified`인지 남긴다. 성공이라고 주장하지 않는다.
 - SIGKILL/호스트 종료/네트워크 단절은 cleanup을 실행하지 못할 수 있다. `-started`만 남아도 성공 release가 없으면
