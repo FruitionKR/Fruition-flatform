@@ -40,7 +40,16 @@ images:
     newName: REPLACE_ME_ACCOUNT_ID.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-frontend
     newTag: latest
 
+configMapGenerator:
+  - name: fruition-rds-ca
+    namespace: fruition
+    files:
+      - root.crt=certs/rds-ca-bundle.pem
+generatorOptions:
+  disableNameSuffixHash: true
+
 patches:
+  - path: rds-ca-mount.yaml
   - patch: |-
       apiVersion: networking.k8s.io/v1
       kind: NetworkPolicy

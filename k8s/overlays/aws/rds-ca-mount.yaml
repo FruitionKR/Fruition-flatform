@@ -1,0 +1,274 @@
+# Public AWS RDS CA certificates. JDBC default path supports older deployed images too.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: access-svc
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: access-svc
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+        - name: rds-ca
+          mountPath: /home/appuser/.postgresql
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-svc
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: document-svc
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+        - name: rds-ca
+          mountPath: /home/appuser/.postgresql
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-api
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: pipeline-api
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingest-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: ingest-worker
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-agent-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: pipeline-agent-worker
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edit-event-consumer
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: edit-event-consumer
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-task-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: query-task-worker
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-task-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: agent-task-worker
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maintenance-task-worker
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: maintenance-task-worker
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: converter
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: converter
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: access-migration
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: migration
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+        - name: rds-ca
+          mountPath: /home/appuser/.postgresql
+          readOnly: true
+        env:
+        - name: PGSSLMODE
+          value: verify-full
+        - name: PGSSLROOTCERT
+          value: /etc/rds-ca/root.crt
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: document-migration
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: migration
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+        - name: rds-ca
+          mountPath: /home/appuser/.postgresql
+          readOnly: true
+        env:
+        - name: PGSSLMODE
+          value: verify-full
+        - name: PGSSLROOTCERT
+          value: /etc/rds-ca/root.crt
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-migration
+  namespace: fruition
+spec:
+  template:
+    spec:
+      volumes:
+      - name: rds-ca
+        configMap:
+          name: fruition-rds-ca
+      containers:
+      - name: migration
+        volumeMounts:
+        - name: rds-ca
+          mountPath: /etc/rds-ca
+          readOnly: true
+        env:
+        - name: PGSSLMODE
+          value: verify-full
+        - name: PGSSLROOTCERT
+          value: /etc/rds-ca/root.crt
