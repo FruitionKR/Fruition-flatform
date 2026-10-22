@@ -98,6 +98,22 @@ def image_matches(image, sha, images):
     return images.get(repository) == digest
 
 
+def alb_access_logs_bucket(config):
+    # Terraform restricts this profile to project=fruition and Seoul.
+    region = config["waf_acl_arn"].split(":")[3]
+    return f"fruition-alb-access-logs-{config['account_id']}-{region}"
+
+
+def verify_alb_log_destination(config):
+    bucket = alb_access_logs_bucket(config)
+    args = ["--bucket", bucket, "--expected-bucket-owner", config["account_id"],
+            "--region", config["waf_acl_arn"].split(":")[3]]
+    location = json.loads(run(["aws", "s3api", "get-bucket-location", *args]))
+    policy = json.loads(run(["aws", "s3api", "get-bucket-policy-status", *args]))
+    if location.get("LocationConstraint") != "ap-northeast-2" or policy.get("PolicyStatus", {}).get("IsPublic") is not False:
+        raise ValueError("ALB 로그 버킷·서울 리전·비공개 정책을 Terraform으로 먼저 준비해야 합니다")
+
+
 def render(config, sha, manifest):
     validate(config, sha)
     validate_manifest(manifest, sha)
@@ -108,7 +124,10 @@ def render(config, sha, manifest):
         overlay = tree / "overlays/aws"
         for path in overlay.glob("*.yaml"):
             content = path.read_text()
-            for key, value in config.items():
+            # Same deterministic name as Terraform alb-access-logs.tf. No new
+            # deployment secret/config key; older pinned release inputs still work.
+            replacements = {**config, "alb_access_logs_bucket": alb_access_logs_bucket(config)}
+            for key, value in replacements.items():
                 content = content.replace("REPLACE_ME_" + key.upper(), value)
             path.write_text(content)
         path = overlay / "kustomization.yaml"
@@ -557,6 +576,7 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         raise ValueError("OAuth 복구는 다른 복구 옵션 없는 initial-install deploy 전용입니다")
     settings = None if bootstrap else smoke_settings()
     verify_target(config)
+    verify_alb_log_destination(config)
     initial = not rollback and review["migration_mode"] == "initial-install"
     if initial:
         initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery, mail_health_recovery, oauth_recovery, images)

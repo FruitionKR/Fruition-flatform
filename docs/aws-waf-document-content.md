@@ -22,9 +22,9 @@ JSON은 선택적인 charset 파라미터를 허용한다. 잘못된 ID·다른 
 ## 평가 순서
 
 1. 긴급 차단이 활성화됐으면 먼저 차단한다.
-2. 정확한 요청 조건에 일치하면 Count로 `fruition:document-content` 라벨만 붙인다. 이어서 `not-public-paths`가 디코딩한 `/internal`·`/swagger-ui`·`/v3/api-docs` 경로를 404로 차단한다.
-3. 기존 관리형 규칙 4개를 평가한다. CommonRuleSet의 `SizeRestrictions_BODY`, `GenericLFI_BODY`, `CrossSiteScripting_BODY`와 SQLiRuleSet의 `SQLi_BODY`만 Count로 전환한다.
-4. 위 네 규칙의 라벨이 있지만 문서 요청 라벨이 없으면 `document-content-body-guard`가 차단한다. 같은 WebACL의 라벨은 `fruition:document-content`라는 로컬 이름으로 참조한다.
+2. 정확한 요청 조건에 일치하면 Count로 `fruition:document-content` 라벨만 붙인다. 이어서 `not-public-paths`가 디코딩한 `/internal`·`/swagger-ui`·`/v3/api-docs` 경로를, `sensitive-file-paths`가 `.git`·`.env` 등 민감 파일 경로를 404로 차단한다. 본문 예외는 URI 차단을 면제하지 않는다.
+3. 기존 관리형 규칙 4개를 평가한다. CommonRuleSet의 `SizeRestrictions_BODY`, `GenericLFI_BODY`, `CrossSiteScripting_BODY`와 SQLiRuleSet의 `SQLi_BODY`, `SQLiExtendedPatterns_BODY`만 Count로 전환한다.
+4. 위 다섯 규칙의 라벨이 있지만 문서 요청 라벨이 없으면 `document-content-body-guard`가 차단한다. 같은 WebACL의 라벨은 `fruition:document-content`라는 로컬 이름으로 참조한다.
 5. `app_domain`이 설정되고 접근 코드가 있으면 `frontend-access-code`가 해당 호스트의 `/api/` 요청 중 코드 없이 열리는 경로가 아니고 `fruition_access` 쿠키 해시가 맞지 않는 요청을 403으로 차단한다.
 6. IP별 제한 `per-source-ip`(5분 3,000건, `/_next/static/` 제외)와 전체 제한 `all-api-requests`(5분 6,000건, `/api/`만 계산)를 평가한다. 초과 시 429다. 값은 `cost-guards.tf`의 `waf_requests_per_ip_5m`·`waf_requests_total_5m` 기본값이다.
 
@@ -64,3 +64,9 @@ python3 scripts/aws_waf_content_probe.py \
 - 로그인한 사용자의 문서 생성·저장·재조회와 AI 실행까지 포함한 업무 검증은 수행하지 않았다. 테스트는 사용자 문서를 변경하지 않았다.
 
 근거: [AWS 기본 규칙](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html), [SQLi 규칙](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-use-case.html), [ALB 본문 검사 제한](https://docs.aws.amazon.com/waf/latest/APIReference/API_Body.html), [로컬 라벨 참조](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-label-match-examples.html).
+
+## 2026-10-22 호환성 보완
+
+운영 회귀 검사에서 SQL 예문 11건이 `SQLiExtendedPatterns_BODY`에 차단되는 기존 예외 누락을 발견했다. 이 본문 규칙도 Count로 평가하고, 같은 라벨 `awswaf:managed:aws:sql-database:SQLiExtendedPatterns_Body`를 기존 재차단 guard에 추가했다. 요청 조건 목록은 넓히지 않았으며 쿼리·URI·헤더·쿠키 SQLi 검사는 유지한다.
+
+적용 후 인증 없는 합성 요청 57건과 해당 WAF 로그를 대조했다. 예외 44건은 ALLOW/401, 대조군 13건은 BLOCK/403이었다. ALLOW 중 SQLi 확장 라벨이 발생한 11건도 확인했다. 이는 WAF 호환성 검사이며 로그인한 사용자의 저장·AI 실행까지 검증한 결과는 아니다.

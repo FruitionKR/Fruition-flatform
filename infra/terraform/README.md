@@ -43,6 +43,10 @@ S3의 Document/AI/converter object 권한은 prefix로 제한하지만 신규 �
 
 비용 보호 임계값과 적용 후 WAF 연결 검증은 [비용 보호 운영](../../docs/aws-deployment-costs.md#추가한-비용-보호-설정과-적용-방법)을 따른다. Terraform apply만으로 ALB에 WAF가 연결되지는 않으며 앱 배포 JSON에 `waf_acl_arn`을 반영해야 한다.
 
+ALB 접근 로그는 이 모듈의 `alb_access_logs` 출력에 있는 전용 버킷으로 보낸다. 버킷·전달 정책·배포 역할의 메타데이터 조회 권한을 먼저 적용한 뒤 Ingress를 배포한다. 배포기는 계정·서울 리전으로 동일한 버킷 이름을 계산하므로 배포 JSON에 새 비밀값을 추가하지 않는다. 실제 ALB 설정은 Controller annotation으로 관리하며 이 모듈에서 ALB를 중복 생성하지 않는다. 일반 로그는 30일 만료, `evidence/`는 별도 보존이므로 수명주기 변경 시 주의한다.
+
+접근 코드 게이트는 기본 `waf_access_code_required=true`로 도메인·코드가 비면 계획을 거부한다. `app_domain`은 실제 Ingress Host와 대조한다. 접근 코드 없이 운영하는 의도적인 배포만 `waf_access_code_required=false`를 명시한다. 민감 파일 경로 규칙의 최초 Count 검증은 `waf_sensitive_paths_block=false`, 최종 운영 차단은 기본값 true다. [운영 적용·검증 기록](../../docs/aws-waf-review-2026-10-22.md#7-2026-10-22-운영-적용-기록)을 참고한다.
+
 CloudWatch addon·로그 14일 보존·운영 대시보드·Discord 장애/복구 알림은 [CloudWatch 운영 절차](../../docs/aws-observability.md)를 따른다. 실제 웹훅 입력과 수신 시험은 별도이며 ALB 지표는 생성 후 suffix를 등록해야 한다.
 
 ### EKS 애드온 관리

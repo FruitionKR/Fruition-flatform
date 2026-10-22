@@ -87,6 +87,10 @@ class FakeCluster:
         if args[:2] == ["aws", "eks"]:
             return json.dumps({"cluster": {"arn": f"arn:aws:eks:ap-northeast-2:{CONFIG['account_id']}:cluster/fruition-eks",
                                            "endpoint": "https://fixture.eks.amazonaws.com", "version": "1.35", "status": "ACTIVE"}})
+        if args[:3] == ["aws", "s3api", "get-bucket-location"]:
+            return json.dumps({"LocationConstraint": "ap-northeast-2"})
+        if args[:3] == ["aws", "s3api", "get-bucket-policy-status"]:
+            return json.dumps({"PolicyStatus": {"IsPublic": False}})
         if "config" in args and "view" in args:
             return "https://fixture.eks.amazonaws.com"
         if args[0] == "kubectl" and args[3:5] == ["delete", "networkpolicy"]:
@@ -116,6 +120,29 @@ class FakeCluster:
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_log_destination_preflight_rejects_wrong_region_public_or_missing_policy(self):
+        for region, policy in [("us-east-1", False), ("ap-northeast-2", True), ("ap-northeast-2", None)]:
+            with patch.object(deploy, "run", side_effect=[json.dumps({"LocationConstraint": region}),
+                                                        json.dumps({"PolicyStatus": {"IsPublic": policy}})]) as run:
+                with self.assertRaises(ValueError):
+                    deploy.verify_alb_log_destination(CONFIG)
+                self.assertIn("--expected-bucket-owner", run.call_args.args[0])
+
+    def test_access_logging_uses_account_scoped_destination_and_preserves_attributes(self):
+        for account in ("123456789012", "999999999999"):
+            config = copy.deepcopy(CONFIG)
+            for key, value in config.items():
+                config[key] = value.replace(CONFIG["account_id"], account)
+            documents = deploy.render(config, SHA, MANIFEST)
+            ingress = next(d for d in documents if d["kind"] == "Ingress")
+            raw = ingress["metadata"]["annotations"]["alb.ingress.kubernetes.io/load-balancer-attributes"]
+            attributes = dict(item.split("=", 1) for item in raw.split(","))
+            self.assertEqual("true", attributes["access_logs.s3.enabled"])
+            self.assertEqual(f"fruition-alb-access-logs-{account}-ap-northeast-2", attributes["access_logs.s3.bucket"])
+            self.assertEqual("alb", attributes["access_logs.s3.prefix"])
+            self.assertEqual("true", attributes["routing.http.drop_invalid_header_fields.enabled"])
+            self.assertEqual("120", attributes["idle_timeout.timeout_seconds"])
+
     def test_waf_is_required_and_bound_to_same_account_and_region(self):
         documents = deploy.render(CONFIG, SHA, MANIFEST)
         ingress = next(d for d in documents if d["kind"] == "Ingress")
