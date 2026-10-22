@@ -7,6 +7,7 @@
 | [architecture.md](architecture.md) | 전체 아키텍처·통신·공통 권한·AWS 배치·저장소 소유권 |
 | [AWS 배포 아키텍처 그림](aws-deployment-architecture.md) | 배포 후 서비스 배치·요청 흐름·배포와 알림 연결을 쉬운 그림으로 설명 |
 | [화면 EKS Fargate 운영](aws-frontend-hosting.md) | 화면·API 같은 주소 경로 분기, 접근 코드 WAF, 절전 중 제약과 되돌리기 |
+| [WAF 스캔 조사와 운영 보완안](aws-waf-review-2026-10-22.md) | 2026-10-22 경보·유출 가능성 조사 근거, 접근 로그·민감 경로 차단·경보 개선 계획 |
 | [api/](api/README.md) | 서비스별 API 진입 안내와 서비스 간 호출 경로 |
 | [data-model.md](data-model.md) | 저장소·DB 계정 격리·서비스 간 관계 |
 | [script.md](script.md) | 통합 실행·검증·AWS 준비와 운영 절차 |
