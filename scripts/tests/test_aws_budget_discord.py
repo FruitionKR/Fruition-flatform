@@ -84,10 +84,67 @@ class BudgetDiscordTests(unittest.TestCase):
         self.assertIn("실제 장애 원인은 관련 로그·자원 상태를 확인", content)
 
     def test_missing_data_ok_does_not_claim_actual_recovery(self):
+        reason = ("Threshold Crossed: no datapoints were received for 1 period and "
+                  "1 missing datapoint was treated as [NonBreaching].")
+        for trigger in (None, {"TreatMissingData": "breaching"}, {"TreatMissingData": "ignore"},
+                        {"TreatMissingData": "missing"}, {"TreatMissingData": "unknown"},
+                        {"TreatMissingData": ["notBreaching"]}):
+            with self.subTest(trigger=trigger):
+                summary = notifier.alarm_diagnosis({"NewStateValue": "OK", "NewStateReason": reason, "Trigger": trigger})
+                self.assertIn("측정 데이터가 누락", summary)
+                self.assertIn("실제 복구 여부는 추가 확인", summary)
+
+    def test_not_breaching_ok_explains_policy_without_claiming_recovery(self):
         summary = notifier.alarm_diagnosis({
-            "NewStateValue": "OK", "NewStateReason": "Threshold Crossed: no datapoints were received for 1 period"})
-        self.assertIn("측정 데이터가 누락", summary)
-        self.assertIn("실제 복구 여부는 추가 확인", summary)
+            "NewStateValue": "OK", "Trigger": {"TreatMissingData": "notBreaching"},
+            "NewStateReason": "Threshold Crossed: no datapoints were received for 1 period and "
+                              "1 missing datapoint was treated as [NonBreaching]."})
+        self.assertIn("누락 데이터를 임계값 미초과로 처리하도록 설정되어 정상으로 판정", summary)
+        self.assertIn("누락 데이터 처리: notBreaching (임계값 미초과로 처리)", summary)
+        for claim in ("0건", "복구됐", "복구 완료", "추가 확인이 필요"):
+            self.assertNotIn(claim, summary)
+
+    def test_missing_data_alarm_does_not_blame_gap_alone(self):
+        for policy, label in (("breaching", "임계값 초과로 처리"), ("missing", "전부 누락 시 데이터 없음 상태"),
+                              ("ignore", "현재 상태 유지"), ("notBreaching", "임계값 미초과로 처리")):
+            with self.subTest(policy=policy):
+                summary = notifier.alarm_diagnosis({
+                    "NewStateValue": "ALARM", "Trigger": {"TreatMissingData": policy},
+                    "NewStateReason": "Threshold Crossed: no datapoints were received for 3 periods and "
+                                      "3 missing datapoints were treated as [Breaching]."})
+                self.assertIn("누락만으로 경보가 됐는지는 이 이벤트로 단정할 수 없으니", summary)
+                self.assertIn(f"누락 데이터 처리: {policy} ({label})", summary)
+        summary = notifier.alarm_diagnosis({"NewStateValue": "ALARM", "NewStateReason": "no datapoints"})
+        self.assertNotIn("누락 데이터 처리:", summary)
+
+    def test_range_without_datapoints_to_alarm_does_not_assume_n_of_n(self):
+        trigger = {"MetricName": "BlockedRequests", "Threshold": 100.0, "ComparisonOperator": "GreaterThanThreshold",
+                   "Period": 300, "EvaluationPeriods": 3}
+        summary = notifier.alarm_diagnosis({"NewStateValue": "ALARM", "Trigger": trigger})
+        self.assertIn("평가 범위: 300초씩 최근 3구간\n", summary)
+        self.assertNotIn("구간 중", summary)
+
+    def test_malformed_optional_metadata_still_delivers_core_alarm(self):
+        topic = TOPIC.replace("budget", "operations")
+        response = MagicMock(status=200)
+        response.read.return_value = b'{"id":"123"}'
+        response.__enter__.return_value = response
+        for trigger in ({"ComparisonOperator": [], "Threshold": 80}, {"ComparisonOperator": {}, "Threshold": 80},
+                        {"ComparisonOperator": "GreaterThanThreshold", "Threshold": [80], "MetricName": {},
+                         "Period": "300", "EvaluationPeriods": True, "TreatMissingData": {}}, "trigger"):
+            opener = MagicMock()
+            opener.open.return_value = response
+            message = json.dumps({"AlarmName": "fruition-ops-node_cpu", "NewStateValue": "ALARM",
+                                  "OldStateValue": ["OK"], "Trigger": trigger,
+                                  "NewStateReason": "Threshold Crossed: no datapoints were received"})
+            with self.subTest(trigger=trigger), patch.dict(os.environ, {"OPERATIONS_TOPIC_ARN": topic}), \
+                 patch.object(notifier, "read_webhook", return_value=URL), \
+                 patch.object(notifier, "build_opener", return_value=opener):
+                self.assertEqual({"delivered": 1}, notifier.handler(event(message, topic), None))
+                content = json.loads(opener.open.call_args.args[0].data)["content"]
+                self.assertIn("AWS 운영 경보 [ALARM]\nfruition-ops-node_cpu\n상태: 경보\n", content)
+                self.assertNotIn("경보 조건:", content)
+                self.assertNotIn("누락 데이터 처리:", content)
 
     def test_unknown_and_insufficient_data_do_not_invent_evidence(self):
         for trigger in (None, {}, {"Metrics": []}):
