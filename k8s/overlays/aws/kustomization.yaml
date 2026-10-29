@@ -292,6 +292,9 @@ patches:
                 env:
                   - name: QUERY_EMBEDDING_MODE
                     value: "bge-m3"
+                  # 후속 편입·lint의 Jev 개념 판정 후보 임베딩만 embedding-server에 요청한다(ai ADR-0026·0037).
+                  - name: EMBEDDING_SERVICE_URL
+                    value: "http://embedding-server:8000"
                 resources:
                   requests:
                     cpu: 500m

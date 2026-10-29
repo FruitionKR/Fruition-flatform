@@ -166,7 +166,7 @@ services:
       redis:
         condition: service_healthy
 
-  # 짧은 텍스트 전용 BGE-M3 임베딩 서버(ai ADR-0026). query·agent·ingest worker가 EMBEDDING_SERVICE_URL로 호출한다.
+  # 짧은 텍스트 전용 BGE-M3 임베딩 서버(ai ADR-0026). query·agent·ingest·maintenance worker가 EMBEDDING_SERVICE_URL로 호출한다.
   embedding-server:
     image: *pipeline-image
     container_name: fruition-embedding-server-dev
@@ -215,6 +215,8 @@ services:
       AI_COMMAND_TOPIC: ${MAINTENANCE_COMMAND_TOPIC:-ai.maintenance.command}
       AI_COMMAND_CONSUMER_GROUP: maintenance-task-worker
       QUERY_EVIDENCE_LIMIT: ${POST_INGEST_EVIDENCE_LIMIT:-3}
+      # 후속 편입·lint의 Jev 개념 판정 후보 임베딩. 긴 페이지 임베딩은 계속 워커가 직접 만든다(ai ADR-0026).
+      EMBEDDING_SERVICE_URL: http://embedding-server:8000
 
   edit-event-consumer:
     image: *pipeline-image

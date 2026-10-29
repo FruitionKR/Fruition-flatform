@@ -109,7 +109,7 @@ AI 노드의 상시 Pod(질의·에이전트·유지보수·수집 작업자 각
 
 ### 임베딩 서버(embedding-server)
 
-질의·에이전트 작업자는 질문 임베딩을, 수집 작업자는 Jev 개념 병합의 후보 임베딩을 `embedding-server`(복제본 1개, 메모리 요청 3Gi, 한도 4Gi)에 `EMBEDDING_SERVICE_URL=http://embedding-server:8000`으로 요청합니다([ai ADR-0026](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/adr/0026-embedding-server.md)). 서버는 짧은 텍스트만 받고, 긴 페이지 임베딩은 유지보수 작업자가 계속 직접 계산합니다. 서버는 `/health`가 모델 적재 완료 시에만 200이라 `startupProbe`가 최대 5분 기다립니다. NetworkPolicy는 질의·에이전트·수집 작업자에서 8000번 포트로 오는 요청만 허용합니다. 수집 작업자는 서버를 호출하지 못하면 기존 LLM 개념 병합으로 처리합니다.
+질의·에이전트 작업자는 질문 임베딩을, 수집·유지보수 작업자는 Jev 개념 판정(편입 병합, 후속 편입 클러스터 일치, lint 승격)의 후보 임베딩을 `embedding-server`(복제본 1개, 메모리 요청 3Gi, 한도 4Gi)에 `EMBEDDING_SERVICE_URL=http://embedding-server:8000`으로 요청합니다([ai ADR-0026](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/adr/0026-embedding-server.md)). 서버는 짧은 텍스트만 받고, 긴 페이지 임베딩은 유지보수 작업자가 계속 직접 계산합니다. 서버는 `/health`가 모델 적재 완료 시에만 200이라 `startupProbe`가 최대 5분 기다립니다. NetworkPolicy는 질의·에이전트·수집·유지보수 작업자에서 8000번 포트로 오는 요청만 허용합니다. 수집·유지보수 작업자는 서버를 호출하지 못하면 Jev 판정 없이 기존 방식(LLM 병합, 이름 일치)으로 처리합니다.
 
 전환 직후에는 질의·에이전트 작업자의 2.5Gi 메모리 패치를 그대로 둡니다. 운영에서 질문 지연과 오류율을 확인한 뒤 패치를 제거해야 메모리가 줄어듭니다. 서버가 재시작되는 동안에는 질문 임베딩이 실패하므로, 문제가 생기면 두 작업자에서 `EMBEDDING_SERVICE_URL`을 빼면 각자 모델을 올리던 이전 동작으로 돌아갑니다.
 
