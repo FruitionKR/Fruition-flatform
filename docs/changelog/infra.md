@@ -2,6 +2,17 @@
 
 ## 2026-10-29
 
+### 운영 경보 Discord 메시지 한국어 판정 근거
+
+- CloudWatch SNS 이벤트의 경보 조건·평가 구간·측정값을 한국어로 설명하고 영어 원문 사유를 보존한다. 데이터 누락으로 OK가 된 경우 실제 복구 확인이 필요함을 안내하며 근본 원인을 추정하지 않는다.
+- 운영 지표별 알람 설명과 점검 안내를 한국어로 보강했다. 임계값과 예산 알림 경로는 유지하며 운영 반영에는 Lambda 코드와 알람 설명의 Terraform 배포가 필요하다.
+- AWS 회귀 테스트 266개, 로컬 종료 테스트 2개, Terraform fmt/validate와 비밀정보 검사를 통과했다. 운영 배포·Discord 발송은 수행하지 않았다.
+
+### PR #131 리뷰: 누락 데이터 처리 설정과 비정상 진단 정보
+
+- `notBreaching` 경보가 데이터 누락으로 OK가 되면 매번 "실제 복구 여부 추가 확인"으로 안내됐다. 이제 SNS `Trigger.TreatMissingData`를 표시하고, 그 설정에 따라 정상 판정됐다고만 설명한다. 실제 0건이나 복구 완료는 단정하지 않는다. 설정이 없거나 알 수 없으면 기존처럼 추가 확인을 안내하고, 누락이 포함된 ALARM은 누락을 유일한 원인으로 단정하지 않는다.
+- 비표준 입력에서 `ComparisonOperator`·`OldStateValue`가 list/dict이면 `TypeError`로 알림 전체가 실패했다. 진단용 부가 정보는 타입을 확인한 뒤 비정상 값의 줄만 생략하고, 필수 필드(`AlarmName`, `NewStateValue`) 검증은 유지한다. `DatapointsToAlarm`이 없는 비표준 입력은 N-of-N을 가정하지 않고 평가 구간만 표시한다.
+
 ### PR #130 리뷰: converter 종료 순서 보장
 
 - `dev-down.sh --graceful`에서도 의존성 없는 converter와 DB가 동시에 종료돼 drain 중 연결이 끊겼다. converter의 `stop`을 먼저 완료한 뒤 전체 `down`을 실행하고, `stop` 실패 시 인프라·볼륨을 보존한다.
