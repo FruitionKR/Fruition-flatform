@@ -2,6 +2,12 @@
 
 ## 2026-10-29
 
+### PR #130 리뷰: converter 종료 순서 보장
+
+- `dev-down.sh --graceful`에서도 의존성 없는 converter와 DB가 동시에 종료돼 drain 중 연결이 끊겼다. converter의 `stop`을 먼저 완료한 뒤 전체 `down`을 실행하고, `stop` 실패 시 인프라·볼륨을 보존한다.
+- 기본·graceful·볼륨 삭제·조합 옵션과 stop 실패를 회귀 테스트 2개로 검증했다. 기존 코드에서 실패하고 수정 후 통과하며 AWS IaC CI에도 이 테스트를 연결했다.
+- 격리된 실제 Docker 프로젝트에서 수정 전 `conv-term → db-term → conv-db-GONE`, 수정 후 `conv-term → conv-db-alive → db-term`을 확인했다. 시험 컨테이너·네트워크는 정리했고 운영 환경은 변경하지 않았다.
+
 ### #90 인프라 후속 작업과 운영 확인
 
 - Kafka scaler에 lag가 있는 파티션 수 제한, 120초 확장 안정화, 분당 1 Pod 확장 제한을 추가했다. 장기 실행을 누락시키는 persistent lag 제외는 사용하지 않는다. 정확한 대기 작업 지표 분리는 여전히 별도 개선이다.

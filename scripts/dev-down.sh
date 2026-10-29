@@ -73,7 +73,8 @@ stop_managed_processes() {
 }
 
 down_infra() {
-  local args=(-f "$COMPOSE_FILE" -f "$PIPELINE_COMPOSE_FILE" -f "$ROOT_DIR/infra/compose.converter.yml" down --remove-orphans --timeout "$STOP_TIMEOUT")
+  local compose_args=(-f "$COMPOSE_FILE" -f "$PIPELINE_COMPOSE_FILE" -f "$ROOT_DIR/infra/compose.converter.yml")
+  local args=(down --remove-orphans --timeout "$STOP_TIMEOUT")
 
   if [[ "$REMOVE_VOLUMES" == "true" ]]; then
     args+=(-v)
@@ -81,8 +82,12 @@ down_infra() {
 
   if docker info >/dev/null 2>&1; then
     log "종료 대기 ${STOP_TIMEOUT}초: 시간 초과 시 작업이 중단되고 다음 기동에서 재전달될 수 있습니다."
+    # converter에는 depends_on이 없다. journal·업로드·offset commit을 마칠 때까지
+    # PostgreSQL·MinIO·Kafka를 유지하고, 정지가 실패하면 전체 종료도 중단한다.
+    log "converter를 먼저 종료합니다."
+    docker compose "${compose_args[@]}" stop --timeout "$STOP_TIMEOUT" markitdown
     log "PostgreSQL, MinIO, pipeline API 컨테이너를 종료합니다."
-    docker compose "${args[@]}"
+    docker compose "${compose_args[@]}" "${args[@]}"
   else
     log "Docker daemon에 연결할 수 없어 인프라 종료는 건너뜁니다."
   fi

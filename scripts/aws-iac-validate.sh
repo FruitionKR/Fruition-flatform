@@ -16,4 +16,5 @@ done
 kubectl kustomize k8s/platform/aws >/dev/null
 # 실제 kustomize 렌더·app RBAC·fake CLI·임시 PostgreSQL/Redis만 사용한다.
 "$python_bin" -m unittest discover -s scripts/tests -p 'test_aws_*.py' -v
+"$python_bin" -m unittest discover -s scripts/tests -p 'test_dev_down.py' -v
 git diff --check
