@@ -394,7 +394,7 @@ spec:
     - protocol: TCP
       port: 8000
 ---
-# embedding-server는 질의 임베딩을 요청하는 query·agent worker의 호출만 받는다(ai ADR-0026).
+# embedding-server는 질의 임베딩을 요청하는 query·agent worker와 개념 후보 임베딩을 요청하는 ingest worker의 호출만 받는다(ai ADR-0026·0038).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -418,6 +418,7 @@ spec:
           values:
           - query-task-worker
           - agent-task-worker
+          - ingest-worker
     ports:
     - protocol: TCP
       port: 8000
@@ -435,6 +436,7 @@ spec:
       values:
       - query-task-worker
       - agent-task-worker
+      - ingest-worker
   policyTypes:
   - Egress
   egress:

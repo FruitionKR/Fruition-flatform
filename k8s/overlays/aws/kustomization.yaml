@@ -180,6 +180,10 @@ patches:
             containers:
               - name: ingest-worker
                 imagePullPolicy: IfNotPresent
+                env:
+                  # Jev 개념 병합의 후보 추림 임베딩을 embedding-server에 요청한다(ai ADR-0026·0038).
+                  - name: EMBEDDING_SERVICE_URL
+                    value: "http://embedding-server:8000"
                 resources:
                   requests:
                     cpu: "1"

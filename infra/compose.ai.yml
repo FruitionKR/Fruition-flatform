@@ -142,6 +142,8 @@ services:
       JEV_ROUTING_ENABLED: ${JEV_ROUTING_ENABLED:-false}
       JEV_EVIDENCE_ENABLED: ${JEV_EVIDENCE_ENABLED:-false}
       JEV_CONCEPT_MERGE_ENABLED: ${JEV_CONCEPT_MERGE_ENABLED:-false}
+      # Jev 개념 병합의 후보 추림 임베딩. 서버가 없으면 ingest는 기존 LLM 병합으로 처리한다(ai ADR-0026·0038).
+      EMBEDDING_SERVICE_URL: http://embedding-server:8000
       WIKI_SEMANTIC_MAX_WORKERS: ${WIKI_SEMANTIC_MAX_WORKERS:-4}
       LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
@@ -164,7 +166,7 @@ services:
       redis:
         condition: service_healthy
 
-  # 짧은 텍스트 전용 BGE-M3 임베딩 서버(ai ADR-0026). query·agent worker가 EMBEDDING_SERVICE_URL로 호출한다.
+  # 짧은 텍스트 전용 BGE-M3 임베딩 서버(ai ADR-0026). query·agent·ingest worker가 EMBEDDING_SERVICE_URL로 호출한다.
   embedding-server:
     image: *pipeline-image
     container_name: fruition-embedding-server-dev
