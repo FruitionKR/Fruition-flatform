@@ -11,6 +11,7 @@ spec:
       consumerGroup: ingest-worker
       topic: ai.ingest.command
       lagThreshold: '5'
+      limitToPartitionsWithLag: "true"
       offsetResetPolicy: earliest
       tls: enable
     authenticationRef:
@@ -29,6 +30,7 @@ spec:
       consumerGroup: query-task-worker
       topic: ai.query.command
       lagThreshold: '10'
+      limitToPartitionsWithLag: "true"
       offsetResetPolicy: earliest
       tls: enable
     authenticationRef:
@@ -47,6 +49,7 @@ spec:
       consumerGroup: agent-task-worker
       topic: ai.agent.command
       lagThreshold: '6'
+      limitToPartitionsWithLag: "true"
       offsetResetPolicy: earliest
       tls: enable
     authenticationRef:
@@ -65,6 +68,7 @@ spec:
       consumerGroup: maintenance-task-worker
       topic: ai.maintenance.command
       lagThreshold: '2'
+      limitToPartitionsWithLag: "true"
       offsetResetPolicy: earliest
       tls: enable
     authenticationRef:
@@ -83,6 +87,7 @@ spec:
       consumerGroup: ai.convert.command-worker
       topic: ai.convert.command
       lagThreshold: '1'
+      limitToPartitionsWithLag: "true"
       offsetResetPolicy: earliest
       tls: enable
     authenticationRef:

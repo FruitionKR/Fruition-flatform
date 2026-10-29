@@ -19,3 +19,17 @@
 6. `kubectl apply -k k8s/base`
 
 AWS는 `overlays/aws`를 사용하며 상태 계층은 RDS·ElastiCache·S3로 대체된다([overlays/aws/README.md](overlays/aws/README.md)).
+
+## Kafka worker 확장과 임시 저장소
+
+Kafka lag에는 처리 중인 미커밋 메시지도 포함된다. 5개 worker ScaledObject는 lag가 있는 파티션 수로 replica 상한을 제한하고,
+HPA가 120초 동안 관측한 확장 권고를 안정화한 뒤 60초당 최대 1 Pod씩 늘린다. 축소 안정화는 300초다.
+AWS의 TLS trigger 교체에도 같은 파티션 제한을 적용한다.
+장시간 작업 때문에 offset이 그대로인 정상 파티션을 누락시키지 않도록 `excludePersistentLag`는 켜지 않는다.
+이는 과도한 증설을 완화하는 설정이며 실행 중 작업과 대기 작업을 정확히 분리하는 지표는 아니다.
+지속적인 여러 파티션의 backlog에는 기존 최대 replica까지 확장되며, 첫 확장에는 최대 약 2분의 지연이 추가된다.
+근거: [KEDA Kafka scaler](https://keda.sh/docs/2.18/scalers/apache-kafka/).
+
+maintenance worker는 `/tmp`의 1536Mi 제한과 별도로 `ephemeral-storage: 2Gi`를 예약한다.
+노드에 공간이 없으면 작업 시작 후 디스크가 부족해지는 대신 스케줄링 단계에서 Pending이 될 수 있다.
+공통 ConfigMap의 `EMBEDDING_TIMEOUT_SECONDS=10`, `AI_PURGE_READ_TIMEOUT=120s`는 기존 서비스 기본값을 명시한 것이다.

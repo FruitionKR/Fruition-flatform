@@ -10,6 +10,18 @@ spec:
     name: ingest-worker
   minReplicaCount: 1
   maxReplicaCount: 4
+  # 미커밋 offset은 실행 중 작업도 포함한다. 짧은 lag 급등으로 한 번에 증설하지 않는다.
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 300
   triggers:
     - type: kafka
       metadata:
@@ -17,6 +29,7 @@ spec:
         consumerGroup: ingest-worker
         topic: ai.ingest.command
         lagThreshold: "5"
+        limitToPartitionsWithLag: "true"
         offsetResetPolicy: earliest
 ---
 apiVersion: keda.sh/v1alpha1
@@ -28,6 +41,18 @@ spec:
   scaleTargetRef: {name: query-task-worker}
   minReplicaCount: 1
   maxReplicaCount: 4
+  # 미커밋 offset은 실행 중 작업도 포함한다. 짧은 lag 급등으로 한 번에 증설하지 않는다.
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 300
   triggers:
     - type: kafka
       metadata:
@@ -35,6 +60,7 @@ spec:
         consumerGroup: query-task-worker
         topic: ai.query.command
         lagThreshold: "10"
+        limitToPartitionsWithLag: "true"
         offsetResetPolicy: earliest
 ---
 apiVersion: keda.sh/v1alpha1
@@ -46,6 +72,18 @@ spec:
   scaleTargetRef: {name: agent-task-worker}
   minReplicaCount: 1
   maxReplicaCount: 4
+  # 미커밋 offset은 실행 중 작업도 포함한다. 짧은 lag 급등으로 한 번에 증설하지 않는다.
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 300
   triggers:
     - type: kafka
       metadata:
@@ -53,6 +91,7 @@ spec:
         consumerGroup: agent-task-worker
         topic: ai.agent.command
         lagThreshold: "6"
+        limitToPartitionsWithLag: "true"
         offsetResetPolicy: earliest
 ---
 apiVersion: keda.sh/v1alpha1
@@ -64,6 +103,18 @@ spec:
   scaleTargetRef: {name: maintenance-task-worker}
   minReplicaCount: 1
   maxReplicaCount: 2
+  # 미커밋 offset은 실행 중 작업도 포함한다. 짧은 lag 급등으로 한 번에 증설하지 않는다.
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 300
   triggers:
     - type: kafka
       metadata:
@@ -71,6 +122,7 @@ spec:
         consumerGroup: maintenance-task-worker
         topic: ai.maintenance.command
         lagThreshold: "2"
+        limitToPartitionsWithLag: "true"
         offsetResetPolicy: earliest
 ---
 # converter는 command 하나가 길고 CPU·메모리를 많이 쓰므로 pod당 1건(lagThreshold 1)으로 3개까지만 늘린다.
@@ -84,6 +136,18 @@ spec:
   scaleTargetRef: {name: converter}
   minReplicaCount: 1
   maxReplicaCount: 3
+  # 미커밋 offset은 실행 중 작업도 포함한다. 짧은 lag 급등으로 한 번에 증설하지 않는다.
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 300
   triggers:
     - type: kafka
       metadata:
@@ -91,4 +155,5 @@ spec:
         consumerGroup: ai.convert.command-worker
         topic: ai.convert.command
         lagThreshold: "1"
+        limitToPartitionsWithLag: "true"
         offsetResetPolicy: earliest

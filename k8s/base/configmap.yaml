@@ -68,6 +68,7 @@ data:
   DOCUMENT_INTERNAL_BASE_URL: "http://document-svc:8080"
   # access-svc -> pipeline-api(/internal/ai/purge/*, 데이터 파기)
   AI_INTERNAL_BASE_URL: "http://pipeline-api:8000"
+  AI_PURGE_READ_TIMEOUT: "120s"
   CORS_ALLOWED_ORIGINS: "http://localhost:3000"
   OAUTH_FRONTEND_REDIRECT_URI: "http://localhost:3000/oauth/callback"
   AUTH_REFRESH_COOKIE_SECURE: "false"
@@ -79,6 +80,7 @@ data:
   LANGSMITH_PROJECT: "local-pilot-dev"
   LANGSMITH_ENDPOINT: "https://api.smith.langchain.com"
   QUERY_EMBEDDING_MODE: "text-only"
+  EMBEDDING_TIMEOUT_SECONDS: "10"
   QUERY_EVALUATOR_MODE: "web"
   QUERY_EVALUATOR_MAX_ATTEMPTS: "2"
   QUERY_WEB_SEARCH_MAX_RESULTS: "5"
