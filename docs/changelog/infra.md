@@ -7,6 +7,8 @@
 - Kafka scaler에 lag가 있는 파티션 수 제한, 120초 확장 안정화, 분당 1 Pod 확장 제한을 추가했다. 장기 실행을 누락시키는 persistent lag 제외는 사용하지 않는다. 정확한 대기 작업 지표 분리는 여전히 별도 개선이다.
 - maintenance worker의 임시 저장소 2Gi 예약과 임베딩 10초·AI 파기 120초 환경변수를 추가했다. base/AWS 렌더 회귀 테스트를 통과했다.
 
+- 기존 RDS 로그 그룹에 선택적 선언형 import를 추가했다. 신규 설치는 빈 목록을 유지한다. Terraform fmt/validate를 통과했다.
+
 ## 2026-10-23
 
 ### 이메일 인증 요청 Redis 권한 복구
