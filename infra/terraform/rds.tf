@@ -47,7 +47,23 @@ resource "aws_db_parameter_group" "postgres16" {
 }
 
 # RDS가 내보내는 로그의 그룹을 먼저 만들어 14일 보관 기간을 건다(없으면 RDS가 만료 없는 그룹을 자동 생성한다).
-# 이미 자동 생성된 그룹이 있으면 `terraform import 'aws_cloudwatch_log_group.rds["access"]' /aws/rds/instance/<project>-access-postgres/postgresql` (core도 같은 방식)로 가져온다.
+# 기존 그룹은 rds_log_groups_to_import에 지정해 plan에서 import를 검토한다.
+variable "rds_log_groups_to_import" {
+  description = "이미 존재하는 RDS 로그 그룹만 지정한다. 신규 설치는 빈 집합으로 생성한다."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for name in var.rds_log_groups_to_import : contains(["access", "core"], name)])
+    error_message = "RDS 로그 그룹은 access 또는 core만 지정할 수 있습니다."
+  }
+}
+
+import {
+  for_each = var.rds_log_groups_to_import
+  to       = aws_cloudwatch_log_group.rds[each.key]
+  id       = "/aws/rds/instance/${var.project}-${each.key}-postgres/postgresql"
+}
+
 resource "aws_cloudwatch_log_group" "rds" {
   for_each          = toset(["access", "core"])
   name              = "/aws/rds/instance/${var.project}-${each.key}-postgres/postgresql"

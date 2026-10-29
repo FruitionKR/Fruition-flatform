@@ -23,4 +23,6 @@ AI와 document-svc가 `core_db`의 Wiki 현재 상태를 함께 읽고 쓰고, A
 
 ## 결과
 
-`wiki_db_cutover.py`가 Wiki·Agent·Skill·checkpoint 복사·검증, core source write 차단, smoke 확인 후 권한 회수를 제공한다. AI runtime 상태는 물리적으로 ai_db가 소유하며 core 사본은 rollback용 read-only 데이터다.
+`wiki_db_cutover.py`가 Wiki·Agent·Skill·checkpoint 복사·검증, core source write 차단, smoke 확인 후 권한 회수를 제공했다. AI runtime 상태는 물리적으로 ai_db가 소유하며 core 사본은 rollback용 read-only 데이터였다.
+
+후속(2026-10): Document V74가 core 사본 23개 테이블을 제거하며 AI 저장소에서 cutover 스크립트를 삭제했다. 현재 설치·업그레이드는 서비스별 migration 절차를 따른다.

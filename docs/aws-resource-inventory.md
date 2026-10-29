@@ -200,12 +200,10 @@ plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현�
 | 93 | DB를 둘 안쪽 구역을 정해요. | `aws_db_subnet_group.main` | DB 배치용 private subnet 집합 |
 | 94 | EKS 컴퓨터만 DB의 정해진 문으로 오게 해요. | `aws_security_group.rds` | EKS 노드에서 PostgreSQL 5432 접근만 허용 |
 
-RDS PostgreSQL 로그 그룹(`aws_cloudwatch_log_group.rds["access"]`, `["core"]`)도 14일 보존으로 Terraform이 관리합니다. 이미 RDS가 만든 그룹이 있으면 첫 apply 전에 가져와야 합니다.
-
-```
-terraform import 'aws_cloudwatch_log_group.rds["access"]' /aws/rds/instance/<project>-access-postgres/postgresql
-terraform import 'aws_cloudwatch_log_group.rds["core"]' /aws/rds/instance/<project>-core-postgres/postgresql
-```
+RDS PostgreSQL 로그 그룹(`aws_cloudwatch_log_group.rds["access"]`, `["core"]`)도 14일 보존으로 Terraform이 관리합니다.
+기존 그룹은 tfvars에 `rds_log_groups_to_import = ["access", "core"]`를 지정하면 선언적 `import` 블록이 가져옵니다.
+`plan`에서 import 대상과 보존 기간 변경을 검토한 뒤 적용합니다. 이미 state에 있는 대상은 다시 import하지 않습니다.
+신규 설치는 기본값 `[]`를 유지해 그룹을 생성합니다. 존재하지 않는 그룹을 import 목록에 넣으면 plan이 실패합니다.
 
 ## Redis — 8개
 

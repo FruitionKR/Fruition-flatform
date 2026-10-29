@@ -31,6 +31,7 @@ class SchedulingTest(unittest.TestCase):
                     tmp = next(v for v in pod["volumes"] if v["name"] == "tmp")
                     self.assertEqual(tmp["emptyDir"]["sizeLimit"], "1536Mi")
                     self.assertIn({"name": "tmp", "mountPath": "/tmp"}, pod["containers"][0]["volumeMounts"])
+                    self.assertEqual(pod["containers"][0]["resources"]["requests"]["ephemeral-storage"], "2Gi")
                 if name in ("pipeline-api", "ingest-worker"):
                     self.assertEqual(next(v for v in pod["volumes"] if v["name"] == "runs"), {"name": "runs", "emptyDir": {}})
                 if overlay == "overlays/aws" and name in WORKERS:
@@ -76,6 +77,25 @@ class SchedulingTest(unittest.TestCase):
                 env = {e["name"]: e.get("value") for e in container["env"]}
                 self.assertEqual(env["SERVER_SHUTDOWN"], "graceful")
                 self.assertEqual(env["SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE"], "40s")
+
+    def test_kafka_backlog_guards_survive_aws_trigger_replacement(self):
+        for overlay in ("base", "overlays/aws"):
+            output = subprocess.check_output(["kubectl", "kustomize", str(ROOT / "k8s" / overlay)], text=True)
+            resources = list(yaml.safe_load_all(output))
+            scalers = [r for r in resources if r["kind"] == "ScaledObject"]
+            self.assertEqual(len(scalers), 5)
+            for scaler in scalers:
+                spec = scaler["spec"]
+                meta = spec["triggers"][0]["metadata"]
+                self.assertEqual(meta["limitToPartitionsWithLag"], "true")
+                self.assertNotEqual(meta.get("excludePersistentLag"), "true")
+                behavior = spec["advanced"]["horizontalPodAutoscalerConfig"]["behavior"]
+                self.assertEqual(behavior["scaleUp"]["stabilizationWindowSeconds"], 120)
+                self.assertEqual(behavior["scaleUp"]["policies"], [{"type": "Pods", "value": 1, "periodSeconds": 60}])
+                self.assertGreaterEqual(behavior["scaleDown"]["stabilizationWindowSeconds"], 300)
+            config = next(r for r in resources if r["kind"] == "ConfigMap" and r["metadata"]["name"] == "fruition-config")
+            self.assertEqual(config["data"]["AI_PURGE_READ_TIMEOUT"], "120s")
+            self.assertEqual(config["data"]["EMBEDDING_TIMEOUT_SECONDS"], "10")
 
     def test_converter_waits_for_a_whole_command_on_sigterm(self):
         # worker는 SIGTERM 뒤에도 진행 중인 command를 끝낸다(마감 7200초). 짧으면 SIGKILL로 끊겨 재전달·모델 비용이 반복된다.
