@@ -66,6 +66,46 @@ class BudgetDiscordTests(unittest.TestCase):
                 notifier.handler(event(message, topic), None)
             read.assert_not_called()
 
+    def test_threshold_evidence_is_explained_in_korean(self):
+        topic = TOPIC.replace("budget", "operations")
+        with patch.dict(os.environ, {"OPERATIONS_TOPIC_ARN": topic}):
+            payload = notifier.discord_payload({"TopicArn": topic, "Message": json.dumps({
+                "AlarmName": "fruition-ops-node_cpu", "NewStateValue": "ALARM",
+                "AlarmDescription": "노드 CPU 사용률 경보입니다.",
+                "NewStateReason": "Threshold Crossed: 3 out of the last 3 datapoints [91.2 (23/10/26 01:00:00)] were greater than the threshold (80.0).",
+                "Trigger": {"MetricName": "node_cpu_utilization", "Threshold": 80,
+                            "ComparisonOperator": "GreaterThanThreshold", "Period": 300,
+                            "EvaluationPeriods": 3, "DatapointsToAlarm": 2}})})
+        content = payload["content"]
+        self.assertIn("측정값이 설정된 경보 조건을 충족", content)
+        self.assertIn("node_cpu_utilization 값이 80 초과", content)
+        self.assertIn("300초씩 최근 3구간 중 2구간", content)
+        self.assertIn("측정값(시각): 91.2 (23/10/26 01:00:00)", content)
+        self.assertIn("실제 장애 원인은 관련 로그·자원 상태를 확인", content)
+
+    def test_missing_data_ok_does_not_claim_actual_recovery(self):
+        summary = notifier.alarm_diagnosis({
+            "NewStateValue": "OK", "NewStateReason": "Threshold Crossed: no datapoints were received for 1 period"})
+        self.assertIn("측정 데이터가 누락", summary)
+        self.assertIn("실제 복구 여부는 추가 확인", summary)
+
+    def test_unknown_and_insufficient_data_do_not_invent_evidence(self):
+        for trigger in (None, {}, {"Metrics": []}):
+            with self.subTest(trigger=trigger):
+                summary = notifier.alarm_diagnosis({"NewStateValue": "ALARM", "Trigger": trigger})
+                self.assertIn("상세 발생 원인은 추가 확인", summary)
+                self.assertNotIn("경보 조건:", summary)
+        self.assertIn("측정 데이터가 부족", notifier.alarm_diagnosis({"NewStateValue": "INSUFFICIENT_DATA"}))
+
+    def test_recovery_and_all_threshold_operators(self):
+        for operator, label in notifier.COMPARISONS.items():
+            with self.subTest(operator=operator):
+                summary = notifier.alarm_diagnosis({"NewStateValue": "OK", "Trigger": {
+                    "ComparisonOperator": operator, "Threshold": 0}})
+                self.assertIn(f"값이 0 {label}", summary)
+                self.assertIn("경보 조건을 충족하지 않아", summary)
+                self.assertNotIn("원인 확인:", summary)
+
     def setUp(self):
         env = patch.dict(os.environ, {"SNS_TOPIC_ARN": TOPIC, "WEBHOOK_SECRET_ARN": "secret-arn"})
         env.start()

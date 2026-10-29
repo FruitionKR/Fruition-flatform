@@ -11,6 +11,45 @@ LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 WEBHOOK = re.compile(r"https://discord\.com/api(?:/v[0-9]+)?/webhooks/[0-9]+/[A-Za-z0-9_-]+")
 STATE_LABELS = {"ALARM": "경보", "OK": "정상", "INSUFFICIENT_DATA": "데이터 없음"}
+COMPARISONS = {
+    "GreaterThanThreshold": "초과", "GreaterThanOrEqualToThreshold": "이상",
+    "LessThanThreshold": "미만", "LessThanOrEqualToThreshold": "이하",
+}
+
+
+def alarm_diagnosis(alarm):
+    """Explain evidence in the event, without inventing a root cause."""
+    state = alarm["NewStateValue"]
+    reason = str(alarm.get("NewStateReason") or "")
+    trigger = alarm.get("Trigger")
+    trigger = trigger if isinstance(trigger, dict) else {}
+    missing = re.search(r"no datapoints|missing datapoints?|datapoints? (?:was|were) unknown", reason, re.I)
+    if state == "INSUFFICIENT_DATA":
+        summary = "판정에 필요한 측정 데이터가 부족합니다."
+    elif missing:
+        summary = ("경보 판정에 측정 데이터 누락이 포함되어 있습니다. 수집 상태와 누락 데이터 처리 설정을 확인하세요." if state == "ALARM" else
+                   "측정 데이터가 누락된 상태에서 정상으로 판정됐습니다. 실제 복구 여부는 추가 확인이 필요합니다.")
+    elif state == "OK":
+        summary = "현재 경보 조건을 충족하지 않아 정상 상태로 전환됐습니다."
+    elif "Threshold Crossed" in reason:
+        summary = "측정값이 설정된 경보 조건을 충족했습니다."
+    else:
+        summary = "경보 상태로 전환됐습니다. 상세 발생 원인은 추가 확인이 필요합니다."
+    lines = [f"판정 사유: {summary}"]
+    comparison = COMPARISONS.get(trigger.get("ComparisonOperator"))
+    if comparison and trigger.get("Threshold") is not None:
+        lines.append(f"경보 조건: {trigger.get('MetricName', '계산 지표')} 값이 {trigger['Threshold']} {comparison}")
+        if trigger.get("Period") and trigger.get("EvaluationPeriods"):
+            periods = trigger["EvaluationPeriods"]
+            lines.append(f"평가 범위: {trigger['Period']}초씩 최근 {periods}구간 중 "
+                         f"{trigger.get('DatapointsToAlarm', periods)}구간")
+    # CloudWatch includes evaluated values followed by timestamps in brackets.
+    values = re.search(r"datapoints?\s*\[([^\]]+)\]", reason, re.I)
+    if values:
+        lines.append(f"판정에 사용된 측정값(시각): {values.group(1)[:300]}")
+    if state == "ALARM":
+        lines.append("원인 확인: 이 알림은 경보 판정 근거입니다. 실제 장애 원인은 관련 로그·자원 상태를 확인해야 합니다.")
+    return "\n".join(lines)
 
 
 class DeliveryError(RuntimeError):
@@ -49,13 +88,13 @@ def discord_payload(sns):
             raise DeliveryError("invalid_cloudwatch_message")
         state = alarm["NewStateValue"]
         title = "복구" if state == "OK" else "경보"
-        # AWS writes NewStateReason in English only; lead with a Korean summary, keep the original last.
+        # Explain the event in Korean; retain AWS's original evidence last.
         transition = STATE_LABELS[state]
         if alarm.get("OldStateValue") in STATE_LABELS:
             transition = f"{STATE_LABELS[alarm['OldStateValue']]} → {transition}"
         description = f"설명: {alarm['AlarmDescription']}\n" if alarm.get("AlarmDescription") else ""
         content = (f"AWS 운영 {title} [{state}]\n{alarm['AlarmName']}\n"
-                   f"상태: {transition}\n{description}"
+                   f"상태: {transition}\n{alarm_diagnosis(alarm)}\n{description}"
                    f"계정: {alarm.get('AWSAccountId', 'unknown')}\n"
                    f"시각: {alarm.get('StateChangeTime', 'unknown')}\n"
                    f"원문 사유: {alarm.get('NewStateReason', 'unknown')}")
