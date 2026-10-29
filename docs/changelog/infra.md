@@ -5,11 +5,13 @@
 ### #90 인프라 후속 작업과 운영 확인
 
 - Kafka scaler에 lag가 있는 파티션 수 제한, 120초 확장 안정화, 분당 1 Pod 확장 제한을 추가했다. 장기 실행을 누락시키는 persistent lag 제외는 사용하지 않는다. 정확한 대기 작업 지표 분리는 여전히 별도 개선이다.
-- maintenance worker의 임시 저장소 2Gi 예약과 임베딩 10초·AI 파기 120초 환경변수를 추가했다. base/AWS 렌더 회귀 테스트를 통과했다.
-
-- 기존 RDS 로그 그룹에 선택적 선언형 import를 추가했다. 신규 설치는 빈 목록을 유지한다. Terraform fmt/validate를 통과했다.
-
-- 로컬 종료에 converter를 포함하고 기본 대기를 30초로 제한했다. `--graceful`은 7800초를 기다린다. 시간 초과 작업은 재전달될 수 있으며 격리 테스트로 기본·graceful·볼륨 삭제 옵션을 검증했다.
+- maintenance worker의 임시 저장소 2Gi 예약, 임베딩 10초·AI 파기 120초 환경변수, 기존 RDS 로그 그룹의 선택적 선언형 import를 추가했다. 신규 환경에서는 import 목록을 비운다.
+- 로컬 종료에 converter를 명시적으로 포함하고 기본 대기를 30초로 제한했다. `--graceful`은 7800초를 기다린다. 시간 초과로 끊긴 작업은 재전달될 수 있다.
+- 삭제된 Wiki cutover 스크립트의 실행 안내와 전용 환경변수를 정리했다. 운영 core_db에서 V74 성공을 읽기 전용 조회로 확인했다.
+- 운영 읽기 전용 확인(2026-10-29): access의 현재 ID 전체(삭제 유예 포함)와 AI reconciliation 대상 10개 workspace/5개 user 소스를 비교하고 export 이전 1시간 안전 여유를 적용했다. workspace 후보 0, user 후보 3, 시각 근거 부족·최근 생성 제외 0건이다. 이는 현재 파기 후보 수이며 과거 `--apply` 실행 여부를 증명하지 않는다. 데이터 파기는 수행하지 않았다.
+- 운영 음성 원장: `speech_synthesis` / `gpt-realtime-2.1-mini` 성공 1건(마지막 2026-10-23 08:31:46 UTC), 취소 2건. 실제 공급사 TTS 성공 근거이며 사용자 기기의 청취 성공까지 증명하지 않는다. 현재 회의·회의 전사 segment는 모두 0건이라 실시간 회의와 iOS 무음 스위치는 별도 실측이 필요하다.
+- 검증: AWS 회귀 테스트 266개, 로컬 종료 옵션 테스트 1개(3개 모드), Terraform fmt/validate, Bash 문법 및 diff 공백 검사를 통과했다.
+- 운영 확인은 SSM runner의 일회성 읽기 전용 DB Pod로 수행하고 Pod를 삭제했다. Secret·개인 ID·본문은 결과에 기록하지 않았다. 이 변경의 Kubernetes/Terraform 운영 적용은 수행하지 않았다.
 
 ## 2026-10-23
 
