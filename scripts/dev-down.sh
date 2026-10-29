@@ -7,6 +7,7 @@ PIPELINE_COMPOSE_FILE="$ROOT_DIR/infra/compose.ai.yml"
 RUNTIME_DIR="$ROOT_DIR/.runtime"
 
 REMOVE_VOLUMES="false"
+STOP_TIMEOUT=30
 
 source "$ROOT_DIR/scripts/lib/runtime.sh"
 
@@ -21,10 +22,11 @@ fail() {
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/dev-down.sh [--volumes]
+Usage: scripts/dev-down.sh [--volumes] [--graceful]
 
 Options:
   --volumes   PostgreSQL, MinIO, pipeline 로컬 볼륨과 project orphan 볼륨을 삭제합니다.
+  --graceful  진행 중 변환 완료를 최대 7800초 기다립니다(기본 30초).
   -h, --help  도움말을 출력합니다.
 USAGE
 }
@@ -33,6 +35,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --volumes)
       REMOVE_VOLUMES="true"
+      shift
+      ;;
+    --graceful)
+      STOP_TIMEOUT=7800
       shift
       ;;
     -h|--help)
@@ -67,13 +73,14 @@ stop_managed_processes() {
 }
 
 down_infra() {
-  local args=(-f "$COMPOSE_FILE" -f "$PIPELINE_COMPOSE_FILE" down --remove-orphans)
+  local args=(-f "$COMPOSE_FILE" -f "$PIPELINE_COMPOSE_FILE" -f "$ROOT_DIR/infra/compose.converter.yml" down --remove-orphans --timeout "$STOP_TIMEOUT")
 
   if [[ "$REMOVE_VOLUMES" == "true" ]]; then
     args+=(-v)
   fi
 
   if docker info >/dev/null 2>&1; then
+    log "종료 대기 ${STOP_TIMEOUT}초: 시간 초과 시 작업이 중단되고 다음 기동에서 재전달될 수 있습니다."
     log "PostgreSQL, MinIO, pipeline API 컨테이너를 종료합니다."
     docker compose "${args[@]}"
   else

@@ -4,7 +4,7 @@
 
 ## 로컬
 
-- `dev-up.sh` / `dev-down.sh`: 전체 개발 환경
+- `dev-up.sh` / `dev-down.sh`: 전체 개발 환경. 종료는 converter를 포함해 기본 30초 대기하며, `--graceful`은 진행 중 변환 완료를 최대 7800초 기다린다. 시간 초과로 중단된 작업은 재시작 때 재전달·재과금될 수 있다. 볼륨은 `--volumes`를 지정할 때만 삭제한다.
 - `front-up.sh` / `front-down.sh`: 프론트엔드
 - `back-up.sh` / `back-down.sh`: 백엔드
 - `back-test.sh`: Java 21을 찾아 백엔드 Gradle 테스트 실행(`[Access|Document]` 지정 가능)
