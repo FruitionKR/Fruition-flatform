@@ -1,0 +1,16 @@
+{
+  "exit_code": 0,
+  "limit_reason": null,
+  "output": "access_PREVIOUS_SCHEMA_OK\ndocument_PREVIOUS_SCHEMA_OK\nINSERT 0 1\nINSERT 0 2\nALTER TABLE\nCREATE INDEX\nCREATE DATABASE\nCREATE INDEX\nCREATE INDEX\nCREATE DATABASE\nDO\nINSERT 0 1\nDO\nMIGRATION_AND_LOGICAL_RESTORE_OK\n",
+  "raw_sha256": "0e596c41ffec634ed8f67e40c597cf247feb58dd1c2d1a9a03ab40c667101d09",
+  "scope": "Exact Access V1-29 and Document V1-82 SQL history, synthetic tokens, V30/V83 forward SQL and separate logical restore; no production data, PITR, or object restore",
+  "controls": {
+    "external_network": false,
+    "rootfs": "read-only",
+    "source": "read-only",
+    "user": "65534:65534",
+    "aggregate_memory_mib": 1696,
+    "aggregate_cpus": 2,
+    "seconds": 120
+  }
+}
