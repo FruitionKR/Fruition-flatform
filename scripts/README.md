@@ -23,8 +23,8 @@
 - `aws-terraform.sh`: SMTP 비밀번호를 Secrets Manager에서 읽어 주입하는 `infra/terraform` 실행 래퍼
 - `aws-platform-up.sh`: 플랫폼 관리자 전용 EKS 플랫폼 구성 설치(`install <terraform-outputs.json>`)
 - `aws-runner-check.sh`: runner 읽기 전용 점검(`runner-check.yml`)
-- `aws-ops-db-query.sh`: runner 호스트에서 운영 core_db에 읽기 전용 SELECT 실행(일회성 psql Pod, `fruition:operators` 권한)
-- `aws-frontend-wake-check.sh`: runner 호스트에서 화면과 같은 Fargate 조건의 일회성 Pod로 VPC DNS·IRSA·기동 이벤트 권한 확인(`--send`면 이벤트 발행). [요청 기반 기동](../docs/aws-request-wake.md#실제-fargate에서-확인)
+- `aws-ops-db-query.sh`: Pod 생성 권한이 있는 별도 관리 주체의 운영 core_db 조회 보조 도구. `fruition:operators`는 Pod를 생성할 수 없으며 SQL 문자열 검사는 DB 권한 경계가 아니다.
+- `aws-frontend-wake-check.sh`: Pod 생성 권한이 있는 별도 관리 주체가 화면과 같은 Fargate 조건의 일회성 Pod로 VPC DNS·IRSA·기동 이벤트 권한 확인(`--send`면 이벤트 발행). [요청 기반 기동](../docs/aws-request-wake.md#실제-fargate에서-확인)
 - `aws_image_release.py`: 서비스 이미지 묶음 게시(`publish-images.yml`)
 - `aws_deploy.py`: manifest 렌더와 순차 배포·rollback gate(`deploy.yml`)
 - `aws_release_safety.py`: 릴리스 검토·인증 smoke 공용 모듈(`aws_deploy.py`·`aws_pdf_smoke.py`가 사용)

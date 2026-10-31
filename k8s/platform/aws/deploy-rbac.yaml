@@ -98,9 +98,9 @@ roleRef:
   name: fruition-platform-reader
   apiGroup: rbac.authorization.k8s.io
 ---
-# runner 호스트의 운영자(fruition:operators)가 fruition namespace 안에서 일회성 조회 Pod(예: psql로 운영 DB SELECT)를
-# 띄우고 로그를 읽는 용도. Deployment는 DB 호스트 같은 env 값을 읽기 위해 조회만 허용한다.
-# Secret·ConfigMap 값은 Pod env 주입으로만 쓰이고 직접 읽지 못한다. 배포·변경 권한은 없다.
+# runner 호스트의 운영자(fruition:operators)는 기존 Pod 상태·로그와 Deployment만 조회한다.
+# Pod 생성은 임의 Secret 주입·명령 실행을 허용하므로 조회 역할에 부여하지 않는다.
+# DB 조회 Pod는 별도 승인된 관리 주체가 생성한다. SQL helper의 문자열 검사는 권한 경계가 아니다.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -109,7 +109,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [pods]
-    verbs: [get, list, watch, create, delete]
+    verbs: [get, list, watch]
   - apiGroups: [""]
     resources: [pods/log]
     verbs: [get]

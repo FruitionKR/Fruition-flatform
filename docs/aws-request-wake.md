@@ -20,7 +20,7 @@
 
 ### 실제 Fargate에서 확인
 
-플랫폼 배포 뒤, 노드가 깨어 있을 때 runner(세션 관리자)에서 실행합니다. 절전 중에는 ALB controller webhook 때문에 Pod를 새로 만들 수 없습니다.
+플랫폼 배포 뒤, 노드가 깨어 있을 때 EKS 사설 API에 접근할 수 있는 환경에서 별도 관리 주체의 AWS 인증으로 실행합니다. runner 기본 역할(`fruition:operators`)은 조회 전용이므로 점검 Pod를 생성할 수 없습니다. 기존 관리자 접근 경로를 사용하고, 점검을 위해 운영자 역할의 Pod 생성 권한을 다시 열지 않습니다. 절전 중에는 ALB controller webhook 때문에 Pod를 새로 만들 수 없습니다.
 
 ```bash
 bash scripts/aws-frontend-wake-check.sh          # DNS·IRSA·상태 조회·권한 경계
