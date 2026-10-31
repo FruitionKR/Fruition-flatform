@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 화면 Pod와 같은 조건(Fargate·fruition-frontend 계정·dnsPolicy Default)으로 일회성 점검 Pod를 띄워
 # VPC DNS 조회, IRSA role, 기동 상태 조회와 이벤트 권한 경계를 확인한다.
-# runner 호스트(세션 관리자 또는 SSM send-command)에서 fruition:operators 권한으로 실행한다.
+# Pod 생성 권한이 있는 별도 관리 주체로 실행한다. fruition:operators는 조회 전용이다.
 # 절전 중에는 ALB controller webhook 때문에 Pod를 만들 수 없으므로 깨어 있을 때 실행한다.
 # resolv.conf가 VPC DNS를 가리키면 CoreDNS가 없는 절전 중에도 같은 조회가 된다.
 #
@@ -22,6 +22,10 @@ NS=fruition
 POD="frontend-wake-check-$(date +%s)"
 
 aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER" >/dev/null
+if ! kubectl -n "$NS" auth can-i create pods --quiet; then
+  echo "점검 Pod 생성 권한이 없습니다. fruition:operators는 조회 전용이므로 별도 관리 절차를 사용하세요." >&2
+  exit 1
+fi
 trap 'kubectl -n "$NS" delete pod "$POD" --ignore-not-found --wait=false >/dev/null 2>&1 || true' EXIT
 
 kubectl -n "$NS" apply -f - >/dev/null <<EOF

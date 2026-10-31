@@ -509,7 +509,11 @@ resource "aws_wafv2_web_acl" "cost_guard" {
             }
             text_transformation {
               priority = 0
-              type     = "NONE"
+              type     = "URL_DECODE"
+            }
+            text_transformation {
+              priority = 1
+              type     = "NORMALIZE_PATH"
             }
           }
         }
