@@ -25,3 +25,14 @@
 ## 완료 조건
 
 각 PR과 병합 main의 전체 CI 성공, 정확한 소스 SHA의 이미지 release 게시, 환경 보호 승인, DB preflight/migration, rollout, 인증 업무 smoke 및 PDF/AI smoke 통과를 확인한 뒤 배포 성공으로 기록한다. 현재 이 파일은 배포 성공 증명이 아니다.
+
+## 배포 대상 고정
+
+예상 릴리스 ID: `2c288f31e68d899a481a1e23a21c553a7be168de`. 게시 후 release.json의 소스·빌드 입력이 아래 값과 정확히 일치하는지 대조한다.
+
+- FruitionKR/Fruition-access: `1c9bf129dad5ddd8a3b1a9321c3ffa26fcb8a025`
+- FruitionKR/Fruition-ai: `30f5c74bbe69f96ad942e0fcd9be1fc3e6a32997`
+- FruitionKR/Fruition-document: `2c9ae8398947ee8e91813929d05bb76e2588e653`
+- FruitionKR/Fruition-frontend: `d2616c2984926b4b470a79d4826d7d4bf6b46034`
+
+PR CI: Access 593개 통과, Document 1,482개 통과, AI pipeline 2,030개 통과·8개 skipped·325 subtests 및 converter 34개·24 subtests 통과. Document의 최초 실패 3개는 최신 자동 병합 계약으로 테스트를 수정한 뒤 재검증했다. Access 최초 실패 1개는 변경된 잠금 조회 mock을 수정한 뒤 재검증했다.
