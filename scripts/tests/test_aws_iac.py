@@ -150,8 +150,8 @@ class IaCContractTests(unittest.TestCase):
         obs = re.sub(r"\s+", " ", (ROOT / "infra/terraform/observability.tf").read_text())
         dim = "dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }"
         for expected in (
-            f'rds_access_memory = {{ namespace = "AWS/RDS", metric = "FreeableMemory", {dim}, stat = "Minimum", threshold = 157286400, comparison = "LessThanThreshold", periods = 1',
-            f'rds_access_swap = {{ namespace = "AWS/RDS", metric = "SwapUsage", {dim}, stat = "Maximum", threshold = 268435456, comparison = "GreaterThanThreshold"',
+            f'rds_access_memory = {{ namespace = "AWS/RDS", metric = "FreeableMemory", {dim}, stat = "Average", threshold = 104857600, comparison = "LessThanThreshold", periods = 3, datapoints = 3',
+            f'rds_access_swap = {{ namespace = "AWS/RDS", metric = "SwapUsage", {dim}, stat = "Maximum", threshold = 67108864, comparison = "GreaterThanThreshold"',
             f'rds_access_connections = {{ namespace = "AWS/RDS", metric = "DatabaseConnections", {dim}, stat = "Maximum", threshold = 60, comparison = "GreaterThanThreshold"',
         ):
             self.assertIn(expected, obs)
