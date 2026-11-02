@@ -70,11 +70,20 @@ resource "aws_cloudwatch_log_group" "rds" {
   retention_in_days = 14
 }
 
+variable "access_db_apply_immediately" {
+  description = "access DB 변경을 유지 관리 기간을 기다리지 않고 바로 적용할지 정한다. 재시작이 따르는 변경이면 Single-AZ라 몇 분 접속이 끊긴다."
+  type        = bool
+  default     = false
+}
+
 resource "aws_db_instance" "access" {
   identifier     = "${var.project}-access-postgres"
   engine         = "postgres"
   engine_version = "16"
-  instance_class = "db.t4g.small"
+  # 30일 FreeableMemory 최소 0.98GB·연결 최대 30으로 small 메모리의 절반 이상이 남아 micro로 줄인다.
+  instance_class = "db.t4g.micro"
+  # 기본은 다음 유지 관리 기간에 적용한다. 크기 변경처럼 바로 반영할 때만 -var로 켠다.
+  apply_immediately = var.access_db_apply_immediately
 
   allocated_storage = 30
   storage_type      = "gp3"
