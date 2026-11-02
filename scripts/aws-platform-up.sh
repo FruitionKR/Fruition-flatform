@@ -55,17 +55,31 @@ helm upgrade --install external-secrets external-secrets/external-secrets --vers
   -n external-secrets --create-namespace --wait --timeout 10m \
   --set serviceAccount.name=external-secrets \
   --set-string "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$eso_role"
+# leader lease 갱신 2초→10초(감사 로그 절감). 리더 Pod가 비정상 종료되면 인계가 최대 약 60초 걸린다.
 helm upgrade --install cluster-autoscaler autoscaler/cluster-autoscaler --version 9.59.0 \
   -n kube-system --wait --timeout 10m --set image.tag=v1.35.0 \
   --set autoDiscovery.clusterName=fruition-eks --set awsRegion=ap-northeast-2 \
   --set rbac.serviceAccount.name=cluster-autoscaler \
   --set-string extraArgs.scale-down-utilization-threshold=0.7 \
   --set-string extraArgs.v=2 \
+  --set-string extraArgs.leader-elect-lease-duration=60s \
+  --set-string extraArgs.leader-elect-renew-deadline=40s \
+  --set-string extraArgs.leader-elect-retry-period=10s \
   --set-string "rbac.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$ca_role"
+# 감사 로그 유입 절감(2026-11-02): lease 갱신 2초→10초, 전체 재조정 2분→10분. CR 변경은 watch로 즉시 처리된다.
 helm upgrade --install strimzi strimzi/strimzi-kafka-operator --version 1.1.0 \
-  -n fruition --wait --timeout 10m
+  -n fruition --wait --timeout 10m \
+  --set fullReconciliationIntervalMs=600000 \
+  --set 'extraEnvs[0].name=STRIMZI_LEADER_ELECTION_LEASE_DURATION_MS' --set-string 'extraEnvs[0].value=60000' \
+  --set 'extraEnvs[1].name=STRIMZI_LEADER_ELECTION_RENEW_DEADLINE_MS' --set-string 'extraEnvs[1].value=40000' \
+  --set 'extraEnvs[2].name=STRIMZI_LEADER_ELECTION_RETRY_PERIOD_MS' --set-string 'extraEnvs[2].value=10000'
+# operator lease 갱신 2초→10초. metrics adapter는 HPA(15초 주기)의 같은 권한 검사를 60초 캐시해 SubjectAccessReview를 줄인다.
 helm upgrade --install keda kedacore/keda --version 2.20.2 \
-  -n keda --create-namespace --wait --timeout 10m
+  -n keda --create-namespace --wait --timeout 10m \
+  --set 'env[0].name=KEDA_OPERATOR_LEADER_ELECTION_LEASE_DURATION' --set-string 'env[0].value=60s' \
+  --set 'env[1].name=KEDA_OPERATOR_LEADER_ELECTION_RENEW_DEADLINE' --set-string 'env[1].value=40s' \
+  --set 'env[2].name=KEDA_OPERATOR_LEADER_ELECTION_RETRY_PERIOD' --set-string 'env[2].value=10s' \
+  --set-string extraArgs.metricsAdapter.authorization-webhook-cache-authorized-ttl=60s
 kubectl apply --dry-run=server -k "$repo_root/k8s/platform/aws"
 kubectl apply -k "$repo_root/k8s/platform/aws"
 kubectl wait clustersecretstore/aws-secrets-manager --for=condition=Ready --timeout=600s
