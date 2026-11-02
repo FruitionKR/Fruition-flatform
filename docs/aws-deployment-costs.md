@@ -2,6 +2,8 @@
 
 2026-09-16에 준비한 설정을 설명하는 글입니다. 크기·개수 표는 2026-10-06 코드 기준으로 고쳤습니다. **설정 파일을 만들었다고 AWS에서 모두 켜진 것은 아닙니다.** 실제로 설치하고 시험하는 일이 남아 있습니다.
 
+> **2026-11-02 알림:** 아래 표에서 "(11-02 변경, 적용 전)"이라고 적은 칸은 코드만 바뀌었고 **아직 실제 운영 AWS에는 적용하지 않은** 내용입니다. Terraform·k8s 적용 전까지 운영은 이전 상태(Redis 2대, access DB Multi-AZ, AI 컴퓨터 상시 켜짐 등)입니다. 자세한 내용은 [맨 아래 절](#2026-11-02-알파-테스트-대비-비용-조정-적용-전)을 봅니다.
+
 우리 서비스를 작은 가게라고 생각해 보세요. 손님이 보는 화면은 가게 앞이고, 서버는 뒤에서 일을 하는 컴퓨터입니다. AWS는 이 컴퓨터와 물건을 보관할 곳을 빌려줍니다.
 
 **컴퓨터 수를 제한해도 돈이 무조건 일정해지는 것은 아닙니다.** 손님이 많아지면 보내는 파일과 AI에게 시키는 일도 많아집니다. 그만큼 돈이 더 들 수 있습니다.
@@ -47,19 +49,19 @@ flowchart LR
 |---|---|---|
 | 컴퓨터를 둘 곳 | AWS 서울, 서로 다른 두 구역(AZ), 바깥/안쪽 공간(subnet) 각각 2개 | 두 구역을 쓴다고 모든 장비에 예비 장비가 있는 것은 아니에요 |
 | 일꾼 관리자 EKS | Kubernetes 1.35 | 컴퓨터를 관리하는 부분도 돈이 들어요 |
-| 보통 일을 하는 컴퓨터 | t3.large, 처음 2대·최소 2대·최대 5대 | 평소에는 2~4대예요. 5번째는 프로그램 교체(rollout) 중 자리가 없어 기다리는(Pending) 일꾼이 생길 때만 Cluster Autoscaler가 켜고, 끝나면 약 10분 쉬었다가 줄여요. 오래 바쁘면 추가 CPU 요금 대신 속도를 제한하는 Standard 설정이에요 |
+| 보통 일을 하는 컴퓨터 | t3.large, 처음 2대·최소 2대·최대 5대 | (11-02 변경, 적용 전) 평소 2대를 목표로 해요. 프로그램 교체(rollout) 중에는 잠깐 3대째가 켜질 수 있고, 자리가 모자라면 Cluster Autoscaler가 최대 5대까지 켜고 끝나면 약 10분 쉬었다가 줄여요. 코드는 추가 CPU 요금 대신 속도를 제한하는 Standard 설정이지만, 실제 운영 컴퓨터는 `unlimited`로 돌고 있는 것을 11-02에 발견했어요(아래 미해결 항목) |
 | 화면 Fargate | 화면 Pod 2개, 각각 0.25 vCPU·768Mi 요청 | 컴퓨터를 빌리지 않고 Pod 크기만큼 시간당 내요. 추가 몫까지 합쳐 Pod 하나를 0.25 vCPU·1GB로 계산해요 |
-| AI 일을 하는 컴퓨터 | m5·m5d·m6i·m7i.xlarge 중 Spot, 처음 0대·최대 4대(작업이 쌓일 때만) | GPU는 없어요. Spot은 AWS 사정에 따라 중단될 수 있어요 |
+| AI 일을 하는 컴퓨터 | m5·m5d·m6i·m7i.xlarge 중 Spot, 일이 없으면 0대·최대 4대 | (11-02 변경, 적용 전) 일이 없으면 0대로 내려가요. 그래서 쉬고 난 뒤 첫 AI 작업은 컴퓨터를 켜느라 약 3~5분 늦게 시작해요. GPU는 없어요. Spot은 AWS 사정에 따라 중단될 수 있어요 |
 | 설치 담당 runner | t3.small 1대, 잠긴 gp3 저장 공간 30GB | 외부 공개 IP가 없고 Standard 설정을 써요 |
-| 중요한 기록장 RDS | PostgreSQL 16, db.t4g.small 2대, 각각 gp3 30GB | 외부에 열지 않고 암호화해요. 로그인 DB(access)는 두 구역(Multi-AZ)에 예비 DB가 있어 그만큼 요금이 더 들고, 문서·AI DB(core)는 한 구역(Single-AZ)이에요. 백업은 7일 보관해요 |
-| 빠른 메모장 Redis | cache.t4g.micro 2대(본체 1·예비 복사본 1) | 보낼 때와 저장할 때 잠가요. 본체가 고장 나면 예비가 자동으로 이어받아요. 자동 크기 확대는 없어요 |
+| 중요한 기록장 RDS | PostgreSQL 16, db.t4g.small 2대, 각각 gp3 30GB | 외부에 열지 않고 암호화해요. (11-02 변경, 적용 전) 로그인 DB(access)도 문서·AI DB(core)처럼 한 구역(Single-AZ)으로 바꿔 예비 DB가 없어요. 이 변경은 다음 정기 점검 시간에 적용되고, AWS 안내상 서비스 중단은 없어요. 백업 7일 보관은 그대로예요 |
+| 빠른 메모장 Redis | cache.t4g.micro 1대 | (11-02 변경, 적용 전) 예비 복사본을 없앴어요. 보낼 때와 저장할 때 잠가요. 고장 나거나 교체되면 자동으로 이어받을 예비가 없어 로그인 정보 등이 사라지고 다시 로그인해야 할 수 있어요. 자동 크기 확대는 없어요 |
 | 할 일 대기줄 Kafka | 1대, gp3 저장 공간 5Gi | 할 일이 너무 쌓이면 공간이 모자랄 수 있어요 |
 | 요청 안내원 ALB | 앱 입구 설정(Ingress) 1개로 준비 | 앱을 설치할 때 만들어요. 화면 주소는 경로로, 두 API 주소는 주소로 요청을 나누고 HTTPS를 써요 |
 | 밖으로 나가는 길 NAT | 1개, 고정 공인 IP 1개 | 길을 빌리는 돈과 자료를 옮기는 돈이 들어요 |
 | 파일 보관함 S3 | 예전 파일도 보관 | 전체 크기 제한은 없어요. 오래된 파일이 계속 쌓일 수 있어요 |
 | 설치용 프로그램 상자 ECR | 서비스별 보관함 5개(frontend 포함), 각각 최근 10개 보관 | 상자 10개의 크기는 서로 다를 수 있어요. 같은 이름표의 내용을 덮어쓰지 못하게 했어요 |
 | Terraform 기록장 | 별도 S3에 보관, 암호화·이전 기록 보관·동시 수정 잠금 | 사용자가 올리는 파일 보관함과 달라요 |
-| 돈 알림 | 계정 전체 월 사용료 $400 / $550 / $650 초과 | Discord에 알리는 설정이에요. 돈을 자동으로 멈추지는 않아요 |
+| 돈 알림 | 계정 전체 월 실제 사용료 $50부터 $1000까지 $50마다(20개) | (11-02 변경, 적용 전, 기존은 $400 / $550 / $650) Discord에 한국어 설명과 AWS 원문을 함께 보내요. 돈을 자동으로 멈추지는 않아요 |
 
 일반 컴퓨터 5대와 AI 컴퓨터 2대는 보통의 자동 확장 한도입니다. 일반 컴퓨터 5번째는 교체 중처럼 잠깐 필요할 때만 켜집니다. runner 1대는 따로 있습니다. 컴퓨터를 교체하는 동안 잠깐 더 생기는 것까지 막는 계정 전체의 절대 제한은 아닙니다.
 
@@ -69,16 +71,17 @@ flowchart LR
 
 | 일꾼 이름 | 준비한 수 | 어디에서 일하나요? |
 |---|---|---|
-| access-svc / document-svc / pipeline-api | 각각 2~4개(CPU 70% 기준 HPA), 교체 중 임시 1개 추가 | 일반 컴퓨터 |
-| ingest-worker / query-task-worker / agent-task-worker | 각각 1~4개 | AI 컴퓨터 |
-| maintenance-task-worker | 1~2개 | AI 컴퓨터 |
-| converter | 1~3개(KEDA, 대기 command 1건당 1개) | AI 컴퓨터 |
-| edit-event-consumer / pipeline-agent-worker / embedding-server | 각각 1개 고정 | AI 컴퓨터 |
+| access-svc / document-svc / pipeline-api | 각각 2~4개(CPU HPA), 교체 중 임시 1개 추가 | 일반 컴퓨터. (11-02 변경, 적용 전) 실측에 맞춰 CPU 요청을 낮추고(100m·150m·150m) HPA 기준을 175%·200%로 올려, Pod 하나가 늘어나는 시점은 이전과 비슷해요 |
+| ingest-worker / query-task-worker / agent-task-worker | 각각 0~4개 (11-02 변경, 적용 전. 이전 1~4개) | AI 컴퓨터 |
+| maintenance-task-worker | 0~2개 (11-02 변경, 적용 전. 이전 1~2개) | AI 컴퓨터 |
+| converter | 0~3개(KEDA, 대기 command 1건당 1개. 이전 1~3개) | AI 컴퓨터 |
+| embedding-server | 0~1개. query·agent 일꾼이 있을 때만 1개 (11-02 변경, 적용 전) | AI 컴퓨터 |
+| edit-event-consumer / pipeline-agent-worker | 각각 1개 고정 | (11-02 변경, 적용 전) 일반 컴퓨터. 이전에는 AI 컴퓨터 |
 | frontend | 2개 고정 | Fargate(컴퓨터 대신 Pod 단위로 빌림) |
 
 **KEDA**는 대기줄에 일이 쌓였는지 보고 일꾼을 늘립니다. **HPA**는 API 일꾼의 CPU 사용량을 보고 늘립니다. **Cluster Autoscaler**는 일꾼이 들어갈 자리가 부족할 때 컴퓨터를 늘립니다. 모두 설치하고 정상 동작을 확인해야 합니다.
 
-AI 컴퓨터는 처음에 0대로 시작하지만, 앱을 설치하면 항상 자리가 필요한 일꾼들이 생깁니다. 따라서 **손님이 없어도 AI 컴퓨터가 계속 켜져 있을 수 있습니다.** 항상 켜 두는 AI 일꾼 8개(embedding-server 포함)의 요청 합계가 CPU 3.25개·메모리 약 13GiB라 AI 컴퓨터 1대(CPU 4개·16GiB) 용량에 가깝습니다. 기록 수집 일꾼까지 더하면 평소에도 2대가 켜질 수 있으니 실제 대수로 비용을 계산합니다. 일부 일꾼만 0개로 바꿔도 나머지 일꾼이 있으면 컴퓨터가 필요합니다.
+**지금 운영(11-02 변경 적용 전)에서는** AI 일꾼이 항상 1개 이상 켜져 있어 손님이 없어도 AI 컴퓨터가 계속 켜져 있습니다. 11-02 변경을 적용하면 일이 없을 때 AI 일꾼이 모두 0개가 되고 AI 컴퓨터도 0대로 내려갑니다. 마지막 일이 있던 뒤 문서 처리 일꾼은 10분, 채팅 질의·에이전트 일꾼은 대화가 이어질 수 있어 30분 기다렸다가 줄어듭니다. 다시 일이 오면 컴퓨터 켜기·프로그램 내려받기·모델 준비 때문에 첫 작업이 약 3~5분 늦게 시작합니다. 항상 1개가 필요한 edit-event-consumer·pipeline-agent-worker는 이 때문에 일반 컴퓨터로 옮겼습니다. 일부 일꾼이라도 AI 컴퓨터에 남아 있으면 컴퓨터가 내려가지 않으니, 적용 후 실제 대수를 확인합니다.
 
 일꾼이 쓸 메모리에는 제한이 있습니다. 앱별 CPU 제한과 전체 작업 공간의 공통 제한(ResourceQuota/LimitRange)은 아직 없습니다. 자리가 다 차면 새 일이 기다리거나 실패할 수 있습니다. 일꾼 수를 제한해도 외부 AI에게 묻는 횟수나 글자 처리 비용까지 제한되지는 않습니다.
 
@@ -90,8 +93,8 @@ AI 컴퓨터는 처음에 0대로 시작하지만, 앱을 설치하면 항상 �
 | AI에게 계속 일을 시킴 | AI를 빌려 쓰는 회사가 요청·토큰 사용량에 따라 청구해요. 토큰은 글을 세는 작은 단위예요 |
 | 큰 파일을 자주 옮김 | NAT 길과 인터넷을 쓰는 양이 늘어요 |
 | DB가 오래 바쁘게 일함 | 현재 RDS T4g 상품은 추가 CPU 사용료가 생길 수 있어요 |
-| 프로그램 교체 중 일반 컴퓨터 5번째가 켜짐 | t3.large 1대가 켜져 있는 시간만큼 On-Demand 요금이 더해져요. 서울 기준 시간당 약 $0.1이라 보통 교체 몇십 분이면 몇십 센트예요. 줄어들지 않고 한 달 내내 켜져 있으면 월 약 $75가 더해지므로 끝난 뒤 4대 이하로 돌아왔는지 확인해요 |
-| 예비 DB·예비 Redis | access DB Multi-AZ와 Redis 예비 복사본은 쓰지 않아도 계속 켜져 있어 해당 부분 요금이 약 2배예요 |
+| 프로그램 교체 중 일반 컴퓨터 5번째가 켜짐 | t3.large 1대가 켜져 있는 시간만큼 On-Demand 요금이 더해져요. 서울 기준 시간당 약 $0.1이라 보통 교체 몇십 분이면 몇십 센트예요. 줄어들지 않고 한 달 내내 켜져 있으면 월 약 $75가 더해지므로 끝난 뒤 평소 대수로 돌아왔는지 확인해요 |
+| 예비 DB·예비 Redis | 지금 운영(적용 전)은 access DB Multi-AZ와 Redis 예비 복사본이 계속 켜져 있어 해당 부분 요금이 약 2배예요. 11-02 변경을 적용하면 예비가 없어 이 돈은 줄지만, 고장 때 자동으로 이어받지 못해요 |
 | 파일을 계속 올리거나 고침 | 새 파일뿐 아니라 예전 파일도 보관하므로 공간이 늘어요 |
 | 컴퓨터가 일기를 아주 많이 씀 | 로그를 모으고 저장하고 찾아보는 데도 돈이 들어요 |
 | 대기줄·DB 공간이 꽉 참 | 서비스가 멈출 수 있어요. 실패한 일을 계속 다시 시도하면 다른 비용도 늘 수 있어요 |
@@ -100,7 +103,7 @@ AI 컴퓨터는 처음에 0대로 시작하지만, 앱을 설치하면 항상 �
 
 S3 전용 길(Gateway endpoint)을 쓰면 해당 S3 통신은 NAT를 거치지 않아 NAT 처리 비용을 줄일 수 있습니다. S3 저장·요청 요금은 남습니다. 손님에게 보내는 ALB 응답을 모두 NAT 사용량으로 한 번 더 세면 안 됩니다. [NAT 설명](https://docs.aws.amazon.com/vpc/latest/userguide/nat-gateway-pricing.html), [S3 전용 길 설명](https://docs.aws.amazon.com/vpc/latest/privatelink/gateway-endpoints.html)
 
-일반 EC2와 runner는 추가 CPU 요금 대신 속도를 제한하는 Standard 설정입니다. DB의 RDS T4g는 같은 설정이 아니므로 추가 CPU 비용을 따로 봐야 합니다. [EC2 T3](https://aws.amazon.com/ec2/instance-types/t3/), [RDS 요금](https://aws.amazon.com/rds/postgresql/pricing/)
+일반 EC2와 runner는 추가 CPU 요금 대신 속도를 제한하는 Standard 설정입니다. 다만 2026-11-02에 운영 일반 컴퓨터가 실제로는 `unlimited`로 돌고 있는 것을 발견했습니다(최근 14일 추가 요금은 없었음, 맨 아래 절 참고). DB의 RDS T4g는 같은 설정이 아니므로 추가 CPU 비용을 따로 봐야 합니다. [EC2 T3](https://aws.amazon.com/ec2/instance-types/t3/), [RDS 요금](https://aws.amazon.com/rds/postgresql/pricing/)
 
 S3에서 지금 보이는 파일을 지워도 예전 버전이 남을 수 있습니다. `tmp/`의 7일 정리만으로 모든 문서·AI 결과·예전 버전이 지워지는 것은 아닙니다. [S3 보관 규칙](https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html)
 
@@ -155,12 +158,12 @@ WAF가 살펴본 개별 요청을 표본으로 저장하는 기능은 껐습니�
 
 ## 손님을 받기 전에 더 해야 할 일
 
-1. **AI 용돈 제한:** 사용자마다 하루에 시킬 수 있는 일·토큰·금액을 제한해야 합니다. 동시에 여러 일을 보내도 한도를 넘지 못하게 하고, 실패한 일의 반복 횟수도 제한해야 합니다. 아직 이 문서만으로 완료된 것은 아닙니다.
-2. **파일 크기 제한:** 한 번에 올릴 크기·개수와 한 사람이 보관할 총량을 정해야 합니다.
+1. **AI 용돈 제한:** 사용자마다 하루에 시킬 수 있는 일·토큰·금액을 제한해야 합니다. 동시에 여러 일을 보내도 한도를 넘지 못하게 하고, 실패한 일의 반복 횟수도 제한해야 합니다. 2026-11-02에 서비스 저장소 브랜치에 하루 금액·토큰·동시 실행 제한을 만들었지만 아직 운영 배포 전입니다(맨 아래 절).
+2. **파일 크기 제한:** 한 번에 올릴 크기·개수와 한 사람이 보관할 총량을 정해야 합니다. 2026-11-02에 서비스 저장소 브랜치에 만들었지만 아직 운영 배포 전입니다(맨 아래 절).
 3. **알림 시험:** Discord 웹훅을 넣고 진짜로 알림이 오는지 확인해야 합니다. Kafka 대기줄·디스크, AI 호출량, CPU credit 등 아직 연결하지 않은 기록도 보완해야 합니다.
 4. **요금 다시 계산:** 평소와 아주 바쁠 때를 나눠 계산해야 합니다. AI 컴퓨터가 계속 켜지는 시간도 넣습니다. 월 730시간 같은 계산 기준과 세금·환율·Spot 가격 변화를 따로 표시합니다.
 
-기존 **월 $500~650은 예상치이며 최대 금액 보장이 아닙니다.** 이 값은 access DB Multi-AZ·Redis 예비 복사본·일반 컴퓨터 최대 5대로 바꾸기 전에 계산했으므로 다시 계산해야 합니다. 외부 AI API 사용료는 별도입니다. 화면을 Vercel에서 Fargate로 옮기면서 Vercel 요금은 없어지고 Fargate 요금이 더해집니다. 서울 기준 대략 vCPU 시간당 약 $0.05, GB 시간당 약 $0.0055로 보면 Pod 하나(0.25 vCPU·1GB × 730시간)는 월 약 $13~15, 2개는 **월 약 $30 이하**입니다. 이 값은 추정이므로 [AWS 요금 계산기](https://calculator.aws/)와 [Fargate 요금](https://aws.amazon.com/fargate/pricing/)으로 확인해야 합니다. CloudWatch 수집 비용도 함께 다시 계산해야 합니다.
+기존 **월 $500~650은 예상치이며 최대 금액 보장이 아닙니다.** 2026-11-02 기준 실제 운영은 월 약 $680 수준으로 보고, 맨 아래 절의 변경을 적용하면 약 $185 줄어들 것으로 어림합니다. 이 값은 access DB Multi-AZ·Redis 예비 복사본·일반 컴퓨터 최대 5대로 바꾸기 전에 계산했으므로 다시 계산해야 합니다. 외부 AI API 사용료는 별도입니다. 화면을 Vercel에서 Fargate로 옮기면서 Vercel 요금은 없어지고 Fargate 요금이 더해집니다. 서울 기준 대략 vCPU 시간당 약 $0.05, GB 시간당 약 $0.0055로 보면 Pod 하나(0.25 vCPU·1GB × 730시간)는 월 약 $13~15, 2개는 **월 약 $30 이하**입니다. 이 값은 추정이므로 [AWS 요금 계산기](https://calculator.aws/)와 [Fargate 요금](https://aws.amazon.com/fargate/pricing/)으로 확인해야 합니다. CloudWatch 수집 비용도 함께 다시 계산해야 합니다.
 
 ## 갑자기 바빠지면 어떻게 하나요?
 
@@ -175,3 +178,89 @@ WAF가 살펴본 개별 요청을 표본으로 저장하는 기능은 껐습니�
 [전체 준비물 목록](aws-resource-inventory.md), [CloudWatch 안내](aws-observability.md), [runner 설치 순서](../infra/runner/README.md), [운영 설계 기록](adr/0021-aws-observability-and-operations.md).
 
 설정 파일: [EKS](../infra/terraform/eks.tf), [runner](../infra/terraform/runner.tf), [RDS](../infra/terraform/rds.tf), [Redis](../infra/terraform/elasticache.tf), [길 설정](../infra/terraform/vpc.tf), [앱 입구](../k8s/overlays/aws/ingress.yaml), [S3](../infra/terraform/s3.tf), [ECR](../infra/terraform/ecr.tf), [예산](../infra/terraform/budgets.tf), [비용 보호](../infra/terraform/cost-guards.tf), [배포 검사](../scripts/aws_deploy.py), [일꾼 수 조절](../k8s/base/keda-scaledobject.yaml), [AWS 앱 설정](../k8s/overlays/aws/kustomization.yaml), [대기줄](../k8s/base/kafka.yaml).
+
+## 2026-11-02 운영 비용 최적화
+
+일반 노드 4대의 실측 CPU 사용률은 2~6%, 메모리는 26~37%였지만 CPU request 비율은 69~82%라 자동 축소 후보가 없었습니다. CloudWatch Agent의 CPU request를 250m에서 50m로 조정하고 Cluster Autoscaler의 `scale-down-utilization-threshold`를 0.7로 설정합니다. 이 값은 실제 CPU 사용률이 아니라 예약량 기준 후보 판정이며, 재배치 가능성·PDB 검사는 계속 적용됩니다. 최소 2대/최대 5대와 앱 replica·HPA는 유지합니다. Kafka가 있는 노드를 강제로 종료하지 않습니다.
+
+Container Insights는 10분 간격으로 수집하고 관련 경보도 10분 구간으로 평가합니다. 동일 노드·Pod 수라면 주기적 관측 횟수는 기존 5분 대비 약 절반이지만, CloudWatch 총요금 절반을 의미하지는 않습니다. Autoscaler 로그는 verbosity 4에서 2로 낮춥니다. 감사·인증·애플리케이션 로그 보관과 ALB/DB 경보는 유지합니다. 적용 후 노드 수, Agent 설정, 새 지표 수신과 ALB target 상태를 확인해야 합니다.
+
+자동 축소를 막던 `pipeline-api`의 `runs`와 EBS CSI controller의 `socket-dir`에만 `safe-to-evict-local-volumes`를 지정합니다. API의 영속 상태·로그는 RDS/S3에 있고 `runs`는 scratch이며, CSI의 해당 볼륨은 Unix socket입니다. worker·converter·Kafka에는 이를 적용하지 않습니다. API 2 replicas, `maxUnavailable: 0`, PDB 최소 1개를 유지합니다. 장시간 연결은 기존 종료 유예를 넘으면 재연결이 필요할 수 있습니다.
+
+현재 로컬 tfvars에 ALB 식별자와 실제 5개 managed addon 버전을 보완했습니다. 이전 파일에는 ALB 값과 metrics-server 버전이 빠져 있었으므로, 다른 환경에서도 운영 값을 확인한 뒤 계획을 생성해야 합니다.
+
+적용 확인: Terraform으로 CloudWatch 관련 8개와 EBS 애드온 1개를 제자리 수정했고 생성·삭제는 없었습니다. CloudWatch/CSI 애드온은 ACTIVE, Agent는 CPU request 50m·수집 600초, API는 2/2 Ready입니다. ALB의 access/document/frontend 대상 총 6개는 healthy였습니다. 관련 테스트 23개와 Terraform validate를 통과했습니다. 일반 노드 한 대가 2026-11-02 14:25 KST부터 자동 축소 후보로 판정됐으며, 실제 대수·청구 절감은 축소 완료와 후속 청구 데이터로 확인해야 합니다.
+
+CloudWatch 새 수집 확인: 14:30 KST 시각의 `ContainerInsights/node_memory_utilization` 데이터가 변경 후 도착했습니다. 자원 경보는 600초, ALB 경보는 300초로 유지되고 조회 당시 모두 OK였습니다. CPU처럼 차분을 사용하는 지표는 수집기 재시작 뒤 추가 표본을 기다릴 수 있습니다.
+
+14:38 KST 확인: 일반 ASG DesiredCapacity=3, InService=3이며 이전 노드 1대는 관리형 `Terminating:Wait` 상태입니다. 자동 축소가 API/CSI Pod를 다른 노드로 옮겼고 access/document/pipeline/frontend는 각각 2/2 Ready입니다. 종료 대기 인스턴스의 실제 과금 종료나 월 절감액까지 확정한 것은 아닙니다. AI Spot 1대, Fargate frontend 2개, DB 구성은 유지했습니다.
+
+되돌리기: `addon-config.json`의 두 수집 간격과 해당 경보/대시보드 주기를 300초로, Agent CPU request를 250m로 복원해 새 Terraform plan을 검토·적용합니다. Autoscaler는 Helm 이전 revision 또는 이전 threshold(0.5)/verbosity(4)로 복원합니다. API/CSI의 `safe-to-evict-local-volumes` annotation을 제거하면 해당 임시 볼륨의 자동 재배치 허용을 되돌립니다. 줄어든 노드 수는 설정 롤백만으로 즉시 4대로 돌아가지 않으며 필요하면 node group 용량을 별도로 조정해야 합니다.
+
+## 2026-11-02 추가 점검: 배포 여유와 로그 내용
+
+`3d140ad`(2026-10-06)는 일반 노드 상한을 4→5로 늘려 rollout Pending에 대응한 변경이다. 이번 최적화도 최대 5대를 유지한다. 3대는 평시 운영 결과이며, 3대만으로 전체 릴리스가 배포된다는 검증 결과가 아니다. 점검 시 일반 노드 CPU allocatable 합계는 5790m, requests 합계 4710m로 여유 1080m였다. access/document/pipeline 동시 maxSurge=1에는 각각 250/500/500m, 총 1250m가 추가로 필요한다. hostname topology spread 때문에 노드별 여유도 충족해야 한다. 변경 전 배포 스크립트는 converter 다음 나머지 Deployment를 한 번에 apply하고 rollout status만 순서대로 기다려 실제 rollout은 동시 시작했다. 아래 후속 적용에서 수정했다.
+
+따라서 평시 3대를 유지하더라도 배포 시 4~5대로 늘어날 수 있어야 한다. 배포 전에 일시적으로 여유 노드를 확보하거나 API 적용 자체를 순차화하는 보완이 적절하다. 기존 600초 rollout timeout 안에 노드 기동·약 2.3GB pipeline 이미지 다운로드·readiness가 완료되는지는 새 전체 릴리스로 아직 검증하지 않았다. 이 점검에서는 업무 배포나 부하 시험을 실행하지 않았다. 종료 대기였던 `i-04c172becdbf9eb03`은 terminated로 확인했다.
+
+최근 1시간 집계(설정 변경·재배치 포함)에서 스캔한 원본 크기는 EKS 관리 로그 약 130.5MB, performance 약 55.4MB, VPC Flow Logs 약 42.7MB, application 약 21.1MB였다. 이는 CloudWatch의 청구 사용량이나 정상 상태 월 견적과 같지 않다.
+
+- performance 메시지의 약 80%가 `ControlPlane` 유형(약 44.2MB, 54,593건)이었다. 600초 설정 후에도 5분 구간당 약 3.9~4.7MB의 ControlPlane 기록이 이어졌다. 노드 수집 간격 조정이 전체 관측량을 절반으로 줄인다고 볼 수 없다.
+- VPC Flow Logs는 파싱된 메시지 크기 기준 약 98.6%가 ACCEPT였다. 정상 연결의 감사 추적을 유지하면서 S3 직접 전달로 옮기는 방안이 적합하다. S3 전달도 수집·저장 비용이 남는다.
+- application에는 autoscaler와 CloudWatch Agent 운영 로그가 많다. pipeline-api는 1,275건 중 1,186건이 `/health` 포함 로그, embedding-server는 600건이 모두 해당 로그였다. 성공 헬스체크만 수집 전 제외하고 오류 응답은 유지하는 방식이 적합하다.
+- metrics-server는 접근할 수 없는 Fargate kubelet을 15초마다 조회해 timeout을 반복한다. csi-snapshotter는 VolumeSnapshot CRD가 없어 watch 오류를 반복한다. 두 오류는 로그 필터로 감추기보다 사용 목적에 맞게 수집 대상·스냅샷 기능 구성을 수정해야 한다.
+- audit 로그에는 leader election lease 갱신·조회와 권한 검사가 다수 포함된다. 감사 로그를 끄거나 CloudWatch 수신 뒤 필터를 추가하는 것을 유입 비용 절감책으로 취급하지 않는다.
+
+AWS Agent 소스는 enhanced 모드에서 ControlPlane 수집도 켠다. 단순히 enhanced=false로 바꾸면 기본 Container Insights의 지표별 과금으로 달라지므로 비용 감소를 보장할 수 없다. 필요한 노드·Pod·실패 노드 지표와 경보 dimension을 보존하는 수집 필터/사용자 정의 collector 설계가 우선이다. 이 점검 이후 아래 후속 적용에서 선별 수집과 로그 전환을 진행했다.
+
+## 2026-11-02 후속 적용: 배포 여유·선별 수집·로그 절감
+
+- `aws_deploy.py`는 converter 준비 후 API 교체 전에 1500m CPU/3Gi 메모리의 임시 Job이 실제 Ready가 될 때까지 기다린다. 일반 ON_DEMAND 노드에서 검증된 pipeline 이미지로 Python sleep만 실행하며, 앱 환경변수·Secret·서비스 계정 토큰은 주입하지 않는다. 15분 안에 확보하지 못하면 API 배포를 중단한다. 정상/실패 모두 Job을 삭제하고, runner가 사라져도 20분 실행 제한과 TTL 60초로 예약을 해제한다. 동명 Job이 있으면 덮어쓰거나 지우지 않는다.
+- API 3개는 apply 자체를 순차 실행하고 각 rollout 완료 후 다음을 시작한다. `maxUnavailable=0`, PDB, replica/HPA를 유지한다. 운영 시험에서 예약 Pod가 일반 ASG 3→4 확장을 유도하고 새 노드에서 pipeline 이미지 실행까지 성공한 뒤 삭제됐다. 전체 새 업무 릴리스/부하 시험과 같지는 않다. 배포기 코드는 저장소의 미커밋 변경이며 GitHub에서 사용하려면 해당 변경이 배포 workflow가 checkout하는 브랜치에 반영돼야 한다.
+- CloudWatch는 enhanced 기본 수집 대신 이름이 분리된 사용자 정의 OTEL pipeline을 쓴다. ControlPlane 상세 수집을 끄고 5개 지표만 EMF로 전송한다. 노드 CPU/메모리·실패 노드는 ClusterName, Pod CPU/메모리는 ClusterName+Namespace=fruition dimension만 게시한다. 노드/Pod별 dimension의 대량 사용자 정의 지표 생성을 막는다. 수집 주기는 600초이며 Application Signals/GPU/중복 OTEL 수집은 계속 비활성이다. 기본 Container Insights 상세 화면의 나머지 지표는 더 이상 갱신되지 않는다.
+- Fluent Bit는 정확한 Uvicorn 형식의 GET/HEAD `/health` 또는 `/healthz` 200 OK 줄만 CloudWatch 전송 전에 제외한다. 500, POST, 일반 업무 로그와 다른 API의 200은 유지한다. 운영과 동일한 Fluent Bit 이미지로 5개 입력 중 성공 헬스체크 1개만 제외되는 것을 확인했다. Fargate 자체 로거에는 이 필터가 적용되지 않는다.
+- VPC ALL Flow Logs는 전용 비공개 S3 `fruition-vpc-flow-logs-273366117740-ap-northeast-2/flow/`로 직접 보낸다. SSE-S3, 공개 접근 차단, 계정/리전 제한 전달 정책, 14일 만료를 설정했다. 실제 gzip 파일의 7,202개 레코드(ACCEPT 7,109 / REJECT 79 / NODATA 7 / SKIPDATA 7)를 확인한 후 기존 CloudWatch Flow Log와 불필요해진 IAM 역할·정책을 제거했다. VPC Flow Logs는 best effort이며 SKIPDATA가 있어 완전한 패킷 감사라고 보장하지 않는다. 기존 CloudWatch log group은 Terraform moved로 소유 주소만 옮겨 14일 보관과 삭제 방지를 유지했다.
+
+S3 직접 전달에도 vended log 전달·S3 저장/요청 비용이 남는다. 정확한 절감액은 후속 청구 사용량으로 확인해야 하며 이 계정의 Cost Explorer/Price List API는 조직 SCP로 차단돼 있다. EKS 감사·인증 로그, RDS/Redis 구성, 앱 replicas는 유지한다.
+
+되돌릴 때는 CloudWatch 설정과 `service_account_role_arn`을 함께 Terraform으로 적용한다. CLI `update-addon`을 쓴다면 `--service-account-role-arn arn:aws:iam::273366117740:role/fruition-cloudwatch-agent`를 반드시 명시하고 실제 ServiceAccount annotation과 Pod의 IRSA 환경변수를 확인한다. 역할을 빠뜨린 갱신에서 연결이 사라져 14:54~15:01 KST 로그 전송 거부가 발생했고, Terraform 복원과 수집기 재기동으로 복구했다. 그동안의 앱 로그는 노드에 남은 원본 423건을 회수해 `recovery-20261102-addon-role` stream에 재전송했다. host/dataplane 및 수집기 로그 전체의 무손실 복구는 보장하지 않는다.
+
+VPC 전달을 되돌릴 때는 기존 log group을 대상으로 CloudWatch Flow Log를 먼저 재생성하고 전달 성공을 확인한 뒤 S3 Flow Log를 중단한다. S3 버킷이나 보존 중인 로그를 삭제할 필요는 없다.
+
+검증 기록: 배포 관련 테스트 79개와 maintenance 테스트 16개(총 95개), Terraform validate/fmt, diff 공백 검사를 통과했다. 15:05 KST CloudWatch API에서 5개 지표 모두 새 표본을 확인했다: 노드 CPU 최대 8.66%, 메모리 39.71%, 실패 노드 0, fruition Pod CPU 1.60%, 메모리 10.06%. EMF 원본도 지표 이름 5개, dimension 조합 2개만 포함했다. 빠른 수신 검증 동안만 receiver를 60초로 실행하고 최종 운영 주기는 600초로 복원했고 15:07 KST 재기동한 Agent 로그의 `collection_interval: 10m0s`와 Ready 상태를 확인했다. `agent.otelConfig`만 바꿔서는 실행 중인 DaemonSet이 자동 재기동되지 않을 수 있으므로 CR/ConfigMap뿐 아니라 재기동 후 Agent가 출력한 실제 collection_interval을 확인한다.
+
+15:04~15:06 KST의 선별 수집 시험 구간은 performance 128건/약 144KB였으며 Type은 Node/Pod/Cluster뿐이고 ControlPlane은 0건이었다. 이 구간은 검증용 60초 주기이고, 과거 1시간 집계와 기간·노드 수가 달라 그대로 월 절감률로 환산하지 않는다.
+
+15:09 KST 일반 ASG는 DesiredCapacity=3, InService=3으로 복귀했고 임시 확장 인스턴스는 `Terminating:Wait`였다. 강제 종료 없이 예약→자동 확장→Ready→예약 해제→자동 축소까지 확인했다. 최종 CloudWatch 애드온 ACTIVE/IRSA 연결 정상, 600초 실행 설정과 관련 Terraform targeted plan의 No changes를 확인했다. 새 600초 CPU 표본은 차분 계산 때문에 재시작 후 약 20분이 걸릴 수 있어, 이번 검증의 실제 5종 수신 증거는 직전 60초 시험 구간이다.
+
+## 2026-11-02 알파 테스트 대비 비용 조정 (적용 전)
+
+**이 절의 내용은 저장소 코드 변경이며 아직 운영 AWS에 적용하지 않았습니다.** Terraform apply와 k8s 배포 뒤에 실제 대수·설정·청구로 확인해야 합니다.
+
+| 항목 | 바뀌는 내용 | 알아둘 점 |
+|---|---|---|
+| Redis (`elasticache.tf`) | `num_cache_clusters` 2→1, 자동 장애 조치·Multi-AZ 끔 | 노드 장애·교체 때 세션·권한 projection·SSE relay가 사라져 재로그인이 필요할 수 있음 |
+| access DB (`rds.tf`) | `multi_az` true→false (core DB와 동일) | 다음 유지 관리 기간에 적용되며 AWS 문서상 중단 없음. 백업 7일·암호화·삭제 보호 유지 |
+| 예산 알림 (`budgets.tf`, `budget_discord/handler.py`) | ACTUAL 기준 $50~$1000, $50마다 예산 20개 | 액션 없는 예산이라 무료. 기존 400·550·650 예산은 이름 키가 같아 다시 만들지 않음. Discord 메시지는 예산 이름·알림 기준·현재 실제 사용액·의미·확인할 일을 한국어로 먼저 쓰고 AWS 원문을 뒤에 붙임 |
+| 자격 증명 경보 (`credential-guard.tf`) | `alarm_description`을 경보별 한국어 설명으로 교체 | 확인 절차 문서 링크는 유지 |
+| AI 노드 0대 (`keda-scaledobject.yaml`) | Kafka worker 5종 `minReplicaCount` 1→0. `cooldownPeriod` ingest·maintenance·converter 600초, query·agent 1800초 | 쉬고 난 뒤 첫 AI 작업은 노드 확보·이미지 pull·모델 적재로 약 3~5분 늦음(cold start) |
+| embedding-server | 새 ScaledObject가 query·agent worker Pod 수를 따라 0/1로 조정 | 두 worker는 init container로 embedding-server `/health`를 기다린 뒤 소비 시작 |
+| worker 위치 (`kustomization.yaml`) | edit-event-consumer·pipeline-agent-worker를 AI 노드 → 일반 노드 | 상시 1개가 필요해 AI 노드에 두면 노드가 0대로 내려가지 않음. pipeline-agent-worker CPU 요청 50m |
+| Kafka (`kafka.yaml`) | `offsets.retention.minutes` 525600(1년) | 기본 7일 뒤 offset이 지워지면 KEDA가 topic 전체를 lag으로 계산해 worker·AI 노드를 계속 깨움. 첫 적용 때 단일 broker가 재시작될 수 있음(약 1~2분) |
+| 일반 노드 평시 2대 | API CPU 요청 access 250→100m, document·pipeline 500→150m. HPA 목표 175%/200% | 실측(2026-10-27~11-02 Pod 평균 3~14m) 기준. Pod당 확장 시점(약 175~300m)은 이전과 비슷. 배포 중에는 3대째가 잠시 켜질 수 있음 |
+| 배포기 (`aws_deploy.py`) | KEDA 대상 Deployment는 `replicas`를 빼고 적용 | 배포할 때마다 0이던 worker가 1로 깨어 AI 노드를 띄우지 않게 함. init container 이미지도 release 태그 검사 대상 |
+
+**예상 절감:** 현재 월 약 $680 기준에서 약 $185/월 줄어들 것으로 어림합니다. 공시 단가 기준 추정이며 Spot 가격·AI 작업 시간·환율에 따라 달라집니다. 적용 후 청구 데이터로 확인합니다.
+
+**미해결 항목**
+
+- 일반 노드 launch template이 실제로는 t3 CPU credit `unlimited`로 실행 중입니다. `eks.tf`는 `standard`로 설정돼 있어 코드와 운영이 다릅니다. 최근 14일 surplus credit 요금은 없었지만 원인 확인과 정리가 필요합니다.
+- EKS 1.35 표준 지원은 2027-03-27에 끝납니다. `upgradePolicy`가 EXTENDED라 그 전에 업그레이드하지 않으면 control plane 요금이 월 약 $73에서 약 $438로 오릅니다.
+
+**서비스 쪽 한도 (이 저장소 밖, 운영 배포 전)**
+
+Fruition-document·Fruition-frontend 브랜치에 사용자 한도를 만들었습니다. 상세 동작은 해당 저장소 문서를 봅니다.
+
+- AI: 사용자당 하루 비용 $5(한국 시간 자정 초기화), 하루 토큰 2,000,000, 동시 실행 3개. `AI_LIMIT_ENABLED` 스위치로 켜고 끕니다.
+- 업로드: PDF 100MB 이하, 사용자당 저장 공간 5GB(휴지통 포함), 하루 200개. `UPLOAD_LIMITS_ENABLED` 스위치로 켜고 끕니다.
+- 화면: 저장 공간 사용량 막대와 한국어 한도 안내 문구를 보여 줍니다.

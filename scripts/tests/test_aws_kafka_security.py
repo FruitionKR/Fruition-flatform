@@ -74,6 +74,8 @@ class KafkaSecurityTests(unittest.TestCase):
         for d in self.docs:
             if d["kind"] != "ScaledObject": continue
             trigger, = d["spec"]["triggers"]
+            # embedding-server scales on worker pods, not Kafka, and needs no Kafka identity.
+            if trigger["type"] != "kafka": continue
             self.assertEqual("enable",trigger["metadata"]["tls"])
             self.assertTrue(trigger["metadata"]["bootstrapServers"].endswith(":9093"))
             self.assertEqual(auth["metadata"]["name"],trigger["authenticationRef"]["name"])

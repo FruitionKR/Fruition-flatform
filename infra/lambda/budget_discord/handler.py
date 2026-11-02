@@ -77,6 +77,32 @@ def alarm_diagnosis(alarm):
     return "\n".join(lines)
 
 
+BUDGET_NOTE = ("비용 데이터는 하루 최대 3회 갱신되어 실제보다 늦게 반영될 수 있고, "
+               "이 알림으로 리소스가 자동으로 멈추지는 않습니다.")
+
+
+def _budget_field(message, label):
+    match = re.search(rf"^\s*{label}:[ \t]*(.+?)\s*$", message, re.M | re.I)
+    return match.group(1)[:100] if match else None
+
+
+def budget_explanation(message):
+    """Explain an AWS Budgets text notification; its format is not guaranteed."""
+    name = _budget_field(message, "Budget Name")
+    # AWS renders the threshold like "> $50.00"; strip the comparison sign.
+    threshold = (_budget_field(message, "Alert Threshold") or "").lstrip("> ").strip()
+    actual = _budget_field(message, "ACTUAL Amount")
+    if not (name and threshold and actual):
+        return ("AWS 예산 알림의 형식을 자동으로 해석하지 못했습니다. "
+                "아래 원문에서 예산 이름과 기준·금액을 확인하세요.\n" + BUDGET_NOTE)
+    budgeted = _budget_field(message, "Budgeted Amount")
+    budgeted = f" (월 예산 {budgeted})" if budgeted else ""
+    return (f"예산 이름: {name}\n알림 기준: 실제 사용액 > {threshold}\n"
+            f"현재 실제 사용액: {actual}{budgeted}\n"
+            f"의미: 이번 달 누적 실제 사용액이 알림 기준을 넘었습니다. {BUDGET_NOTE}\n"
+            "확인할 일: Cost Explorer에서 서비스별 비용을 보고 비용이 급증한 서비스를 확인하세요.")
+
+
 class DeliveryError(RuntimeError):
     """Safe error text only: Lambda records unhandled exceptions."""
 
@@ -125,7 +151,9 @@ def discord_payload(sns):
                    f"원문 사유: {alarm.get('NewStateReason', 'unknown')}")
     else:
         # Budget notifications contain text, not a guaranteed JSON schema.
-        content = "AWS 예산 알림\n" + str(sns.get("Subject") or "Budget notification") + "\n\n" + message
+        # Korean explanation first; keep AWS's original text last.
+        content = (f"AWS 예산 알림\n{budget_explanation(message)}\n\n원문:\n"
+                   + str(sns.get("Subject") or "Budget notification") + "\n\n" + message)
     encoded = content.encode("utf-16-le")
     if len(encoded) > 3800:
         content = encoded[:3800].decode("utf-16-le", errors="ignore") + "\n… (이하 생략)"

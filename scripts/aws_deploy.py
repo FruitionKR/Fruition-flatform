@@ -173,7 +173,8 @@ def check_manifest(documents, sha, images=None):
     for document in documents:
         if document["kind"] not in {"Deployment", "Job"}:
             continue
-        for container in document["spec"]["template"]["spec"]["containers"]:
+        pod = document["spec"]["template"]["spec"]
+        for container in pod["containers"] + pod.get("initContainers", []):
             if not image_matches(container["image"], sha, images):
                 raise ValueError("업무 image는 모두 release에 기록된 immutable 태그/digest여야 합니다")
 
@@ -383,6 +384,30 @@ def wait_alb_bindings():
             return
         time.sleep(5)
     raise ValueError("ALB TargetGroupBinding 준비 시간 초과: 앱 Pod 생성 전 중단합니다")
+
+
+def wait_kafka_settled(document):
+    """Kafka 설정 변경은 Strimzi가 단일 broker를 재시작한다. kubectl wait의 Ready는 재시작 전 옛 상태일 수 있다.
+
+    operator가 새 generation을 반영(observedGeneration)하고 Ready이며 broker Pod가 모두 다시 Ready일 때까지 기다린다.
+    """
+    name = document["metadata"]["name"]
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        kafka = json.loads(kubectl("get", "kafka/" + name, "-o", "json") or "{}")
+        status = kafka.get("status", {})
+        reconciled = status.get("observedGeneration", -1) >= kafka.get("metadata", {}).get("generation", 0) and \
+            any(c.get("type") == "Ready" and c.get("status") == "True" for c in status.get("conditions", []))
+        pods = json.loads(kubectl("get", "pods", "-l", f"strimzi.io/cluster={name},strimzi.io/broker-role=true",
+                                  "-o", "json") or "{}").get("items", [])
+        brokers_ready = bool(pods) and all(
+            not p.get("metadata", {}).get("deletionTimestamp") and
+            any(c.get("type") == "Ready" and c.get("status") == "True" for c in p.get("status", {}).get("conditions", []))
+            for p in pods)
+        if reconciled and brokers_ready:
+            return
+        time.sleep(5)
+    raise TimeoutError("Kafka broker 재시작이 10분 안에 끝나지 않았습니다. API 교체 전에 중단합니다")
 
 
 def http_status(url, *extra):
@@ -708,6 +733,60 @@ def _deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fa
                      initial_data=initial_data if initial else None)
 
 
+def reserve_deployment_headroom(documents):
+    """A bounded, inert Job asks autoscaler for real schedulable rollout capacity."""
+    pipeline = next(d for d in documents if d["kind"] == "Deployment" and d["metadata"]["name"] == "pipeline-api")
+    image = pipeline["spec"]["template"]["spec"]["containers"][0]["image"]
+    name = "fruition-deploy-headroom"
+    # 빈 t3.large 할당 가능 CPU 1930m - DaemonSet 요청 추정 약 255m(aws-node 25m, kube-proxy 100m,
+    # ebs-csi-node 30m, cloudwatch-agent 50m, fluent-bit 50m; 운영 runner 권한으로는 직접 조회 불가) = 약 1675m.
+    # 1200m은 그 안에서 약 28% 여유를 두고, 가장 큰 API 1개 surge(500m/1Gi)를 덮는다. 3Gi도 빈 노드(약 6.8Gi)에 들어간다.
+    reservation = {
+        "apiVersion": "batch/v1", "kind": "Job",
+        "metadata": {"name": name, "namespace": NAMESPACE},
+        "spec": {"activeDeadlineSeconds": 1200, "ttlSecondsAfterFinished": 60, "backoffLimit": 0,
+                 "template": {"metadata": {"labels": {"app": name}}, "spec": {
+                     "restartPolicy": "Never", "automountServiceAccountToken": False,
+                     "nodeSelector": {"eks.amazonaws.com/capacityType": "ON_DEMAND"},
+                     "securityContext": {"runAsNonRoot": True, "runAsUser": 10001,
+                                         "seccompProfile": {"type": "RuntimeDefault"}},
+                     "containers": [{"name": "reserve", "image": image,
+                         "command": ["python", "-c", "import time; time.sleep(1200)"],
+                         "resources": {"requests": {"cpu": "1200m", "memory": "3Gi"},
+                                       "limits": {"cpu": "1200m", "memory": "3Gi"}},
+                         "securityContext": {"allowPrivilegeEscalation": False,
+                                             "capabilities": {"drop": ["ALL"]}}}]}}}}
+    # create fails on a concurrent reservation; never delete somebody else's Job.
+    kubectl("create", "-f", "-", input=yaml.safe_dump(reservation))
+    try:
+        deadline = time.monotonic() + 900
+        while time.monotonic() < deadline:
+            pods = json.loads(kubectl("get", "pods", "-l", "job-name=" + name, "-o", "json"))
+            if any(p.get("status", {}).get("phase") == "Running" and
+                   any(c.get("type") == "Ready" and c.get("status") == "True"
+                       for c in p.get("status", {}).get("conditions", [])) for p in pods["items"]):
+                return
+            if any(p.get("status", {}).get("phase") == "Failed" for p in pods["items"]):
+                raise RuntimeError("배포 여유 Pod가 실패했습니다. 기존 서비스를 유지하고 배포를 중단합니다")
+            time.sleep(5)
+        raise TimeoutError("배포 여유 용량을 15분 안에 확보하지 못했습니다")
+    finally:
+        # The new node remains during autoscaler's unneeded-node grace period.
+        # Waiting for deletion releases its capacity before application rollout.
+        kubectl("delete", "job", name, "--wait=true", "--timeout=90s", "--ignore-not-found=true")
+
+
+def without_keda_replicas(documents):
+    """KEDA가 replicas를 정하는 Deployment는 manifest의 replicas(1)를 빼고 적용한다.
+
+    적용할 때마다 1로 되돌리면 0으로 줄어 있던 worker가 깨어 AI 노드를 띄우고, 늘어나 있던 worker는
+    처리 중에 줄어든다. 이전 적용 기록에 replicas가 남아 있으면 첫 적용에서만 기본값 1이 된다.
+    """
+    targets = {d["spec"]["scaleTargetRef"]["name"] for d in documents if d["kind"] == "ScaledObject"}
+    return [{**d, "spec": {k: v for k, v in d["spec"].items() if k != "replicas"}}
+            if d["kind"] == "Deployment" and d["metadata"]["name"] in targets else d for d in documents]
+
+
 def complete_rollout(config, sha, documents, *, current, review, settings, existing="",
                      bootstrap=False, initial=False, initial_data=None):
     """Roll out already validated schemas; never execute a migration Job."""
@@ -717,6 +796,8 @@ def complete_rollout(config, sha, documents, *, current, review, settings, exist
     for document in documents:
         if document["kind"] in {"Kafka", "KafkaTopic"}:
             wait(document)
+        if document["kind"] == "Kafka":
+            wait_kafka_settled(document)
     apply([d for d in documents if d["kind"] == "KafkaUser"])
     for document in documents:
         if document["kind"] == "KafkaUser":
@@ -726,9 +807,11 @@ def complete_rollout(config, sha, documents, *, current, review, settings, exist
     routing = {"Service", "Ingress"}
     maintenance = bool(review and review["migration_mode"] == "maintenance-cutover")
     apply([d for d in documents if d["kind"] in routing and (not maintenance or d["kind"] == "Service")])
+    # maintenance-cutover는 ScaledObject를 다시 걸지 않으므로 manifest의 replicas로 worker를 되살린다.
+    rollout_documents = documents if maintenance else without_keda_replicas(documents)
     if not maintenance:
         wait_alb_bindings()
-    workloads = [d for d in documents if d["kind"] not in foundation | event_kinds | routing | SCALING_KINDS |
+    workloads = [d for d in rollout_documents if d["kind"] not in foundation | event_kinds | routing | SCALING_KINDS |
                  {"Namespace", "Job", "ScaledObject", "KafkaUser", "TriggerAuthentication"}]
     # New document-svc publishes ai.convert.command. Roll the converter worker out and
     # confirm it runs before any other workload so no command waits for an old worker.
@@ -737,10 +820,20 @@ def complete_rollout(config, sha, documents, *, current, review, settings, exist
         raise ValueError(f"{CONVERTER_DEPLOYMENT} Deployment가 manifest에 없습니다")
     apply(converter)
     kubectl("rollout", "status", "deployment/" + CONVERTER_DEPLOYMENT, "--timeout=600s")
-    apply([d for d in workloads if d not in converter])
+    reserve_deployment_headroom(documents)
+    apply([d for d in workloads if d["kind"] != "Deployment"])
+    # API surge requests total 400m. One-at-a-time replacement needs at most
+    # 150m and preserves maxUnavailable=0 / PDB minAvailable=1.
+    apis = {"access-svc", "document-svc", "pipeline-api"}
     for document in workloads:
-        if document["kind"] == "Deployment" and document not in converter:
+        if document["kind"] == "Deployment" and document["metadata"]["name"] in apis:
+            apply([document])
             kubectl("rollout", "status", "deployment/" + document["metadata"]["name"], "--timeout=600s")
+    others = [d for d in workloads if d["kind"] == "Deployment" and d not in converter
+              and d["metadata"]["name"] not in apis]
+    apply(others)
+    for document in others:
+        kubectl("rollout", "status", "deployment/" + document["metadata"]["name"], "--timeout=600s")
     if not review or review["migration_mode"] != "maintenance-cutover":
         apply([d for d in documents if d["kind"] == "TriggerAuthentication"])
         apply([d for d in documents if d["kind"] == "ScaledObject"])

@@ -146,7 +146,7 @@ resource "aws_cloudwatch_metric_alarm" "operations" {
   metric_name         = each.value.metric
   dimensions          = each.value.dimensions
   statistic           = each.value.stat
-  period              = 300
+  period              = each.value.namespace == "ContainerInsights" ? 600 : 300
   evaluation_periods  = each.value.periods
   datapoints_to_alarm = try(each.value.datapoints, each.value.periods)
   threshold           = each.value.threshold
@@ -285,7 +285,7 @@ resource "aws_cloudwatch_dashboard" "operations" {
     [for i, key in sort(keys(local.operations_metrics)) : {
       type = "metric", x = (i % 3) * 8, y = 2 + floor(i / 3) * 6, width = 8, height = 6
       properties = {
-        title   = key, region = var.region, period = 300, stat = local.operations_metrics[key].stat, view = "timeSeries"
+        title   = key, region = var.region, period = local.operations_metrics[key].namespace == "ContainerInsights" ? 600 : 300, stat = local.operations_metrics[key].stat, view = "timeSeries"
         metrics = [concat([local.operations_metrics[key].namespace, local.operations_metrics[key].metric], flatten([for k, v in local.operations_metrics[key].dimensions : [k, v]]))]
       }
     }],

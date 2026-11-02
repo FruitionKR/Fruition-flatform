@@ -97,6 +97,12 @@ class CredentialGuardTests(unittest.TestCase):
         self.assertIn('each.key == "CredentialAuditHeartbeat" ? 2 : 1', terraform)
         self.assertIn('each.key == "CredentialAuditHeartbeat" ? "breaching" : "ignore"', terraform)
 
+    def test_terraform_does_not_remove_rotation_evidence_tags(self):
+        secrets = (path.parents[2] / "terraform/secrets.tf").read_text()
+        app_secret = secrets.split('resource "aws_secretsmanager_secret" "app"', 1)[1].split("\nresource ", 1)[0]
+        for tag in ("fruition:db-credentials-rotated-at", "fruition:jwt-signing-key-rotated-at"):
+            self.assertIn(f'tags["{tag}"]', app_secret)
+
 
 if __name__ == "__main__":
     unittest.main()

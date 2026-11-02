@@ -169,7 +169,11 @@ locals {
     vpc-cni    = { addon_version = var.eks_addon_versions["vpc-cni"], configuration_values = jsonencode({ enableNetworkPolicy = "true" }) }
     # Strimzi Kafka PVC용 EBS gp3
     aws-ebs-csi-driver = {
-      addon_version            = var.eks_addon_versions["aws-ebs-csi-driver"]
+      addon_version = var.eks_addon_versions["aws-ebs-csi-driver"]
+      # Only the Unix socket is ephemeral; EBS volumes remain persistent.
+      configuration_values = jsonencode({
+        controller = { podAnnotations = { "cluster-autoscaler.kubernetes.io/safe-to-evict-local-volumes" = "socket-dir" } }
+      })
       service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
     }
     # API HPA가 CPU 사용률을 읽으려면 필요하다. 없으면 HPA가 <unknown>으로 멈춘다.

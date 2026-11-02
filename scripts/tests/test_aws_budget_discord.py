@@ -187,6 +187,39 @@ class BudgetDiscordTests(unittest.TestCase):
         self.assertNotIn(URL, " ".join(logs.output))
         self.assertNotIn("$551", " ".join(logs.output))
 
+    def test_exceeded_budget_is_explained_in_korean_with_original_last(self):
+        message = ("AWS Budget Notification November 02, 2026\nAWS Account 123456789012\n\n"
+                   "Dear AWS Customer,\n\nYou requested that we alert you when the ACTUAL Cost associated "
+                   "with your fruition-monthly-100 budget is greater than $100.00 for the current month.\n\n"
+                   "Budget Name: fruition-monthly-100\nBudget Type: Cost\nBudgeted Amount: $100.00\n"
+                   "Alert Type: ACTUAL\nAlert Threshold: > $100.00\nACTUAL Amount: $123.45\n")
+        content = notifier.discord_payload({"Subject": "AWS Budgets: fruition-monthly-100 has exceeded "
+                                                       "your alert threshold", "Message": message})["content"]
+        self.assertTrue(content.startswith("AWS 예산 알림\n예산 이름: fruition-monthly-100\n"))
+        self.assertIn("알림 기준: 실제 사용액 > $100.00\n", content)
+        self.assertIn("현재 실제 사용액: $123.45 (월 예산 $100.00)", content)
+        self.assertIn("하루 최대 3회 갱신", content)
+        self.assertIn("자동으로 멈추지는 않습니다", content)
+        self.assertIn("확인할 일:", content)
+        self.assertTrue(content.endswith("\n\n" + message))
+        self.assertLess(content.index("확인할 일:"), content.index("원문:\nAWS Budgets: fruition-monthly-100"))
+
+    def test_unparseable_budget_message_falls_back_with_original(self):
+        for message in ("Actual spend: $551.00", "Budget Name: x\nAlert Threshold: >\nACTUAL Amount: $1"):
+            with self.subTest(message=message):
+                content = notifier.discord_payload({"Message": message})["content"]
+                self.assertIn("형식을 자동으로 해석하지 못했습니다", content)
+                self.assertNotIn("예산 이름:", content)
+                self.assertTrue(content.endswith("원문:\nBudget notification\n\n" + message))
+
+    def test_long_parsed_budget_keeps_korean_and_truncates(self):
+        message = "Budget Name: b\nAlert Threshold: > $50.00\nACTUAL Amount: $60.00\n" + "😀" * 3000
+        content = notifier.discord_payload({"Message": message})["content"]
+        self.assertLessEqual(len(content.encode("utf-16-le")) // 2, 2000)
+        self.assertIn("현재 실제 사용액: $60.00", content)
+        self.assertIn("원문:\nBudget notification\n\nBudget Name: b", content)
+        self.assertTrue(content.endswith("(이하 생략)"))
+
     def test_long_unicode_message_fits_discord_limit(self):
         result = notifier.discord_payload({"Message": "😀" * 3000})
         self.assertLessEqual(len(result["content"].encode("utf-16-le")) // 2, 2000)

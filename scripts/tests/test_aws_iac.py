@@ -110,6 +110,21 @@ class IaCContractTests(unittest.TestCase):
         for key in ("access", "core"):
             self.assertRegex(rds, rf'depends_on\s*=\s*\[aws_cloudwatch_log_group\.rds\["{key}"\]\]')
 
+    def test_redis_and_access_db_run_single_node_for_cost(self):
+        redis = (ROOT / "infra/terraform/elasticache.tf").read_text()
+        self.assertRegex(redis, r'num_cache_clusters\s*=\s*1\b')
+        self.assertRegex(redis, r'automatic_failover_enabled\s*=\s*false')
+        self.assertRegex(redis, r'multi_az_enabled\s*=\s*false')
+        self.assertRegex(redis, r'transit_encryption_mode\s*=\s*"required"')
+        rds = (ROOT / "infra/terraform/rds.tf").read_text()
+        for key in ("access", "core"):
+            block = rds[rds.index(f'resource "aws_db_instance" "{key}"'):]
+            block = block[:block.index("\n}\n")]
+            self.assertRegex(block, r'multi_az\s*=\s*false')
+            self.assertRegex(block, r'backup_retention_period\s*=\s*7')
+            self.assertRegex(block, r'deletion_protection\s*=\s*true')
+            self.assertRegex(block, r'storage_encrypted\s*=\s*true')
+
     def test_converter_does_not_set_unread_env(self):
         files = ["k8s/base/converter.yaml", "infra/compose.converter.yml"]
         for path in files:
@@ -122,7 +137,13 @@ class IaCContractTests(unittest.TestCase):
         self.assertNotIn('aws_secretsmanager_secret_version', budget)
         self.assertNotIn('subscriber_email_addresses', budget)
         self.assertNotIn('budget_email', (ROOT / "infra/terraform/variables.tf").read_text())
-        self.assertIn('toset(["400", "550", "650"])', budget)
+        # $50~$1000을 $50 단위로 실제 사용액 알림. 이름이 topic policy ArnLike 패턴과 맞아야 한다.
+        self.assertIn('toset([for amount in range(50, 1001, 50) : tostring(amount)])', budget)
+        self.assertIn('name         = "${var.project}-monthly-${each.value}"', budget)
+        self.assertIn(':budget/${var.project}-monthly-*', budget)
+        self.assertEqual(1, budget.count("notification {"))
+        self.assertRegex(budget, r'notification_type\s*=\s*"ACTUAL"')
+        self.assertNotIn('FORECASTED', budget)
         self.assertIn('"aws:SourceAccount"', budget)
         self.assertIn('"aws:SourceArn"', budget)
         self.assertIn('aws_secretsmanager_secret.budget_discord.arn', budget)

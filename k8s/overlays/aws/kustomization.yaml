@@ -115,9 +115,12 @@ patches:
                 env:
                   - name: POSTGRES_HOST
                     value: "REPLACE_ME_CORE_RDS_ENDPOINT"
+                # CPU 요청은 실측(2026-10-27~11-02 Container Insights: Pod 평균 7m, 시간 최대 48m)에 맞춰
+                # 일반 노드 2대에 상주하도록 낮춘다. limit이 없어 기동·부하 때는 노드의 남는 CPU를 쓴다.
+                # HPA 목표(api-autoscaling.yaml)는 같은 비율로 올려 확장 시점(Pod당 약 300m)을 유지한다.
                 resources:
                   requests:
-                    cpu: 500m
+                    cpu: 150m
                     memory: 1Gi
                   limits:
                     memory: 2Gi
@@ -137,6 +140,10 @@ patches:
                 env:
                   - name: POSTGRES_HOST
                     value: "REPLACE_ME_ACCESS_RDS_ENDPOINT"
+                # base 250m → 100m. 실측 Pod 평균 3m, 시간 최대 18m. 메모리 요청(base 512Mi)은 실측 최대 475Mi라 그대로 둔다.
+                resources:
+                  requests:
+                    cpu: 100m
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment
@@ -149,9 +156,10 @@ patches:
             containers:
               - name: pipeline-api
                 imagePullPolicy: IfNotPresent
+                # 실측 Pod 평균 14m, 시간 최대 30m.
                 resources:
                   requests:
-                    cpu: 500m
+                    cpu: 150m
                     memory: 1Gi
                   limits:
                     memory: 2Gi
@@ -168,6 +176,10 @@ patches:
             containers:
               - name: pipeline-agent-worker
                 imagePullPolicy: IfNotPresent
+                # DB를 1초마다 polling하는 상주 worker. 실측 평균 9m, 시간 최대 26m, 메모리 최대 162Mi.
+                resources:
+                  requests:
+                    cpu: 50m
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment
@@ -250,6 +262,33 @@ patches:
                     memory: 2560Mi
                   limits:
                     memory: 3584Mi
+            # embedding-server는 KEDA가 이 worker가 생길 때 0에서 함께 깨운다(base keda-scaledobject.yaml).
+            # 모델 적재 전에 질의를 받으면 질의 임베딩이 실패하므로, 서버가 준비될 때까지 소비를 시작하지 않는다.
+            initContainers:
+              - name: wait-embedding-server
+                image: fruition-mvp-dev-pipeline-api:latest
+                imagePullPolicy: IfNotPresent
+                command:
+                  - python
+                  - -c
+                  # 노드 확보·이미지 pull·모델 적재를 기다린다. 180회(15분 이상) 안에 안 되면 실패해 Pod가 재시도한다.
+                  - |
+                    import time, urllib.request
+                    for _ in range(180):
+                        try:
+                            urllib.request.urlopen("http://embedding-server:8000/health", timeout=5).close()
+                            break
+                        except Exception:
+                            time.sleep(5)
+                    else:
+                        raise SystemExit("embedding-server가 준비되지 않았습니다")
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]
+                resources:
+                  requests: {cpu: 10m, memory: 64Mi}
+                  limits: {memory: 128Mi}
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment
@@ -273,6 +312,33 @@ patches:
                     memory: 2560Mi
                   limits:
                     memory: 3584Mi
+            # embedding-server는 KEDA가 이 worker가 생길 때 0에서 함께 깨운다(base keda-scaledobject.yaml).
+            # 모델 적재 전에 질의를 받으면 질의 임베딩이 실패하므로, 서버가 준비될 때까지 소비를 시작하지 않는다.
+            initContainers:
+              - name: wait-embedding-server
+                image: fruition-mvp-dev-pipeline-api:latest
+                imagePullPolicy: IfNotPresent
+                command:
+                  - python
+                  - -c
+                  # 노드 확보·이미지 pull·모델 적재를 기다린다. 180회(15분 이상) 안에 안 되면 실패해 Pod가 재시도한다.
+                  - |
+                    import time, urllib.request
+                    for _ in range(180):
+                        try:
+                            urllib.request.urlopen("http://embedding-server:8000/health", timeout=5).close()
+                            break
+                        except Exception:
+                            time.sleep(5)
+                    else:
+                        raise SystemExit("embedding-server가 준비되지 않았습니다")
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]
+                resources:
+                  requests: {cpu: 10m, memory: 64Mi}
+                  limits: {memory: 128Mi}
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment
@@ -294,10 +360,13 @@ patches:
                     memory: 2560Mi
                   limits:
                     memory: 3584Mi
-  # AI 비동기 처리와 변환을 Spot node group에 배치한다.
+  # AI 비동기 처리와 변환을 Spot node group에 배치한다. 모두 KEDA가 일이 없으면 0으로 줄여 AI 노드도 0대가 된다.
+  # 상시 1개가 필요한 작은 worker는 일반 노드에 둔다. AI 노드에 두면 그 하나 때문에 AI 노드가 내려가지 않는다.
+  # - edit-event-consumer: 문서 편집마다 오는 document.edit.event를 받는다. KEDA로 깨우면 편집마다 AI 노드가 뜬다.
+  # - pipeline-agent-worker: Kafka가 아니라 DB를 polling해 lag으로 깨울 수 없다.
   - target:
       kind: Deployment
-      name: (ingest-worker|pipeline-agent-worker|query-task-worker|agent-task-worker|maintenance-task-worker|edit-event-consumer|converter|embedding-server)
+      name: (ingest-worker|query-task-worker|agent-task-worker|maintenance-task-worker|converter|embedding-server)
     patch: |-
       - op: add
         path: /spec/template/spec/nodeSelector

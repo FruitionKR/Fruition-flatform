@@ -101,6 +101,10 @@ spec:
       maxUnavailable: 0
       maxSurge: 1
   template:
+    metadata:
+      annotations:
+        # Durable run state/logs live in RDS/S3; only this scratch volume may be evicted.
+        cluster-autoscaler.kubernetes.io/safe-to-evict-local-volumes: runs
     spec:
       terminationGracePeriodSeconds: 60
       topologySpreadConstraints:

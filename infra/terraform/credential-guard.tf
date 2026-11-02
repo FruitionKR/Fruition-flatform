@@ -90,7 +90,7 @@ locals {
 resource "aws_cloudwatch_metric_alarm" "credential_guard" {
   for_each          = var.human_operator_user_name == "" ? {} : local.credential_guard_metrics
   alarm_name        = "${var.project}-ops-security-${each.key}"
-  alarm_description = each.key == "CredentialAuditHeartbeat" ? "Daily credential audit missing for two daily periods (allow scheduler boundary jitter). Investigate EventBridge/Lambda and stale security measurements; follow docs/aws-credential-rotation.md." : "Credential metadata audit: ${each.key}. Follow docs/aws-credential-rotation.md; never rotate encryption keys blindly."
+  alarm_description = "${lookup({ RootCredentialsUnprotected = "루트 계정에 액세스 키·서명 인증서가 있거나 MFA 없는 비밀번호가 있습니다. 루트 자격 증명을 제거하거나 MFA를 설정하세요.", HumanMfaMissing = "운영자 IAM 사용자에 MFA 장치가 없습니다. MFA 장치 등록 여부를 확인하세요.", HumanDirectAdministratorAccess = "운영자 IAM 사용자에 AdministratorAccess 정책이 직접 연결되어 있습니다. 연결된 정책과 변경 이력(CloudTrail)을 확인하세요.", DbCredentialAgeDays = "DB 자격 증명이 90일 넘게 교체되지 않았습니다(교체 시각 태그가 없거나 잘못돼도 경보). Secrets Manager 태그와 교체 이력을 확인하세요.", JwtSigningKeyAgeDays = "JWT 서명 키가 90일 넘게 교체되지 않았습니다(교체 시각 태그가 없거나 잘못돼도 경보). Secrets Manager 태그와 교체 이력을 확인하세요.", CredentialAuditHeartbeat = "일일 자격 증명 점검 결과가 이틀 연속 들어오지 않아 다른 보안 지표가 오래된 값일 수 있습니다. EventBridge 규칙과 Lambda 실행·오류 로그를 확인하세요." }, each.key, "자격 증명 메타데이터 점검 경보: ${each.key}.")} 확인 절차: docs/aws-credential-rotation.md. 암호화 키는 영향 확인 없이 교체하지 마세요."
   namespace         = "Fruition/Security"
   metric_name       = each.key
   dimensions        = { Project = var.project }
