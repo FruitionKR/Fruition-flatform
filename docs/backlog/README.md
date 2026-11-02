@@ -6,6 +6,11 @@
 
 아래 목록의 `docs/spec/…`, `docs/issue/…`, `docs/changelog/…`, `docs/msa/…` 경로는 2026-08-07 이관으로 전부 이 디렉터리 내부(`spec/`, `issue/`, `changelog/`, `msa/`) 경로로 읽는다.
 
+## 2026-11-02 결정 보류 (현재 동작 유지)
+
+- [agent-auto-approval-delete-share.md](agent-auto-approval-delete-share.md) — AI 에이전트 자동 승인에 삭제·외부 공유 분류를 두지 않은 이유와 도구 추가 시 정할 것. 검토자 답변안 포함.
+- [notion-import-folder-representative-order.md](notion-import-folder-representative-order.md) — Notion 가져오기의 폴더 대표 문서가 이름순 트리에서 맨 위에 오지 않는 문제와 정렬 선택지.
+
 ## 2026-10-06 이관 (현행 코드 대조 정리)
 
 - `aws-operations-improvement-plan.md` — `architecture.md`의 "AWS 운영 보완 계획"(OPS-01~09)과 `script.md`의 "AWS 운영 보완 실행 계획". 계획 수립 시점의 근거라 이후 구현(관측·알람·HPA/PDB·Redis replica·Multi-AZ·이미지 게시 CI)과 맞지 않는다.
