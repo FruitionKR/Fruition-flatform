@@ -98,6 +98,9 @@ locals {
     rds_core_space         = "핵심 DB 저장 공간 경보입니다. 남은 용량, 테이블·인덱스 증가량을 확인하세요."
     rds_access_cpu         = "인증 DB CPU 사용률 경보입니다. 실행 중인 쿼리, 연결 수와 부하를 확인하세요."
     rds_core_cpu           = "핵심 DB CPU 사용률 경보입니다. 실행 중인 쿼리, 연결 수와 부하를 확인하세요."
+    rds_access_memory      = "인증 DB 여유 메모리가 150MB 아래로 내려갔습니다(micro 1GB). 연결 수, 오래 실행 중인 쿼리와 인스턴스 크기를 확인하세요."
+    rds_access_swap        = "인증 DB 스왑 사용량이 256MB를 넘었습니다. 메모리가 부족해 디스크로 밀려난 상태이니 여유 메모리, 연결 수와 small 복귀 여부를 확인하세요."
+    rds_access_connections = "인증 DB 연결 수가 60을 넘었습니다(micro 최대 약 80). access-svc Pod 수·Hikari 풀 크기와 마이그레이션 작업, 남은 운영 접속을 확인하세요."
     alb_5xx                = "애플리케이션 서버 오류(5xx) 경보입니다. 대상 서비스 로그와 배포 상태를 확인하세요."
     alb_latency            = "애플리케이션 응답 지연 경보입니다. 느린 쿼리, 외부 API와 서비스 부하를 확인하세요."
     alb_requests           = "ALB 요청 수 경보입니다. 트래픽 급증 원인과 요청 경로를 확인하세요."
@@ -129,6 +132,11 @@ locals {
     for name, db in { access = aws_db_instance.access, core = aws_db_instance.core } : "rds_${name}_cpu" => {
       namespace              = "AWS/RDS", metric = "CPUUtilization", dimensions = { DBInstanceIdentifier = db.identifier }, stat = "Average", threshold = 80, comparison = "GreaterThanThreshold", periods = 3, missing = "missing"
     }
+    }, {
+    # access DB는 db.t4g.micro(1GB)라 메모리·스왑·연결 수를 따로 지켜본다.
+    rds_access_memory      = { namespace = "AWS/RDS", metric = "FreeableMemory", dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }, stat = "Minimum", threshold = 157286400, comparison = "LessThanThreshold", periods = 1, missing = "missing" }
+    rds_access_swap        = { namespace = "AWS/RDS", metric = "SwapUsage", dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }, stat = "Maximum", threshold = 268435456, comparison = "GreaterThanThreshold", periods = 1, missing = "missing" }
+    rds_access_connections = { namespace = "AWS/RDS", metric = "DatabaseConnections", dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }, stat = "Maximum", threshold = 60, comparison = "GreaterThanThreshold", periods = 2, missing = "missing" }
     }, var.observability_alb_arn_suffix == "" ? {} : {
     alb_5xx = { namespace = "AWS/ApplicationELB", metric = "HTTPCode_Target_5XX_Count", dimensions = { LoadBalancer = var.observability_alb_arn_suffix }, stat = "Sum", threshold = 10, comparison = "GreaterThanThreshold", periods = 1, datapoints = 1, missing = "notBreaching" }
     # Allow one wake-up window, but detect persistent ALB-generated failures too.

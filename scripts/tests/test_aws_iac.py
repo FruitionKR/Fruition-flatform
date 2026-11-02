@@ -125,6 +125,29 @@ class IaCContractTests(unittest.TestCase):
             self.assertRegex(block, r'deletion_protection\s*=\s*true')
             self.assertRegex(block, r'storage_encrypted\s*=\s*true')
 
+    def test_access_db_is_micro_with_memory_swap_and_connection_alarms(self):
+        rds = (ROOT / "infra/terraform/rds.tf").read_text()
+        blocks = {}
+        for key in ("access", "core"):
+            block = rds[rds.index(f'resource "aws_db_instance" "{key}"'):]
+            blocks[key] = block[:block.index("\n}\n")]
+        # 즉시 적용은 명시적으로 -var를 줄 때만 켜지고, 기본은 유지 관리 기간이다.
+        self.assertRegex(rds, r'variable "access_db_apply_immediately" \{[^}]*type\s*=\s*bool[^}]*default\s*=\s*false')
+        self.assertRegex(blocks["access"], r'apply_immediately\s*=\s*var\.access_db_apply_immediately')
+        self.assertNotIn("apply_immediately", blocks["core"])
+        self.assertRegex(blocks["access"], r'instance_class\s*=\s*"db\.t4g\.micro"')
+        self.assertRegex(blocks["core"], r'instance_class\s*=\s*"db\.t4g\.small"')
+        obs = re.sub(r"\s+", " ", (ROOT / "infra/terraform/observability.tf").read_text())
+        dim = "dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }"
+        for expected in (
+            f'rds_access_memory = {{ namespace = "AWS/RDS", metric = "FreeableMemory", {dim}, stat = "Minimum", threshold = 157286400, comparison = "LessThanThreshold", periods = 1',
+            f'rds_access_swap = {{ namespace = "AWS/RDS", metric = "SwapUsage", {dim}, stat = "Maximum", threshold = 268435456, comparison = "GreaterThanThreshold"',
+            f'rds_access_connections = {{ namespace = "AWS/RDS", metric = "DatabaseConnections", {dim}, stat = "Maximum", threshold = 60, comparison = "GreaterThanThreshold"',
+        ):
+            self.assertIn(expected, obs)
+        for key in ("rds_access_memory", "rds_access_swap", "rds_access_connections"):
+            self.assertRegex(obs, rf'{key} = "인증 DB [^"]+확인하세요\."')
+
     def test_converter_does_not_set_unread_env(self):
         files = ["k8s/base/converter.yaml", "infra/compose.converter.yml"]
         for path in files:
