@@ -264,3 +264,35 @@ Fruition-document·Fruition-frontend 브랜치에 사용자 한도를 만들었�
 - AI: 사용자당 하루 비용 $5(한국 시간 자정 초기화), 하루 토큰 2,000,000, 동시 실행 3개. `AI_LIMIT_ENABLED` 스위치로 켜고 끕니다.
 - 업로드: PDF 100MB 이하, 사용자당 저장 공간 5GB(휴지통 포함), 하루 200개. `UPLOAD_LIMITS_ENABLED` 스위치로 켜고 끕니다.
 - 화면: 저장 공간 사용량 막대와 한국어 한도 안내 문구를 보여 줍니다.
+
+## 2026-11-02 EKS 감사 로그 발생량 줄이기 (적용 전)
+
+**저장소 코드 변경이며 아직 운영에 적용하지 않았습니다.** 감사 로그는 켠 채로, 로그를 많이 만드는 controller의 동작 주기만 늘립니다. EKS 감사 정책은 AWS가 관리하므로 바꿀 수 없습니다.
+
+16:00 KST 전후 1시간 측정에서 `/aws/eks/fruition-eks/cluster`의 감사 로그는 약 116MB/h(약 7.8만 건)였습니다. get 42MB, update 35MB, watch 11MB 순입니다. 2초마다 갱신하는 leader election lease가 가장 큰 몫이었습니다.
+
+| 대상 | 바꾸는 값 | 적용 방법 | 예상 절감 (MB/h) | 영향 |
+|---|---|---|---|---|
+| Strimzi operator | lease 15/10/2초 → 60/40/10초, 전체 재조정 2분 → 10분 | `aws-platform-up.sh` (helm) | 약 8 | operator 재시작 때 인계 최대 약 60초. 수동으로 바뀐 리소스를 되돌리는 주기가 10분. CR 변경은 지금처럼 바로 처리 |
+| EBS CSI controller | provisioner·attacher·resizer lease 5초 → 10초, snapshotter 끔 | Terraform (`eks.tf` addon) | 약 6 | 리더 인계 최대 약 60초. VolumeSnapshot CRD가 없어 원래 동작하지 않던 스냅샷 기능 제거 |
+| Cluster Autoscaler | lease 2초 → 10초 | helm | 약 2.3 | 리더 인계 최대 약 60초 동안 노드 확장 판단이 멈춤 |
+| KEDA operator | lease 2초 → 10초 | helm | 약 2.1 | 재시작 때 확장 판단이 최대 약 60초 멈춤 |
+| KEDA metrics adapter | 권한 확인 결과 캐시 10초 → 60초 | helm | 약 3 | RBAC 회수가 metrics 조회에 최대 60초 늦게 반영. 실제 HPA 요청은 kube-apiserver 감사에 그대로 남음 |
+
+합계 약 21MB/h(감사 로그의 약 18%), 월 약 15GB, 서울 수집 단가 $0.76/GB 기준 **월 약 $11** 절감으로 어림합니다. 리더 선출은 끄지 않았습니다.
+
+손대지 않은 항목: `system:anonymous` 약 5,000건/h는 control plane 내부(127.0.0.1)와 AWS NLB health checker의 `/healthz`·`/livez`·`/readyz` 요청이며 모두 200입니다. 정상이고 조치할 수 없습니다. `eks:*`·`system:kube-*`·HPA controller·metrics-server addon은 AWS 관리 대상이거나 설정 항목이 없습니다. AWS Load Balancer Controller(v3.5.0)는 lease 주기 설정이 없고, webhook이 `failurePolicy=Fail`이라 replica를 1로 줄이지 않습니다. CloudWatch Agent의 `cwagent-clusterleader` ConfigMap 갱신도 설정할 수 없습니다.
+
+**적용 순서:** helm 3개(Strimzi·Cluster Autoscaler·KEDA)는 `bash scripts/aws-platform-up.sh install <terraform-outputs.json>`로 적용합니다. 앱 배포(`aws_deploy.py`)로는 바뀌지 않습니다. EBS CSI는 Terraform plan에서 `aws_eks_addon.core["aws-ebs-csi-driver"]`의 `configuration_values`만 제자리 수정되는지 확인한 뒤 apply합니다. controller Pod가 다시 뜨며 그동안 새 볼륨 연결이 잠시 늦어질 수 있습니다.
+
+**적용 후 확인 (1시간 뒤):**
+
+```
+filter @logStream like /kube-apiserver-audit/
+| stats sum(strlen(@message))/1048576 as MB, count(*) as n by user.username, verb, objectRef.resource
+| sort MB desc | limit 20
+```
+
+lease update 건수가 대상별 약 1,790건/h(EBS sidecar 약 720건/h)에서 약 360건/h로, `keda-metrics-server`의 `subjectaccessreviews` create가 약 1,330건/h에서 크게 줄었는지 봅니다. snapshotter lease와 `volumesnapshot*` 404 요청은 없어야 합니다. CloudWatch `AWS/Logs` `IncomingBytes`(LogGroupName=`/aws/eks/fruition-eks/cluster`, 1시간 합계)가 적용 전 약 113~130MB에서 약 95~110MB로 내려가는지 확인합니다.
+
+되돌리기: `aws-platform-up.sh`에서 추가한 `--set` 줄과 `eks.tf`의 `sidecars` 블록을 지우고 같은 방법으로 다시 적용합니다.

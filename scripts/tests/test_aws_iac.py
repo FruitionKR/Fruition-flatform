@@ -104,6 +104,16 @@ class IaCContractTests(unittest.TestCase):
         converter = (ROOT / "k8s/base/converter.yaml").read_text()
         self.assertNotIn("safe-to-evict", converter)
 
+    def test_ebs_csi_sidecars_reduce_audit_churn_without_disabling_leader_election(self):
+        eks = re.sub(r"\s+", " ", (ROOT / "infra/terraform/eks.tf").read_text())
+        for flag in ("lease-duration=60s", "renew-deadline=40s", "retry-period=10s"):
+            self.assertIn(f'"--leader-election-{flag}"', eks)
+        for sidecar in ("provisioner", "attacher", "resizer"):
+            self.assertIn(f"{sidecar} = {{ additionalArgs = local.ebs_csi_leader_election_args }}", eks)
+        # VolumeSnapshot CRD가 없어 404 list/watch만 반복하던 snapshotter를 끈다.
+        self.assertIn("snapshotter = { forceEnable = false }", eks)
+        self.assertNotIn("--leader-election=false", eks)
+
     def test_rds_log_groups_are_managed_with_14_day_retention(self):
         rds = (ROOT / "infra/terraform/rds.tf").read_text()
         self.assertRegex(rds, r'resource "aws_cloudwatch_log_group" "rds"\s*\{[^}]*toset\(\["access", "core"\]\)[^}]*/aws/rds/instance/\$\{var\.project\}-\$\{each\.key\}-postgres/postgresql[^}]*retention_in_days\s*=\s*14')
