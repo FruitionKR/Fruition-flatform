@@ -1,8 +1,10 @@
 # Account-wide actual USD spend. No application deployment dependency.
 data "aws_caller_identity" "budget" {}
 
+# $50부터 $1000까지 $50 단위로 실제 사용액 알림을 보낸다. 예산 하나에 알림 1개(100% 초과)만 둔다.
+# 액션 없는 예산은 무료이고, 이름 키를 유지해 기존 400·550·650 예산은 다시 만들지 않는다.
 resource "aws_budgets_budget" "monthly" {
-  for_each = toset(["400", "550", "650"])
+  for_each = toset([for amount in range(50, 1001, 50) : tostring(amount)])
 
   name         = "${var.project}-monthly-${each.value}"
   budget_type  = "COST"

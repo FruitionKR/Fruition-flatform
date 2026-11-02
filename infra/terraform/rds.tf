@@ -89,9 +89,9 @@ resource "aws_db_instance" "access" {
   ca_cert_identifier     = "rds-ca-rsa2048-g1"
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
-  # 로그인이 막히면 전체 서비스가 막힌다. access DB만 먼저 Multi-AZ로 올린다.
-  # core DB는 부하 근거가 생길 때 같은 방식으로 검토한다(2026-10-04 기준 CPU 평균 8%).
-  multi_az            = true
+  # 비용 절감을 위해 core DB와 같이 Single-AZ로 운영한다. 백업 7일·암호화·삭제 보호는 유지한다.
+  # Multi-AZ 해제는 중단 없이 다음 유지 관리 기간에 적용된다(ModifyDBInstance MultiAZ).
+  multi_az            = false
   publicly_accessible = false
 
   backup_retention_period   = 7
