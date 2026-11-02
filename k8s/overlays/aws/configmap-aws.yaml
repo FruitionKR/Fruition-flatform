@@ -29,3 +29,6 @@ data:
   # JDBC does not consume the libpq environment variable itself.
   SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_SSLROOTCERT: "/etc/rds-ca/root.crt"
   SPRING_MAIL_PORT: "REPLACE_ME_SMTP_PORT"
+  # AI 사용량 제한은 운영 판단 전까지 의도적으로 끈다. 켤 때 "true"로 바꾼다.
+  # 업로드 제한은 코드 기본값(켜짐)을 그대로 쓰므로 키를 두지 않는다.
+  AI_LIMIT_ENABLED: "false"

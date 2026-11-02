@@ -59,6 +59,8 @@ helm upgrade --install cluster-autoscaler autoscaler/cluster-autoscaler --versio
   -n kube-system --wait --timeout 10m --set image.tag=v1.35.0 \
   --set autoDiscovery.clusterName=fruition-eks --set awsRegion=ap-northeast-2 \
   --set rbac.serviceAccount.name=cluster-autoscaler \
+  --set-string extraArgs.scale-down-utilization-threshold=0.7 \
+  --set-string extraArgs.v=2 \
   --set-string "rbac.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$ca_role"
 helm upgrade --install strimzi strimzi/strimzi-kafka-operator --version 1.1.0 \
   -n fruition --wait --timeout 10m

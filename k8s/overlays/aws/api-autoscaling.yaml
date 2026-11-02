@@ -1,17 +1,20 @@
 # API Pod는 KEDA 대상이 아니다. KEDA는 Kafka 적체만 보고 AI 작업자를 조절하므로
 # HTTP 요청이 아무리 늘어도 API replicas는 2개 고정이었다. CPU 기준 HPA로 그 구간을 채운다.
 #
-# 상한 4의 근거 — 일반 노드는 t3.large(2 vCPU / 8GiB) 평소 최대 4대이고 노드당 할당 가능
-# CPU는 약 1.9 vCPU라 전체 약 7.6 vCPU다. 5번째 노드(max_size 5)는 rollout 중 Pending을
-# 받는 여유분이라 이 계산에 넣지 않는다. 세 API가 동시에 상한에 닿으면
-#   access-svc    4 x 250m = 1.0 vCPU   (base 요청값)
-#   document-svc  4 x 500m = 2.0 vCPU   (overlay 요청값)
-#   pipeline-api  4 x 500m = 2.0 vCPU   (overlay 요청값)
-# 합계 5.0 vCPU다. 남는 2.6 vCPU를 Kafka(일반 노드 상주, 250m)·클러스터 controller와
-# 노드별 DaemonSet(fluent-bit·cloudwatch-agent·ebs-csi·aws-node)이 쓴다.
-# converter·edit-event-consumer·pipeline-agent-worker·embedding-server와 AI worker는
-# ai-worker Spot 노드에 배치되므로(kustomization.yaml nodeSelector) 이 예산에 들어가지 않는다.
-# 상한을 6으로 두면 7.5 vCPU가 되어 노드 CPU를 넘고 Pending이 생긴다.
+# 상한 4의 근거 — 일반 노드는 t3.large(2 vCPU / 8GiB), 노드당 할당 가능 CPU는 약 1.93 vCPU다.
+# 평상시는 2대(약 3.86 vCPU)에 상주하도록 요청값을 실측에 맞춰 낮췄다(kustomization.yaml).
+# 세 API가 동시에 상한에 닿으면
+#   access-svc    4 x 100m = 0.4 vCPU
+#   document-svc  4 x 150m = 0.6 vCPU
+#   pipeline-api  4 x 150m = 0.6 vCPU
+# 합계 1.6 vCPU라 늘어난 Pod가 남는 요청 여유에 들어가지 않으면 Cluster Autoscaler가 노드를 더한다(max_size 5).
+# 일반 노드에는 Kafka·Strimzi operator·edit-event-consumer·pipeline-agent-worker와 클러스터 controller,
+# 노드별 DaemonSet(fluent-bit·cloudwatch-agent·ebs-csi·aws-node·kube-proxy)도 상주한다.
+# converter·embedding-server와 Kafka AI worker는 ai-worker Spot 노드에 배치된다(kustomization.yaml nodeSelector).
+#
+# 목표 사용률은 요청값 대비 비율이라, 요청값을 낮춘 만큼 비율을 올려 Pod당 확장 시점을
+# 이전과 비슷하게 둔다(access 175% x 100m = 175m, document·pipeline 200% x 150m = 300m).
+# 100%를 넘는 목표는 CPU limit이 없어 Pod가 요청값보다 더 쓸 수 있기 때문에 의미가 있다.
 #
 # 하한 2는 기존 replicas와 같다. 평상시 Pod 수가 그대로라 비용이 늘지 않는다.
 # 자동 확장이 실제로 도는지는 부하 시험으로 확인해야 하며, 이 설정만으로 증명되지 않는다.
@@ -35,7 +38,7 @@ spec:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 70
+        averageUtilization: 175
   behavior:
     scaleUp:
       # 급증에 빠르게 반응하되 한 번에 두 배까지만 늘린다.
@@ -70,7 +73,7 @@ spec:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 70
+        averageUtilization: 200
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 30
@@ -103,7 +106,7 @@ spec:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 70
+        averageUtilization: 200
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 30

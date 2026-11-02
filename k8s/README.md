@@ -22,6 +22,7 @@ AWS는 `overlays/aws`를 사용하며 상태 계층은 RDS·ElastiCache·S3로 �
 
 ## Kafka worker 확장과 임시 저장소
 
+worker는 lag이 없으면 0까지 줄고(cooldownPeriod 뒤), lag이 생기면 1로 깨어난다. embedding-server는 query·agent worker Pod 수를 따라 0/1이 된다.
 Kafka lag에는 처리 중인 미커밋 메시지도 포함된다. 5개 worker ScaledObject는 lag가 있는 파티션 수로 replica 상한을 제한하고,
 HPA가 120초 동안 관측한 확장 권고를 안정화한 뒤 60초당 최대 1 Pod씩 늘린다. 축소 안정화는 300초다.
 AWS의 TLS trigger 교체에도 같은 파티션 제한을 적용한다.

@@ -1,5 +1,5 @@
 # Kafka `ai.ingest.command` 컨슈머 (consumer group: ingest-worker).
-# replicas는 KEDA ScaledObject가 1~4로 관리한다 (keda-scaledobject.yaml).
+# replicas는 KEDA ScaledObject가 0~4로 관리한다 (keda-scaledobject.yaml).
 # HTTP 서버가 없어 probe는 프로세스 생존(컨테이너 종료 시 재시작) 수준으로 둔다.
 apiVersion: apps/v1
 kind: Deployment

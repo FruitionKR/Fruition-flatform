@@ -1,5 +1,5 @@
 # Kafka `ai.convert.command` 컨슈머 (consumer group: ai.convert.command-worker). PDF 변환 worker (ai ADR 0034).
-# replicas는 KEDA ScaledObject가 1~3으로 관리한다 (keda-scaledobject.yaml).
+# replicas는 KEDA ScaledObject가 0~3으로 관리한다 (keda-scaledobject.yaml).
 # HTTP 서버·Service가 없어 probe는 프로세스 생존(컨테이너 종료 시 재시작) 수준으로 둔다(ingest-worker와 같다).
 # compose와 동일하게 read-only rootfs + 권한 축소, /tmp만 쓰기 허용.
 apiVersion: apps/v1
