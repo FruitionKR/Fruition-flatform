@@ -32,3 +32,6 @@ data:
   # AI 사용량 제한은 운영 판단 전까지 의도적으로 끈다. 켤 때 "true"로 바꾼다.
   # 업로드 제한은 코드 기본값(켜짐)을 그대로 쓰므로 키를 두지 않는다.
   AI_LIMIT_ENABLED: "false"
+  # 채팅 답변 듣기(TTS)는 비용 때문에 끈다. document-svc가 합성 요청을 403으로 거절하고 화면은 듣기 버튼을 숨긴다.
+  # 음성 입력·회의 받아쓰기는 영향 없음. 다시 켤 때 "true"로 바꾸고 document-svc를 재시작한다(프론트 재빌드 불필요).
+  SPEECH_SYNTHESIS_ENABLED: "false"
