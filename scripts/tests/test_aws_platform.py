@@ -110,5 +110,12 @@ class PlatformTests(unittest.TestCase):
         self.assertFalse(any("leader-elect=false" in line or "leaderElection.enable=false" in line
                              for line in helm.values()))
 
+    def test_autoscaler_waits_for_worker_grace_period_before_scale_down(self):
+        # 기본 600초면 900초 종료 유예를 쓰는 worker가 노드 축소 중 강제 종료된다.
+        result, calls = self.invoke()
+        self.assertEqual(0, result.returncode, result.stderr)
+        helm = {call[3]: call for call in calls if call[:3] == ["helm", "upgrade", "--install"]}
+        self.assertIn("extraArgs.max-graceful-termination-sec=900", helm["cluster-autoscaler"])
+
 if __name__ == "__main__":
     unittest.main()
