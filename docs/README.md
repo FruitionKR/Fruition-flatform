@@ -12,6 +12,7 @@
 | [보안 문제와 Claude 독립 검토](security-review-2026-10-31.md) | 기존 47개 보안 주장, 추가 재현, 타당성 검토와 미확인 조건 |
 | [보안 수정과 회귀 검증](security-fixes-2026-10-31.md) | 병렬 수정 범위, 테스트 결과, 마이그레이션과 배포 조건 |
 | [최신 main 배포 결과](deployment-2026-10-31.md) | 네 서비스 main 통합·CI·이미지 게시·EKS 배포 및 smoke 결과 |
+| [운영 설정값 참조](operations-reference.md) | 사양·옵션 유무·환경 변수·비밀값 이름(값 제외)·경보·배포 규칙의 실제 값과 근거를 한곳에 모음 |
 | [api/](api/README.md) | 서비스별 API 진입 안내와 서비스 간 호출 경로 |
 | [data-model.md](data-model.md) | 저장소·DB 계정 격리·서비스 간 관계 |
 | [script.md](script.md) | 통합 실행·검증·AWS 준비와 운영 절차 |
