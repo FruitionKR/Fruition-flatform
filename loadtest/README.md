@@ -37,21 +37,22 @@ Fruition 시험 단계 배포(ALB + WAF + EKS)의 처리량·지연·자동 확�
 - ALB 사전 워밍(과거 Support 요청 방식)이 지금도 받는지는 확인하지 못했다. 현재 공식 수단은 LCU 예약이다.
 - 아래 비용 항목의 단가는 리전 요금표로 실행 직전에 다시 확인한다(이 문서는 단가를 적지 않는다).
 
-## 2. 시스템 사실 (이 저장소 기준)
+## 2. 시스템 사실 (이 저장소 기준, 2026-11-03 main으로 다시 확인)
 
 | 항목 | 값 | 위치 |
 |---|---|---|
-| API Pod | access-svc·document-svc·pipeline-api 각 HPA 2~4, CPU 70%, scaleUp 안정화 30초(분당 최대 2배), scaleDown 5분 | [api-autoscaling.yaml](../k8s/overlays/aws/api-autoscaling.yaml) |
-| 요청값 | access 250m/512Mi, document 500m(overlay), frontend 2 replica 250m/768Mi | k8s base·overlay |
-| 노드 | 일반 t3.large 최소 2·최대 5, AI Spot 노드 0~4 | [eks.tf](../infra/terraform/eks.tf) |
-| AI worker | KEDA(Kafka lag) — query 1~4, agent 1~4, ingest 1~4. HTTP 부하로는 늘지 않는다 | [keda-scaledobject.yaml](../k8s/base/keda-scaledobject.yaml) |
-| DB·캐시 | RDS PostgreSQL 16 `db.t4g.small` 2개, ElastiCache `cache.t4g.micro` — 모두 burstable(CPU 크레딧) | rds.tf, elasticache.tf |
+| API Pod | access-svc·document-svc·pipeline-api 각 HPA 2~4, CPU 목표는 요청값 대비 access 175%·document·pipeline 200%(Pod당 약 175m·300m), scaleUp 안정화 30초(분당 최대 2배), scaleDown 5분 | [api-autoscaling.yaml](../k8s/overlays/aws/api-autoscaling.yaml) |
+| 요청값 | access 100m/512Mi, document 150m/1Gi, pipeline-api 150m/1Gi(overlay, CPU limit 없음), frontend 2 replica 250m/768Mi(Fargate) | [kustomization.yaml](../k8s/overlays/aws/kustomization.yaml), [frontend.yaml](../k8s/overlays/aws/frontend.yaml) |
+| 노드 | 일반 t3.large 최소 2·최대 5(코드는 CPU credit `standard`, 운영 인스턴스는 `unlimited`로 확인됨 — [operations-reference.md](../docs/operations-reference.md) 1장), AI Spot 노드 0~4 | [eks.tf](../infra/terraform/eks.tf) |
+| AI worker | KEDA(Kafka lag) — query 0~4, agent 0~4, ingest 0~4. 평소 0이라 첫 질의는 AI 노드·worker cold start를 기다린다. HTTP 부하로는 늘지 않는다 | [keda-scaledobject.yaml](../k8s/base/keda-scaledobject.yaml) |
+| DB·캐시 | RDS PostgreSQL 16 access `db.t4g.micro`·core `db.t4g.small`, ElastiCache `cache.t4g.micro` — 모두 burstable(CPU 크레딧) | rds.tf, elasticache.tf |
 | WAF `per-source-ip` | IP당 5분 3,000건(≈10 req/s), `/_next/static/` 제외, 초과 시 429 | [cost-guards.tf](../infra/terraform/cost-guards.tf) |
 | WAF `all-api-requests` | **전체** `/api/` 5분 6,000건(≈20 req/s), 초과 시 모든 사용자 429 | 같은 파일 |
 | WAF `frontend-access-code` | app_domain의 `/api/*`(로그인·초대·워크스페이스 목록 제외)는 `fruition_access` 쿠키 = 접근 코드 SHA-256 hex가 없으면 403 | 같은 파일 |
-| ALB | idle timeout 120초, TLS1.2+, WAF 연결 | ingress.yaml |
+| ALB | idle timeout 120초, TLS1.2+, WAF 연결, S3 접근 로그 켜짐 | [ingress.yaml](../k8s/overlays/aws/ingress.yaml) |
+| 로그인 IP 한도(access-svc) | 출처 IP당 300초 고정 창에 로그인 시도 50회(성공 포함). 51번째부터 429. 출처는 ALB가 붙인 `X-Forwarded-For` 오른쪽 값, 즉 부하 발생기 IP | Fruition-access `LoginAttemptLimiter.java`, `AUTH_LOGIN_IP_LIMIT`([operations-reference.md](../docs/operations-reference.md) 2.4) |
 | 절전 | request-wake가 켜져 있으면 노드가 내려간 상태일 수 있다. 첫 요청은 5xx | [aws-request-wake.md](../docs/aws-request-wake.md) |
-| 관측 | Container Insights 수집 주기 300초 — 짧은 급증은 놓친다 | [aws-observability.md](../docs/aws-observability.md) |
+| 관측 | Container Insights 수집 주기 600초(2026-11-02부터), Pod 상세 화면 일부는 갱신되지 않는다 — 짧은 급증은 놓친다 | [aws-observability.md](../docs/aws-observability.md) |
 
 ### 호출하는 API와 비용 성격
 
@@ -77,7 +78,7 @@ Fruition 시험 단계 배포(ALB + WAF + EKS)의 처리량·지연·자동 확�
 | `meeting-ws.js` | per-vu-iterations | 1 VU 1회, `MEETING_WS_ENABLED=1` 필요 | 회의 WS 접속 경로(ticket·Origin·ready·finish) |
 | `cleanup.js` | 1회 | — | 중단된 실행이 남긴 `k6-loadtest-*` 워크스페이스 삭제 |
 
-행동 1회는 요청 1~4건이다. **`load`의 기본값(초당 3 행동 ≈ 6~8 req/s)만 WAF 기본 한도 안쪽이다.** `stress`·`spike`는 WAF 한도를 임시로 올려야 한다(아래 4-3).
+행동 1회는 요청 1~4건이다. **`load`의 기본값(초당 3 행동 ≈ 6~8 req/s)만 WAF 기본 한도 안쪽이다.** `stress`·`spike`는 WAF 한도를 임시로 올려야 한다(아래 4-3). 둘은 로그인 IP 한도에도 먼저 걸린다(아래 4-3 끝).
 
 ### 합격 기준과 자동 중단
 
@@ -104,11 +105,11 @@ Fruition 시험 단계 배포(ALB + WAF + EKS)의 처리량·지연·자동 확�
 
 ### 4-2. 접근 코드
 
-WAF `frontend-access-code` 규칙 때문에 app_domain의 `/api/*`에는 `fruition_access` 쿠키가 필요하다. `ACCESS_CODE`에 평문 코드를 주면 k6가 프론트엔드와 같은 방식(trim 후 SHA-256 hex)으로 쿠키를 만든다. 값은 Secrets Manager의 앱 secret `ACCESS_CODE`에서 실행 직전에 읽는다.
+WAF `frontend-access-code` 규칙 때문에 app_domain의 `/api/*`에는 `fruition_access` 쿠키가 필요하다. `ACCESS_CODE`에 평문 코드를 주면 k6가 프론트엔드와 같은 방식(trim 후 SHA-256 hex)으로 쿠키를 만든다. 값은 Secrets Manager의 WAF 전용 secret `fruition/waf-access-code`(`ACCESS_CODE`만 들어 있다)에서 실행 직전에 읽는다. 앱 secret에는 JWT 개인 키가 함께 있으므로 부하 발생기에서 읽지 않는다.
 
 ```bash
 export ACCESS_CODE="$(aws secretsmanager get-secret-value --region ap-northeast-2 \
-  --secret-id <앱 secret 이름> --query SecretString --output text | jq -r .ACCESS_CODE)"
+  --secret-id fruition/waf-access-code --query SecretString --output text | jq -r .ACCESS_CODE)"
 ```
 
 ### 4-3. WAF 한도 (stress·spike·큰 load)
@@ -124,6 +125,12 @@ terraform -chdir=infra/terraform plan \
 - 올리지 않고 돌리면 `waf_blocks` 임계값이 시험을 바로 멈춘다(의도된 안전장치).
 - 한도 상향은 비용 가드를 잠시 약하게 만든다. 시험 동안 Budget·WAF 지표를 지켜보고, 이상하면 `waf_emergency_block=true`로 API를 막는다.
 - WAF 규칙에 부하 발생기 IP 예외(IP set)를 두는 방식은 현재 Terraform에 없다. 필요하면 별도 인프라 변경으로 다룬다.
+
+**로그인 IP 한도도 함께 본다.** access-svc는 한 출처 IP의 로그인 시도를 300초에 50회로 막는다(성공도 센다). 이 시나리오는 `setup()`에서 계정마다 1회, 각 VU가 처음 행동할 때 1회 로그인하므로 5분 안의 로그인 수 ≈ 계정 수 + 동시에 쓰인 VU 수다. 발생기 IP 하나에서 보내면:
+
+- `smoke`·`soak`과 기본 `load`(동시 VU 수십 개 이하)는 대체로 한도 안이다. `LOAD_MAX_VUS`(기본 50)까지 VU가 늘면 넘을 수 있다.
+- `stress`(최대 400 VU)와 `spike`(최대 300 VU)는 부하를 올리는 첫 몇 분 안에 50회를 넘긴다. 이 429도 `waf_blocks`로 세므로(`lib/http.js`는 429를 모두 WAF 차단으로 본다) 시험이 곧바로 멈추고, WAF 한도를 올려도 결과가 나오지 않는다. 어느 쪽인지는 `waf_blocks`의 `ep` 태그로 구분한다(`auth_login`이면 로그인 한도).
+- 그래서 `stress`·`spike`를 의미 있게 돌리려면 시험 시간대에만 access-svc에 `AUTH_LOGIN_IP_LIMIT`을 올렸다가 되돌려야 한다. 현재 운영 매니페스트에는 이 값이 없어 코드 기본값 50을 쓰므로, 올리려면 별도 배포 변경이 필요하다(이 PR 범위 밖).
 
 ### 4-4. 환경 상태
 
@@ -143,7 +150,7 @@ terraform -chdir=infra/terraform plan \
 | Kafka/KEDA | `document.edit.event` 소비 지연(edit-event-consumer 1 replica), LLM을 켰다면 `ai.query.command` lag와 query-task-worker 수 |
 | NAT | `BytesOutToDestination`(LLM 호출·이미지 pull) — 관측 경보 1GiB 기준이 있다 |
 
-Container Insights는 300초 주기라 spike 분석에는 ALB 1분 지표와 `kubectl` 관찰을 같이 쓴다.
+Container Insights는 600초 주기라 spike 분석에는 ALB 1분 지표와 `kubectl` 관찰을 같이 쓴다.
 
 ## 5. 실행 방법
 
@@ -200,7 +207,7 @@ BASE_URL=http://localhost:3000 ACCOUNTS_FILE=/절대/경로/accounts.json SMOKE_
 |---|---|---|
 | LLM | 질의·회의 WS가 외부 제공자를 부르고 크레딧을 쓴다 | `LLM_SHARE=0`(기본), `LLM_MAX_PER_VU`, 작은 모델 지정 |
 | NAT Gateway | 앱 Pod의 외부 호출(LLM 등)과, 발생기를 EKS 프라이빗 서브넷에 둔 경우 | 발생기를 VPC 밖 퍼블릭 서브넷에 둔다 |
-| ALB | 시간당 LCU(요청·연결·처리 바이트). LCU 예약을 쓰면 예약량만큼 과금 | spike는 예약 없이 먼저 측정 |
+| ALB | 시간당 LCU(요청·연결·처리 바이트). LCU 예약을 쓰면 예약량만큼 과금. 접근 로그가 요청마다 S3에 쌓인다 | spike는 예약 없이 먼저 측정 |
 | WAF | 요청 수 과금, **WAF 로그가 CloudWatch Logs로 요청마다 기록**된다 | 시험 시간을 짧게, 불필요한 반복 실행 금지 |
 | CloudWatch | 로그 수집량(앱 로그·WAF 로그), Container Insights | soak은 한 번만, 로그 검색 범위를 좁게 |
 | S3 | multipart 생성·중단 요청 수(데이터 없음) | 업로드 비율 5% 유지 |
