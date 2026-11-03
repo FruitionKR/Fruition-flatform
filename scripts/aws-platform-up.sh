@@ -56,6 +56,7 @@ helm upgrade --install external-secrets external-secrets/external-secrets --vers
   --set serviceAccount.name=external-secrets \
   --set-string "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$eso_role"
 # leader lease 갱신 2초→10초(감사 로그 절감). 리더 Pod가 비정상 종료되면 인계가 최대 약 60초 걸린다.
+# 축소 시 Pod 종료 대기 상한 600초→900초. AI worker가 terminationGracePeriodSeconds 900초 안에 작업을 마치게 한다.
 helm upgrade --install cluster-autoscaler autoscaler/cluster-autoscaler --version 9.59.0 \
   -n kube-system --wait --timeout 10m --set image.tag=v1.35.0 \
   --set autoDiscovery.clusterName=fruition-eks --set awsRegion=ap-northeast-2 \
@@ -65,6 +66,7 @@ helm upgrade --install cluster-autoscaler autoscaler/cluster-autoscaler --versio
   --set-string extraArgs.leader-elect-lease-duration=60s \
   --set-string extraArgs.leader-elect-renew-deadline=40s \
   --set-string extraArgs.leader-elect-retry-period=10s \
+  --set-string extraArgs.max-graceful-termination-sec=900 \
   --set-string "rbac.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$ca_role"
 # 감사 로그 유입 절감(2026-11-02): lease 갱신 2초→10초, 전체 재조정 2분→10분. CR 변경은 watch로 즉시 처리된다.
 helm upgrade --install strimzi strimzi/strimzi-kafka-operator --version 1.1.0 \

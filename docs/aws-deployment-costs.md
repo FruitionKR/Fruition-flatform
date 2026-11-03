@@ -296,3 +296,7 @@ filter @logStream like /kube-apiserver-audit/
 lease update 건수가 대상별 약 1,790건/h(EBS sidecar 약 720건/h)에서 약 360건/h로, `keda-metrics-server`의 `subjectaccessreviews` create가 약 1,330건/h에서 크게 줄었는지 봅니다. snapshotter lease와 `volumesnapshot*` 404 요청은 없어야 합니다. CloudWatch `AWS/Logs` `IncomingBytes`(LogGroupName=`/aws/eks/fruition-eks/cluster`, 1시간 합계)가 적용 전 약 113~130MB에서 약 95~110MB로 내려가는지 확인합니다.
 
 되돌리기: `aws-platform-up.sh`에서 추가한 `--set` 줄과 `eks.tf`의 `sidecars` 블록을 지우고 같은 방법으로 다시 적용합니다.
+
+### Cluster Autoscaler 축소 시 Pod 종료 대기 900초 (2026-11-03)
+
+Cluster Autoscaler가 노드를 줄일 때 Pod 종료를 기다리는 상한(`--max-graceful-termination-sec`)을 기본 600초에서 **900초**로 올립니다. AI worker는 `terminationGracePeriodSeconds` 900초 안에 진행 중 작업을 최대 840초까지 마무리하는데, 600초에서 끊기면 작업이 중간에 강제 종료됩니다. 위 lease 설정과 같은 `aws-platform-up.sh` helm 적용으로 반영됩니다. 영향은 worker가 있는 노드의 축소가 최대 15분 늦어지는 정도입니다. 적용 후 `kubectl -n kube-system get deploy -l app.kubernetes.io/name=aws-cluster-autoscaler -o jsonpath='{.items[0].spec.template.spec.containers[0].command}'`에 `--max-graceful-termination-sec=900`이 있는지 확인합니다.
