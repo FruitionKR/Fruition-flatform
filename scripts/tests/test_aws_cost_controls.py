@@ -82,6 +82,18 @@ class ServiceLimitTests(unittest.TestCase):
         self.assertIn({"configMapRef": {"name": "fruition-config"}}, container["envFrom"])
         self.assertNotIn("AI_LIMIT_ENABLED", {e["name"] for e in container.get("env", [])})
 
+    def test_speech_synthesis_stays_off_and_reaches_document_svc(self):
+        output = subprocess.check_output(["kubectl", "kustomize", str(ROOT / "k8s/overlays/aws")], text=True)
+        resources = [r for r in yaml.safe_load_all(output) if r]
+        config = next(r for r in resources if r["kind"] == "ConfigMap" and r["metadata"]["name"] == "fruition-config")
+        self.assertEqual("false", config["data"]["SPEECH_SYNTHESIS_ENABLED"])
+        # 음성 입력·회의 받아쓰기는 끄지 않는다.
+        self.assertFalse({"SPEECH_TRANSCRIPTION_ENABLED", "SPEECH_LIVE_ENABLED"} & set(config["data"]))
+        document = next(r for r in resources if r["kind"] == "Deployment" and r["metadata"]["name"] == "document-svc")
+        container = document["spec"]["template"]["spec"]["containers"][0]
+        self.assertIn({"configMapRef": {"name": "fruition-config"}}, container["envFrom"])
+        self.assertNotIn("SPEECH_SYNTHESIS_ENABLED", {e["name"] for e in container.get("env", [])})
+
 
 class TelemetryTests(unittest.TestCase):
     def test_alarm_metrics_survive_allowlist_with_compatible_dimensions(self):
