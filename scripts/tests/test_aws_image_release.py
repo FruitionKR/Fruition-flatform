@@ -265,6 +265,7 @@ class ImageReleaseTests(unittest.TestCase):
         trees = {"FruitionKR/Fruition-access": "1" * 40, "FruitionKR/Fruition-document": "2" * 40,
                  "FruitionKR/Fruition-ai": "3" * 40, "FruitionKR/Fruition-frontend": "4" * 40}
         pipeline_tree = "9" * 40
+        web_tree = "7" * 40
         def github(path, missing_ok=False):
             repo = "/".join(path.split("/")[1:3])
             if path.endswith("/commits/main"):
@@ -278,6 +279,10 @@ class ImageReleaseTests(unittest.TestCase):
                 return {"sha": trees[repo], "truncated": False, "tree": [
                     {"path": "converter", "type": "tree", "sha": "8" * 40},
                     {"path": "pipeline", "type": "tree", "sha": pipeline_tree}]}
+            if path == f"repos/FruitionKR/Fruition-frontend/git/trees/{trees['FruitionKR/Fruition-frontend']}":
+                return {"sha": trees[repo], "truncated": False, "tree": [
+                    {"path": "docs", "type": "tree", "sha": "6" * 40},
+                    {"path": "web", "type": "tree", "sha": web_tree}]}
             if "/releases/tags/" in path:
                 return None
             raise AssertionError(path)
@@ -292,7 +297,8 @@ class ImageReleaseTests(unittest.TestCase):
         self.assertEqual(pipeline_tree, data["builds"]["pipeline"]["context_tree"])
         # converter는 저장소 루트를 context로 쓰므로 AI 저장소의 어떤 변경에도 다시 빌드된다.
         self.assertEqual(trees["FruitionKR/Fruition-ai"], data["builds"]["converter"]["context_tree"])
-        self.assertEqual(trees["FruitionKR/Fruition-frontend"], data["builds"]["frontend"]["context_tree"])
+        # frontend는 web/ 디렉터리가 context라 web/ 아래가 바뀔 때만 다시 빌드된다.
+        self.assertEqual(web_tree, data["builds"]["frontend"]["context_tree"])
         release.validate_manifest(data, data["release_sha"], complete=False)
 
     def test_fetch_and_verify_use_the_exact_manifest_file(self):
@@ -320,7 +326,7 @@ class ImageReleaseTests(unittest.TestCase):
         self.assertEqual(release.BUILDER_JOB_SHA256, build_job_digest())
 
     def test_current_release_includes_frontend_image_and_repository(self):
-        self.assertEqual(("FruitionKR/Fruition-frontend", ".", "Dockerfile"), release.SERVICES["frontend"])
+        self.assertEqual(("FruitionKR/Fruition-frontend", "web", "web/Dockerfile"), release.SERVICES["frontend"])
         self.assertIn("FruitionKR/Fruition-frontend", release.REPOS)
         data = manifest()
         bad = copy.deepcopy(data); del bad["images"]["frontend"]

@@ -193,6 +193,42 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: converter
+  namespace: fruition
+spec:
+  template:
+    spec:
+      containers:
+      - name: converter
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka-kafka-bootstrap.fruition.svc:9093
+        - name: KAFKA_SECURITY_PROTOCOL
+          value: SSL
+        - name: KAFKA_SSL_CAFILE
+          value: /etc/kafka/ca/ca.crt
+        - name: KAFKA_SSL_CERTFILE
+          value: /etc/kafka/client/user.crt
+        - name: KAFKA_SSL_KEYFILE
+          value: /etc/kafka/client/user.key
+        volumeMounts:
+        - name: kafka-client
+          mountPath: /etc/kafka/client
+          readOnly: true
+        - name: kafka-ca
+          mountPath: /etc/kafka/ca
+          readOnly: true
+      volumes:
+      - name: kafka-client
+        secret:
+          secretName: kafka-converter
+      - name: kafka-ca
+        secret:
+          secretName: kafka-cluster-ca-cert
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: edit-event-consumer
   namespace: fruition
 spec:

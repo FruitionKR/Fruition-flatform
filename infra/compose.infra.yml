@@ -27,6 +27,8 @@ services:
       AI_DB_RUNTIME_PASSWORD: ${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}
       AI_DB_MIGRATION_USER: ${AI_DB_MIGRATION_USER:-ai_migration}
       AI_DB_MIGRATION_PASSWORD: ${AI_DB_MIGRATION_PASSWORD:-ai_migration_dev_password}
+      AI_DB_CONVERTER_USER: ${AI_DB_CONVERTER_USER:-ai_converter}
+      AI_DB_CONVERTER_PASSWORD: ${AI_DB_CONVERTER_PASSWORD:-ai_converter_dev_password}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -68,6 +70,8 @@ services:
       AI_DB_RUNTIME_PASSWORD: ${AI_DB_RUNTIME_PASSWORD:-ai_runtime_dev_password}
       AI_DB_MIGRATION_USER: ${AI_DB_MIGRATION_USER:-ai_migration}
       AI_DB_MIGRATION_PASSWORD: ${AI_DB_MIGRATION_PASSWORD:-ai_migration_dev_password}
+      AI_DB_CONVERTER_USER: ${AI_DB_CONVERTER_USER:-ai_converter}
+      AI_DB_CONVERTER_PASSWORD: ${AI_DB_CONVERTER_PASSWORD:-ai_converter_dev_password}
     volumes:
       - ./postgres/validate-db-isolation.sh:/usr/local/bin/validate-db-isolation:ro
       - ./postgres/db-isolation-config.bash:/usr/local/bin/db-isolation-config.bash:ro
@@ -117,6 +121,8 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
           --create --if-not-exists --topic ai.maintenance.command --partitions 12 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+          --create --if-not-exists --topic ai.convert.command --partitions 12 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
           --create --if-not-exists --topic ai.task.event --partitions 12 --replication-factor 1
         # 문서 편집 outbox 이벤트 (key=document_id)
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
@@ -154,8 +160,9 @@ services:
       - minio-data:/data
 
   minio-init:
-    # mc 이미지가 사라져 AWS CLI(public ECR, digest 고정)로 버킷을 만든다. 새 버킷은 기본이 비공개라 anonymous 설정은 필요 없다.
-    image: public.ecr.aws/aws-cli/aws-cli@sha256:37458ae4e84ce11cdd92da543e72ece6d75ca73c35a0bcd3fe4571ccc882cf98
+    # Public ECR의 익명 다운로드 한도로 CI가 실패해 공식 Docker Hub AWS CLI 2.37.4 이미지를 digest로 고정한다.
+    # 새 버킷은 기본이 비공개라 anonymous 설정은 필요 없다.
+    image: amazon/aws-cli@sha256:fdd8d1fcbea9c371678dee5a40df8b178c7a781b4586605756ee28114c97ead6
     container_name: fruition-minio-init-dev
     depends_on:
       minio:

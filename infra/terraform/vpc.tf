@@ -23,12 +23,8 @@ module "vpc" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  # 침해 시 네트워크 포렌식용 Flow Logs
-  enable_flow_log                                 = true
-  create_flow_log_cloudwatch_log_group            = true
-  create_flow_log_cloudwatch_iam_role             = true
-  flow_log_max_aggregation_interval               = 60
-  flow_log_cloudwatch_log_group_retention_in_days = 14
+  # Direct S3 flow logging is owned by vpc-flow-logs.tf.
+  enable_flow_log = false
 
   # AWS Load Balancer Controller subnet 자동 탐색용 태그
   public_subnet_tags = {

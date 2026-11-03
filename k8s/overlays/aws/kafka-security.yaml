@@ -24,6 +24,7 @@ spec:
             - query-task-worker
             - agent-task-worker
             - maintenance-task-worker
+            - converter
             - edit-event-consumer
       - podSelector:
           matchLabels:

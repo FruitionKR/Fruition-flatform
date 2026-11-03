@@ -104,12 +104,79 @@ class IaCContractTests(unittest.TestCase):
         converter = (ROOT / "k8s/base/converter.yaml").read_text()
         self.assertNotIn("safe-to-evict", converter)
 
+    def test_ebs_csi_sidecars_reduce_audit_churn_without_disabling_leader_election(self):
+        eks = re.sub(r"\s+", " ", (ROOT / "infra/terraform/eks.tf").read_text())
+        for flag in ("lease-duration=60s", "renew-deadline=40s", "retry-period=10s"):
+            self.assertIn(f'"--leader-election-{flag}"', eks)
+        for sidecar in ("provisioner", "attacher", "resizer"):
+            self.assertIn(f"{sidecar} = {{ additionalArgs = local.ebs_csi_leader_election_args }}", eks)
+        # VolumeSnapshot CRD가 없어 404 list/watch만 반복하던 snapshotter를 끈다.
+        self.assertIn("snapshotter = { forceEnable = false }", eks)
+        self.assertNotIn("--leader-election=false", eks)
+
+    def test_rds_log_groups_are_managed_with_14_day_retention(self):
+        rds = (ROOT / "infra/terraform/rds.tf").read_text()
+        self.assertRegex(rds, r'resource "aws_cloudwatch_log_group" "rds"\s*\{[^}]*toset\(\["access", "core"\]\)[^}]*/aws/rds/instance/\$\{var\.project\}-\$\{each\.key\}-postgres/postgresql[^}]*retention_in_days\s*=\s*14')
+        for key in ("access", "core"):
+            self.assertRegex(rds, rf'depends_on\s*=\s*\[aws_cloudwatch_log_group\.rds\["{key}"\]\]')
+
+    def test_redis_and_access_db_run_single_node_for_cost(self):
+        redis = (ROOT / "infra/terraform/elasticache.tf").read_text()
+        self.assertRegex(redis, r'num_cache_clusters\s*=\s*1\b')
+        self.assertRegex(redis, r'automatic_failover_enabled\s*=\s*false')
+        self.assertRegex(redis, r'multi_az_enabled\s*=\s*false')
+        self.assertRegex(redis, r'transit_encryption_mode\s*=\s*"required"')
+        rds = (ROOT / "infra/terraform/rds.tf").read_text()
+        for key in ("access", "core"):
+            block = rds[rds.index(f'resource "aws_db_instance" "{key}"'):]
+            block = block[:block.index("\n}\n")]
+            self.assertRegex(block, r'multi_az\s*=\s*false')
+            self.assertRegex(block, r'backup_retention_period\s*=\s*7')
+            self.assertRegex(block, r'deletion_protection\s*=\s*true')
+            self.assertRegex(block, r'storage_encrypted\s*=\s*true')
+
+    def test_access_db_is_micro_with_memory_swap_and_connection_alarms(self):
+        rds = (ROOT / "infra/terraform/rds.tf").read_text()
+        blocks = {}
+        for key in ("access", "core"):
+            block = rds[rds.index(f'resource "aws_db_instance" "{key}"'):]
+            blocks[key] = block[:block.index("\n}\n")]
+        # 즉시 적용은 명시적으로 -var를 줄 때만 켜지고, 기본은 유지 관리 기간이다.
+        self.assertRegex(rds, r'variable "access_db_apply_immediately" \{[^}]*type\s*=\s*bool[^}]*default\s*=\s*false')
+        self.assertRegex(blocks["access"], r'apply_immediately\s*=\s*var\.access_db_apply_immediately')
+        self.assertNotIn("apply_immediately", blocks["core"])
+        self.assertRegex(blocks["access"], r'instance_class\s*=\s*"db\.t4g\.micro"')
+        self.assertRegex(blocks["core"], r'instance_class\s*=\s*"db\.t4g\.small"')
+        obs = re.sub(r"\s+", " ", (ROOT / "infra/terraform/observability.tf").read_text())
+        dim = "dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }"
+        for expected in (
+            f'rds_access_memory = {{ namespace = "AWS/RDS", metric = "FreeableMemory", {dim}, stat = "Average", threshold = 104857600, comparison = "LessThanThreshold", periods = 3, datapoints = 3',
+            f'rds_access_swap = {{ namespace = "AWS/RDS", metric = "SwapUsage", {dim}, stat = "Maximum", threshold = 67108864, comparison = "GreaterThanThreshold"',
+            f'rds_access_connections = {{ namespace = "AWS/RDS", metric = "DatabaseConnections", {dim}, stat = "Maximum", threshold = 60, comparison = "GreaterThanThreshold"',
+        ):
+            self.assertIn(expected, obs)
+        for key in ("rds_access_memory", "rds_access_swap", "rds_access_connections"):
+            self.assertRegex(obs, rf'{key} = "인증 DB [^"]+확인하세요\."')
+
+    def test_converter_does_not_set_unread_env(self):
+        files = ["k8s/base/converter.yaml", "infra/compose.converter.yml"]
+        for path in files:
+            text = (ROOT / path).read_text()
+            for name in ("OCR_LANGUAGE", "OCR_TIMEOUT_SECONDS", "MARKDOWN_TIMEOUT_SECONDS"):
+                self.assertNotIn(name, text, f"{path} {name}")
+
     def test_budget_delivery_keeps_webhook_out_of_state_and_scopes_permissions(self):
         budget = (ROOT / "infra/terraform/budgets.tf").read_text()
         self.assertNotIn('aws_secretsmanager_secret_version', budget)
         self.assertNotIn('subscriber_email_addresses', budget)
         self.assertNotIn('budget_email', (ROOT / "infra/terraform/variables.tf").read_text())
-        self.assertIn('toset(["400", "550", "650"])', budget)
+        # $50~$1000을 $50 단위로 실제 사용액 알림. 이름이 topic policy ArnLike 패턴과 맞아야 한다.
+        self.assertIn('toset([for amount in range(50, 1001, 50) : tostring(amount)])', budget)
+        self.assertIn('name         = "${var.project}-monthly-${each.value}"', budget)
+        self.assertIn(':budget/${var.project}-monthly-*', budget)
+        self.assertEqual(1, budget.count("notification {"))
+        self.assertRegex(budget, r'notification_type\s*=\s*"ACTUAL"')
+        self.assertNotIn('FORECASTED', budget)
         self.assertIn('"aws:SourceAccount"', budget)
         self.assertIn('"aws:SourceArn"', budget)
         self.assertIn('aws_secretsmanager_secret.budget_discord.arn', budget)
@@ -120,6 +187,28 @@ class IaCContractTests(unittest.TestCase):
         self.assertRegex(budget, r'message_retention_seconds\s*=\s*1209600')
         self.assertIn('on_failure', budget)
         self.assertIn('redrive_policy', budget)
+
+    def test_storage_lifecycle_expires_old_versions_and_pipeline_logs(self):
+        source = (ROOT / "infra/terraform/s3.tf").read_text()
+        rules = {m.group(1): m.group(2) for m in re.finditer(r'rule \{\s*id\s*=\s*"([^"]+)"(.*?)\n  \}', source, re.S)}
+        everything = re.sub(r"\s+", " ", rules["expire-noncurrent-versions"])
+        self.assertIn("filter {}", everything)
+        self.assertIn("noncurrent_days = 30", everything)
+        self.assertIn("expired_object_delete_marker = true", everything)
+        self.assertRegex(rules["expire-tmp"], r'prefix\s*=\s*"tmp/"')
+        self.assertIn("noncurrent_days = 7", rules["expire-tmp"])
+        logs = rules["expire-pipeline-runs"]
+        self.assertRegex(logs, r'prefix\s*=\s*"pipeline-runs/"')
+        self.assertRegex(logs, r'days\s*=\s*30')
+        self.assertRegex(logs, r'noncurrent_days\s*=\s*1\b')
+
+    def test_ai_kafka_topics_keep_messages_72_hours(self):
+        topics = [d for d in yaml.safe_load_all((ROOT / "k8s/base/kafka.yaml").read_text()) if d["kind"] == "KafkaTopic"]
+        # 토픽이 추가돼도(예: ai.convert.command) 매니페스트의 모든 토픽이 72시간 보관을 지키는지 본다.
+        self.assertLessEqual({"ai.ingest.command", "ai.query.command", "ai.agent.command", "ai.maintenance.command",
+                              "ai.task.event", "document.edit.event"}, {t["metadata"]["name"] for t in topics})
+        for topic in topics:
+            self.assertEqual(259200000, topic["spec"]["config"]["retention.ms"], topic["metadata"]["name"])
 
     def test_ci_has_no_aws_credentials_and_covers_infra_paths(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/aws-iac.yml").read_text())
@@ -133,6 +222,16 @@ class IaCContractTests(unittest.TestCase):
         self.assertIn("-backend=false", script)
         self.assertIn("-lockfile=readonly", script)
         self.assertNotRegex(script, r"(?m)^\s*aws\s")
+
+    def test_ai_billing_warn_lines_alarm_only_for_document_svc(self):
+        obs = re.sub(r"\s+", " ", (ROOT / "infra/terraform/observability.tf").read_text())
+        for expected in ('prefix = "[AI 모델 전환 감지]"', 'prefix = "[AI 단가 미등록]"',
+                         'prefix = "[환율 갱신 실패]"', 'prefix = "[AI 사용량 확인 필요]"', 'prefix = "[AI 환율·정책 없음]"',
+                         '$.kubernetes.container_name = \\"document-svc\\"', 'namespace = "Fruition/AIUsage"',
+                         'period = 86400', 'comparison_operator = "GreaterThanOrEqualToThreshold"',
+                         'alarm_actions = [aws_sns_topic.operations.arn]'):
+            self.assertIn(expected, obs)
+
 
 if __name__ == "__main__":
     unittest.main()

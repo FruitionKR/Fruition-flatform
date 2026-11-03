@@ -54,6 +54,10 @@ spec:
       default.replication.factor: 1
       min.insync.replicas: 1
       auto.create.topics.enable: false
+      # KEDA가 worker를 0으로 줄이면 consumer group이 빈 채로 남는다. 기본값(7일)이 지나 commit offset이
+      # 지워지면 KEDA Kafka scaler는 offsetResetPolicy earliest에서 lag을 topic 끝 offset 전체로 계산해
+      # 처리할 메시지가 없어도 worker와 AI 노드를 계속 깨워 둔다. 오래 쉬는 group의 offset도 1년 보존한다.
+      offsets.retention.minutes: 525600
   entityOperator:
     topicOperator:
       # AdminClient는 브로커를 못 찾으면 백오프 없이 재부트스트랩을 반복하고
@@ -79,6 +83,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -90,6 +97,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -101,6 +111,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -112,6 +125,24 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
+---
+# PDF 변환 command (key=batch run_id). 한 문서의 batch가 파티션에 퍼져 converter worker가 병렬로 처리한다.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: ai.convert.command
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 12
+  replicas: 1
+  # 소비 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -123,6 +154,9 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 질문 원문 등 개인정보가 담겨 처리 지연 복구에 필요한 72시간만 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000
 ---
 # 문서 편집 outbox 이벤트 (key=document_id)
 apiVersion: kafka.strimzi.io/v1
@@ -135,3 +169,6 @@ metadata:
 spec:
   partitions: 12
   replicas: 1
+  # 문서·워크스페이스 ID, revision, content_hash만 담은 편집 알림이며 본문은 없다. 소비 지연 복구용으로 72시간 보관한다(ADR 0023).
+  config:
+    retention.ms: 259200000

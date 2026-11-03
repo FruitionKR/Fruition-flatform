@@ -6,7 +6,13 @@
 |---|---|
 | [architecture.md](architecture.md) | 전체 아키텍처·통신·공통 권한·AWS 배치·저장소 소유권 |
 | [AWS 배포 아키텍처 그림](aws-deployment-architecture.md) | 배포 후 서비스 배치·요청 흐름·배포와 알림 연결을 쉬운 그림으로 설명 |
+| [AWS 배포와 운영 면접 설명](deployment-interview-2026-11-01.md) | 배포 현황·구조·검증·보안 개선 사례와 면접 답변, 확인 시점과 한계 |
 | [화면 EKS Fargate 운영](aws-frontend-hosting.md) | 화면·API 같은 주소 경로 분기, 접근 코드 WAF, 절전 중 제약과 되돌리기 |
+| [WAF 스캔 조사와 운영 보완안](aws-waf-review-2026-10-22.md) | 2026-10-22 경보·유출 가능성 조사 근거, 접근 로그·민감 경로 차단·경보 개선 계획 |
+| [보안 문제와 Claude 독립 검토](security-review-2026-10-31.md) | 기존 47개 보안 주장, 추가 재현, 타당성 검토와 미확인 조건 |
+| [보안 수정과 회귀 검증](security-fixes-2026-10-31.md) | 병렬 수정 범위, 테스트 결과, 마이그레이션과 배포 조건 |
+| [최신 main 배포 결과](deployment-2026-10-31.md) | 네 서비스 main 통합·CI·이미지 게시·EKS 배포 및 smoke 결과 |
+| [운영 설정값 참조](operations-reference.md) | 사양·옵션 유무·환경 변수·비밀값 이름(값 제외)·경보·배포 규칙의 실제 값과 근거를 한곳에 모음 |
 | [api/](api/README.md) | 서비스별 API 진입 안내와 서비스 간 호출 경로 |
 | [data-model.md](data-model.md) | 저장소·DB 계정 격리·서비스 간 관계 |
 | [script.md](script.md) | 통합 실행·검증·AWS 준비와 운영 절차 |
@@ -24,6 +30,8 @@
 | [ADR-0020](adr/0020-platform-and-document-ownership.md) | 플랫폼과 서비스 문서 관리 결정 |
 | [ADR-0021](adr/0021-aws-observability-and-operations.md) | CloudWatch 중심 관측과 운영 준비 결정 |
 | [ADR-0022](adr/0022-realtime-speech-transcription.md) | 음성 기능 서비스 책임과 실시간 전사 WebSocket 중계 결정 |
+| [ADR-0023](adr/0023-retention-after-personal-data-purge.md) | 개인정보 파기 후 S3 이전 버전·AI 로그·Kafka 보관 기간 |
+| [ADR-0024](adr/0024-converter-least-privilege-db-account.md) | converter 전용 최소 권한 DB 계정 |
 | [backlog/](backlog/README.md) | 과거 통합 설계·이슈·다이어그램, 완료된 계획·일회성 점검 기록 보관 |
 
 서비스별 문서: [frontend](https://github.com/FruitionKR/Fruition-frontend/blob/main/docs/README.md) · [Access](https://github.com/FruitionKR/Fruition-access/blob/main/docs/README.md) · [Document](https://github.com/FruitionKR/Fruition-document/blob/main/docs/README.md) · [AI](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/README.md)

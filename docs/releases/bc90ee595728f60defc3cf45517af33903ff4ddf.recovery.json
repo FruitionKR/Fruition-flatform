@@ -1,0 +1,7 @@
+{
+  "release_sha": "bc90ee595728f60defc3cf45517af33903ff4ddf",
+  "mode": "complete-after-migrations",
+  "incident_url": "https://github.com/FruitionKR/Fruition-flatform/actions/runs/39808347893",
+  "started_data_sha256": "8d4e7e5483ea164eb09285330c023a9bdd58fd0f6b55702fc349aceada1ac4d8",
+  "failed_data_sha256": "b0de1b3ba6dbf7801f898458720cbe89c11c81fa8c36d9ae7ea678640364d7fa"
+}

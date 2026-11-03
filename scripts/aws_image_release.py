@@ -16,7 +16,7 @@ SERVICES = {
     "document-svc": ("FruitionKR/Fruition-document", ".", "Dockerfile"),
     "pipeline": ("FruitionKR/Fruition-ai", "pipeline", "pipeline/Dockerfile"),
     "converter": ("FruitionKR/Fruition-ai", ".", "converter/Dockerfile"),
-    "frontend": ("FruitionKR/Fruition-frontend", ".", "Dockerfile"),
+    "frontend": ("FruitionKR/Fruition-frontend", "web", "web/Dockerfile"),
 }
 REPOS = sorted({s[0] for s in SERVICES.values()})
 # schema 1은 frontend가 EKS로 오기 전 release다. 검증은 하되 rollback으로만 쓴다.

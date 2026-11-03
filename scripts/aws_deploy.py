@@ -10,12 +10,13 @@ import shutil
 import subprocess
 import tempfile
 import time
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from aws_release_safety import validate_review, smoke_settings, authenticated_smoke
-from aws_image_release import validate_manifest
+from aws_image_release import validate_manifest, SERVICES
 
 import yaml
 
@@ -32,7 +33,7 @@ SCALING_KINDS = {"HorizontalPodAutoscaler"}
 PLACEHOLDER = re.compile(r"REPLACE_ME|PLACEHOLDER|CHANGEME|<[^>]+>|\$\{[^}]+\}", re.I)
 DNS = r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}"
 KEYS = {"account_id", "access_rds_endpoint", "core_rds_endpoint", "redis_endpoint", "s3_bucket", "app_domain", "domain", "acm_cert_arn",
-        "document_storage_role_arn", "pipeline_storage_role_arn", "vpc_cidr", "alb_subnet_cidr_1", "alb_subnet_cidr_2", "smtp_port", "waf_acl_arn"}
+        "document_storage_role_arn", "pipeline_storage_role_arn", "converter_storage_role_arn", "vpc_cidr", "alb_subnet_cidr_1", "alb_subnet_cidr_2", "smtp_port", "waf_acl_arn"}
 
 
 def run(args, *, input=None):
@@ -44,8 +45,10 @@ def kubectl(*args, input=None):
 
 
 def validate(config, sha):
-    if set(config) != KEYS:
+    if not KEYS <= set(config) or set(config) - KEYS - {"analytics_enabled"}:
         raise ValueError("배포 JSON에는 문서의 비밀 아닌 입력 키만 모두 필요합니다")
+    if config.get("analytics_enabled", "false") not in ("true", "false"):
+        raise ValueError("analytics_enabled는 true 또는 false 문자열이어야 합니다")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("image SHA는 게시된 릴리스의 소문자 40자리 ID여야 합니다")
     for key, value in config.items():
@@ -65,10 +68,10 @@ def validate(config, sha):
         raise ValueError("ACM ARN의 region/account/certificate를 확인하세요")
     if not re.fullmatch(rf"arn:aws:wafv2:ap-northeast-2:{config['account_id']}:regional/webacl/[A-Za-z0-9_-]+/[0-9a-f-]{{36}}", config["waf_acl_arn"]):
         raise ValueError("WAF ARN의 region/account/regional webacl을 확인하세요")
-    for key in ("document_storage_role_arn", "pipeline_storage_role_arn"):
+    for key in ("document_storage_role_arn", "pipeline_storage_role_arn", "converter_storage_role_arn"):
         if not re.fullmatch(rf"arn:aws:iam::{config['account_id']}:role/[A-Za-z0-9+=,.@_/-]+", config[key]):
             raise ValueError("서비스 S3 role ARN의 account와 형식을 확인하세요")
-    if config["document_storage_role_arn"] == config["pipeline_storage_role_arn"]:
+    if len({config["document_storage_role_arn"], config["pipeline_storage_role_arn"], config["converter_storage_role_arn"]}) != 3:
         raise ValueError("서비스별 S3 role을 분리해야 합니다")
     network = ipaddress.ip_network(config["vpc_cidr"])
     if network.version != 4 or not network.is_private:
@@ -98,6 +101,22 @@ def image_matches(image, sha, images):
     return images.get(repository) == digest
 
 
+def alb_access_logs_bucket(config):
+    # Terraform restricts this profile to project=fruition and Seoul.
+    region = config["waf_acl_arn"].split(":")[3]
+    return f"fruition-alb-access-logs-{config['account_id']}-{region}"
+
+
+def verify_alb_log_destination(config):
+    bucket = alb_access_logs_bucket(config)
+    args = ["--bucket", bucket, "--expected-bucket-owner", config["account_id"],
+            "--region", config["waf_acl_arn"].split(":")[3]]
+    location = json.loads(run(["aws", "s3api", "get-bucket-location", *args]))
+    policy = json.loads(run(["aws", "s3api", "get-bucket-policy-status", *args]))
+    if location.get("LocationConstraint") != "ap-northeast-2" or policy.get("PolicyStatus", {}).get("IsPublic") is not False:
+        raise ValueError("ALB 로그 버킷·서울 리전·비공개 정책을 Terraform으로 먼저 준비해야 합니다")
+
+
 def render(config, sha, manifest):
     validate(config, sha)
     validate_manifest(manifest, sha)
@@ -108,7 +127,10 @@ def render(config, sha, manifest):
         overlay = tree / "overlays/aws"
         for path in overlay.glob("*.yaml"):
             content = path.read_text()
-            for key, value in config.items():
+            # Same deterministic name as Terraform alb-access-logs.tf. No new
+            # deployment secret/config key; older pinned release inputs still work.
+            replacements = {**config, "alb_access_logs_bucket": alb_access_logs_bucket(config)}
+            for key, value in replacements.items():
                 content = content.replace("REPLACE_ME_" + key.upper(), value)
             path.write_text(content)
         path = overlay / "kustomization.yaml"
@@ -125,6 +147,18 @@ def render(config, sha, manifest):
         path.write_text(yaml.safe_dump(data, sort_keys=False))
         content = run(["kubectl", "kustomize", str(overlay)])
     documents = list(yaml.safe_load_all(content))
+    # Version is the effective source commit, never the multi-repository release ID.
+    for document in documents:
+        if document["kind"] != "Deployment":
+            continue
+        name = document["metadata"]["name"]
+        for container in document["spec"]["template"]["spec"]["containers"]:
+            env = {item["name"]: item for item in container.get("env", [])}
+            if "APP_VERSION" not in env:
+                continue
+            service = name if name in SERVICES else "pipeline"
+            env["APP_VERSION"]["value"] = manifest["sources"][SERVICES[service][0]]
+            env["ANALYTICS_ENABLED"]["value"] = config.get("analytics_enabled", "false")
     check_manifest(documents, sha, images)
     return documents
 
@@ -139,7 +173,8 @@ def check_manifest(documents, sha, images=None):
     for document in documents:
         if document["kind"] not in {"Deployment", "Job"}:
             continue
-        for container in document["spec"]["template"]["spec"]["containers"]:
+        pod = document["spec"]["template"]["spec"]
+        for container in pod["containers"] + pod.get("initContainers", []):
             if not image_matches(container["image"], sha, images):
                 raise ValueError("업무 image는 모두 release에 기록된 immutable 태그/digest여야 합니다")
 
@@ -181,29 +216,47 @@ def job(document):
     wait(document, "Complete")
 
 
-def preflight_job(service, config, *, require_empty=False):
+def preflight_job(service, config, *, require_empty=False, require_quiescent=False):
     prefix = {"access": "ACCESS", "document": "CORE", "ai": "AI"}[service]
     db = {"access": "access", "document": "core", "ai": "ai"}[service]
     runtime_secret = "fruition-" + ("pipeline" if service == "ai" else service)
-    env = [{"name": "PGCONNECT_TIMEOUT", "value": "15"}, {"name": "PGSSLMODE", "value": "require"}]
+    env = [{"name": "PGCONNECT_TIMEOUT", "value": "15"}, {"name": "PGSSLMODE", "value": "verify-full"},
+           {"name": "PGSSLROOTCERT", "value": "/etc/rds-ca/root.crt"}]
+    analytics_check = ""
+    if service == "access" and config.get("analytics_enabled", "false") == "true":
+        env.append({"name": "POSTHOG_PROJECT_TOKEN", "valueFrom": {"secretKeyRef": {
+            "name": "fruition-analytics", "key": "POSTHOG_PROJECT_TOKEN", "optional": True}}})
+        analytics_check = ('case "${POSTHOG_PROJECT_TOKEN:-}" in phc_?*) ;; *) echo "analytics token missing or invalid" >&2; exit 1 ;; esac\n'
+                           'case "$POSTHOG_PROJECT_TOKEN" in *[!a-zA-Z0-9_-]*) echo "analytics token invalid" >&2; exit 1 ;; esac\n')
     for role in ("runtime", "migration"):
         key = ("AI_DATABASE_URL" if role == "runtime" else "AI_DB_MIGRATION_URL") if service == "ai" else f"{prefix}_DB_{role.upper()}_PASSWORD"
         env.append({"name": role.upper() + "_CREDENTIAL", "valueFrom": {"secretKeyRef": {
             "name": runtime_secret if role == "runtime" else f"fruition-{service}-migration", "key": key}}})
+    roles = "runtime migration"
+    if service == "ai":
+        # converter 전용 계정(원장·작업 journal 권한만)도 접속·URI 계약·권한 범위를 확인한다. 마지막 role의 연결로 pg_dump를 하므로 migration을 끝에 둔다.
+        roles = "runtime converter migration"
+        env.append({"name": "CONVERTER_CREDENTIAL", "valueFrom": {"secretKeyRef": {
+            "name": "fruition-converter", "key": "AI_DATABASE_URL"}}})
     host = config["access_rds_endpoint" if service == "access" else "core_rds_endpoint"]
     # credential은 Secret에서만 주입한다. shell trace와 DB client 오류 출력은 비활성화한다.
     script = f"""set -eu
-export PGHOST={host} PGPORT=5432
-for role in runtime migration; do
+{analytics_check}export PGHOST={host} PGPORT=5432
+for role in {roles}; do
   export PGUSER={db}_"$role"
   export PGDATABASE={db}_db
-  if [ "$role" = runtime ]; then credential="$RUNTIME_CREDENTIAL"; else credential="$MIGRATION_CREDENTIAL"; fi
+  case "$role" in
+    runtime) credential="$RUNTIME_CREDENTIAL" ;;
+    converter) credential="$CONVERTER_CREDENTIAL" ;;
+    *) credential="$MIGRATION_CREDENTIAL" ;;
+  esac
 """
     if service == "ai":
         # Terraform이 생성하는 단일 endpoint URI 계약만 허용한다. query의 host/sslmode 재정의를 거부한다.
-        script += '''  # Terraform URI의 명시적 TLS 옵션만 허용한다. 실제 TLS는 PGSSLMODE=require로 유지.
+        script += '''  # Strip only the permitted URI option; the verified environment enforces TLS identity.
   case "$credential" in
     *\\?sslmode=require) credential=${credential%\\?sslmode=require} ;;
+    *\\?sslmode=verify-full) credential=${credential%\\?sslmode=verify-full} ;;
   esac
   prefix="postgresql://$PGUSER:"
   suffix="@$PGHOST:$PGPORT/$PGDATABASE"
@@ -220,7 +273,7 @@ for role in runtime migration; do
 '''
     else:
         script += '  export PGPASSWORD="$credential"\n'
-    script += f"""  result=$(psql --dbname="$PGDATABASE" -X -A -t -v ON_ERROR_STOP=1 -v expected_user="{db}_$role" -v expected_db='{db}_db' -v migration='{db}_migration' 2>/dev/null <<'SQL'
+    script += f"""  result=$(psql --dbname="$PGDATABASE" -X -A -t -v ON_ERROR_STOP=1 -v expected_user="{db}_$role" -v expected_db='{db}_db' -v migration='{db}_migration' -v converter='{db}_converter' 2>/dev/null <<'SQL'
 SELECT current_user = :'expected_user' AND current_database() = :'expected_db'
  AND (SELECT pg_get_userbyid(datdba) = :'migration' FROM pg_database WHERE datname = current_database())
  AND (SELECT pg_get_userbyid(nspowner) = :'migration' FROM pg_namespace WHERE nspname = 'public')
@@ -230,7 +283,12 @@ SELECT current_user = :'expected_user' AND current_database() = :'expected_db'
  AND NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user))
  AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datname IN ('access_db','core_db','ai_db') AND datname <> current_database() AND has_database_privilege(current_user, oid, 'CONNECT'))
  AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','S','v','m') AND pg_get_userbyid(c.relowner) <> :'migration')
- AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) privilege WHERE n.nspname='public' AND c.relkind IN ('r','p') AND current_user <> :'migration' AND NOT has_table_privilege(current_user,c.oid,privilege));
+ AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) privilege WHERE n.nspname='public' AND c.relkind IN ('r','p') AND current_user NOT IN (:'migration', :'converter') AND NOT has_table_privilege(current_user,c.oid,privilege))
+ AND (current_user <> :'converter' OR (NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m') AND (has_table_privilege(current_user,c.oid,'DELETE,TRUNCATE,REFERENCES,TRIGGER')
+   OR (c.relname NOT IN ('ai_task_runs','ai_task_changes','ai_purged_scopes') AND has_table_privilege(current_user,c.oid,'SELECT'))
+   OR (c.relname <> 'ai_task_runs' AND has_table_privilege(current_user,c.oid,'UPDATE'))
+   OR (c.relname NOT IN ('ai_model_usage','ai_task_runs') AND has_table_privilege(current_user,c.oid,'INSERT'))))
+  AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' AND has_sequence_privilege(current_user,c.oid,'USAGE,SELECT,UPDATE'))));
 SQL
   )
   [ "$result" = t ] || {{ echo 'DB ownership gate failed'; exit 1; }}
@@ -254,6 +312,15 @@ SQL
 [ "$empty" = t ] || { echo 'Initial install requires an empty database'; exit 1; }
 """
         script = script.replace('# 같은 PostgreSQL client', empty_check + '# 같은 PostgreSQL client')
+    if require_quiescent:
+        quiet_check = """quiet=$(psql --dbname="$PGDATABASE" -X -A -t -v ON_ERROR_STOP=1 2>/dev/null <<'SQL'
+SELECT NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+ AND pid<>pg_backend_pid() AND usename IS NOT NULL);
+SQL
+)
+[ "$quiet" = t ] || { echo 'Maintenance requires no other DB clients'; exit 1; }
+"""
+        script = script.replace('# 같은 PostgreSQL client', quiet_check + '# 같은 PostgreSQL client')
     labels = {"app.kubernetes.io/component": "db-preflight", "app": f"{service}-db-preflight"}
     return {"apiVersion": "batch/v1", "kind": "Job",
             "metadata": {"name": f"{service}-db-preflight", "namespace": NAMESPACE, "labels": labels},
@@ -261,17 +328,19 @@ SQL
                 "metadata": {"labels": labels},
                 "spec": {"restartPolicy": "Never", "serviceAccountName": f"fruition-{service}-migration",
                          "automountServiceAccountToken": False,
+                         "volumes": [{"name": "rds-ca", "configMap": {"name": "fruition-rds-ca"}}],
                          "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001,
                                              "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}},
                          "containers": [{"name": "preflight", "image": "postgres:16-alpine",
                                          "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
-                                         "command": ["sh", "-c", script], "env": env}]}}}}
+                                         "command": ["sh", "-c", script], "env": env,
+                                         "volumeMounts": [{"name": "rds-ca", "mountPath": "/etc/rds-ca", "readOnly": True}]}]}}}}
 
 
-def fingerprints(config, *, require_empty=False):
+def fingerprints(config, *, require_empty=False, require_quiescent=False):
     results = {}
     for service in ("access", "document", "ai"):
-        document = preflight_job(service, config, require_empty=require_empty)
+        document = preflight_job(service, config, require_empty=require_empty, require_quiescent=require_quiescent)
         job(document)
         digest = kubectl("logs", "job/" + document["metadata"]["name"]).strip()
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
@@ -317,10 +386,38 @@ def wait_alb_bindings():
     raise ValueError("ALB TargetGroupBinding 준비 시간 초과: 앱 Pod 생성 전 중단합니다")
 
 
+def wait_kafka_settled(document):
+    """Kafka 설정 변경은 Strimzi가 단일 broker를 재시작한다. kubectl wait의 Ready는 재시작 전 옛 상태일 수 있다.
+
+    operator가 새 generation을 반영(observedGeneration)하고 Ready이며 broker Pod가 모두 다시 Ready일 때까지 기다린다.
+    """
+    name = document["metadata"]["name"]
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        kafka = json.loads(kubectl("get", "kafka/" + name, "-o", "json") or "{}")
+        status = kafka.get("status", {})
+        reconciled = status.get("observedGeneration", -1) >= kafka.get("metadata", {}).get("generation", 0) and \
+            any(c.get("type") == "Ready" and c.get("status") == "True" for c in status.get("conditions", []))
+        pods = json.loads(kubectl("get", "pods", "-l", f"strimzi.io/cluster={name},strimzi.io/broker-role=true",
+                                  "-o", "json") or "{}").get("items", [])
+        brokers_ready = bool(pods) and all(
+            not p.get("metadata", {}).get("deletionTimestamp") and
+            any(c.get("type") == "Ready" and c.get("status") == "True" for c in p.get("status", {}).get("conditions", []))
+            for p in pods)
+        if reconciled and brokers_ready:
+            return
+        time.sleep(5)
+    raise TimeoutError("Kafka broker 재시작이 10분 안에 끝나지 않았습니다. API 교체 전에 중단합니다")
+
+
 def http_status(url, *extra):
     # --retry는 연결 실패와 408/429/5xx만 다시 시도한다. 404·401은 그대로 돌려준다.
-    return run(["curl", "--silent", "--show-error", "--output", "/dev/null", "--write-out", "%{http_code}",
-                "--retry", "8", "--retry-all-errors", "--retry-delay", "5", "--max-time", "30", *extra, url]).strip()
+    # curl retries truncate the output file; /dev/null does not support that on
+    # the deployment runner. A private temporary regular file is seekable.
+    with tempfile.TemporaryDirectory(prefix="fruition-http-") as directory:
+        return run(["curl", "--silent", "--show-error", "--output", str(Path(directory) / "body"),
+                    "--write-out", "%{http_code}", "--retry", "8", "--retry-all-errors",
+                    "--retry-delay", "5", "--max-time", "30", *extra, url]).strip()
 
 
 def wait_status(url, expected, *extra, attempts=24):
@@ -526,7 +623,7 @@ def install_record(name, data):
             "immutable": True, "data": data}
 
 
-def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False, images=None):
+def validate_deploy_inputs(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False, images=None):
     validate(config, sha)
     check_manifest(documents, sha, images)
     if not rollback:
@@ -541,8 +638,18 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
                            or probe_recovery or mail_health_recovery):
         raise ValueError("OAuth 복구는 다른 복구 옵션 없는 initial-install deploy 전용입니다")
     settings = None if bootstrap else smoke_settings()
+    return settings
+
+
+def _deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=False, probe_recovery=False, mail_health_recovery=False, oauth_recovery=False, images=None):
+    settings = validate_deploy_inputs(config, sha, documents, rollback=rollback, review=review,
+                                     bootstrap=bootstrap, probe_recovery=probe_recovery,
+                                     mail_health_recovery=mail_health_recovery, oauth_recovery=oauth_recovery, images=images)
     verify_target(config)
+    verify_alb_log_destination(config)
     initial = not rollback and review["migration_mode"] == "initial-install"
+    if review and review["migration_mode"] == "maintenance-cutover" and bootstrap:
+        raise ValueError("maintenance-cutover는 deploy 전용입니다")
     if initial:
         initial_data, needs_empty_check, recovery_record = initial_install_state(config, sha, documents, bootstrap, probe_recovery, mail_health_recovery, oauth_recovery, images)
     if bootstrap:
@@ -601,49 +708,145 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         if document["kind"] == "ExternalSecret":
             wait(document)
     if not existing.strip():
-        current = fingerprints(config, require_empty=initial and needs_empty_check)
+        if review["migration_mode"] == "maintenance-cutover":
+            current = fingerprints(config, require_quiescent=True)
+            if current != review["before_fingerprints"]:
+                raise ValueError("maintenance before schema changed after foundation preflight")
+        else:
+            current = fingerprints(config, require_empty=initial and needs_empty_check)
         if initial and needs_empty_check:
             # Persist proof only AFTER all three databases passed the empty/ownership gate.
             apply([install_record("fruition-bootstrap", initial_data)])
-        if review["migration_mode"] == "expand-only" or (initial and bootstrap):
+        if review["migration_mode"] in {"expand-only", "maintenance-cutover"} or (initial and bootstrap):
             for document in documents:
                 if document["kind"] == "Job":
+                    if review["migration_mode"] == "maintenance-cutover":
+                        from aws_maintenance import assert_quiescent
+                        fingerprints(config, require_quiescent=True)
+                        assert_quiescent(SimpleNamespace(**globals()), documents)
                     job(document)
         current = fingerprints(config)
+        if review["migration_mode"] == "maintenance-cutover" and current != review["after_fingerprints"]:
+            raise ValueError("maintenance after fingerprints differ from rehearsed schema")
+    complete_rollout(config, sha, documents, current=current, review=review, settings=settings,
+                     existing=existing, bootstrap=bootstrap, initial=initial,
+                     initial_data=initial_data if initial else None)
+
+
+def reserve_deployment_headroom(documents):
+    """A bounded, inert Job asks autoscaler for real schedulable rollout capacity."""
+    pipeline = next(d for d in documents if d["kind"] == "Deployment" and d["metadata"]["name"] == "pipeline-api")
+    image = pipeline["spec"]["template"]["spec"]["containers"][0]["image"]
+    name = "fruition-deploy-headroom"
+    # 빈 t3.large 할당 가능 CPU 1930m - DaemonSet 요청 추정 약 255m(aws-node 25m, kube-proxy 100m,
+    # ebs-csi-node 30m, cloudwatch-agent 50m, fluent-bit 50m; 운영 runner 권한으로는 직접 조회 불가) = 약 1675m.
+    # 1200m은 그 안에서 약 28% 여유를 두고, 가장 큰 API 1개 surge(500m/1Gi)를 덮는다. 3Gi도 빈 노드(약 6.8Gi)에 들어간다.
+    reservation = {
+        "apiVersion": "batch/v1", "kind": "Job",
+        "metadata": {"name": name, "namespace": NAMESPACE},
+        "spec": {"activeDeadlineSeconds": 1200, "ttlSecondsAfterFinished": 60, "backoffLimit": 0,
+                 "template": {"metadata": {"labels": {"app": name}}, "spec": {
+                     "restartPolicy": "Never", "automountServiceAccountToken": False,
+                     "nodeSelector": {"eks.amazonaws.com/capacityType": "ON_DEMAND"},
+                     "securityContext": {"runAsNonRoot": True, "runAsUser": 10001,
+                                         "seccompProfile": {"type": "RuntimeDefault"}},
+                     "containers": [{"name": "reserve", "image": image,
+                         "command": ["python", "-c", "import time; time.sleep(1200)"],
+                         "resources": {"requests": {"cpu": "1200m", "memory": "3Gi"},
+                                       "limits": {"cpu": "1200m", "memory": "3Gi"}},
+                         "securityContext": {"allowPrivilegeEscalation": False,
+                                             "capabilities": {"drop": ["ALL"]}}}]}}}}
+    # create fails on a concurrent reservation; never delete somebody else's Job.
+    kubectl("create", "-f", "-", input=yaml.safe_dump(reservation))
+    try:
+        deadline = time.monotonic() + 900
+        while time.monotonic() < deadline:
+            pods = json.loads(kubectl("get", "pods", "-l", "job-name=" + name, "-o", "json"))
+            if any(p.get("status", {}).get("phase") == "Running" and
+                   any(c.get("type") == "Ready" and c.get("status") == "True"
+                       for c in p.get("status", {}).get("conditions", [])) for p in pods["items"]):
+                return
+            if any(p.get("status", {}).get("phase") == "Failed" for p in pods["items"]):
+                raise RuntimeError("배포 여유 Pod가 실패했습니다. 기존 서비스를 유지하고 배포를 중단합니다")
+            time.sleep(5)
+        raise TimeoutError("배포 여유 용량을 15분 안에 확보하지 못했습니다")
+    finally:
+        # The new node remains during autoscaler's unneeded-node grace period.
+        # Waiting for deletion releases its capacity before application rollout.
+        kubectl("delete", "job", name, "--wait=true", "--timeout=90s", "--ignore-not-found=true")
+
+
+def without_keda_replicas(documents):
+    """KEDA가 replicas를 정하는 Deployment는 manifest의 replicas(1)를 빼고 적용한다.
+
+    적용할 때마다 1로 되돌리면 0으로 줄어 있던 worker가 깨어 AI 노드를 띄우고, 늘어나 있던 worker는
+    처리 중에 줄어든다. 이전 적용 기록에 replicas가 남아 있으면 첫 적용에서만 기본값 1이 된다.
+    """
+    targets = {d["spec"]["scaleTargetRef"]["name"] for d in documents if d["kind"] == "ScaledObject"}
+    return [{**d, "spec": {k: v for k, v in d["spec"].items() if k != "replicas"}}
+            if d["kind"] == "Deployment" and d["metadata"]["name"] in targets else d for d in documents]
+
+
+def complete_rollout(config, sha, documents, *, current, review, settings, existing="",
+                     bootstrap=False, initial=False, initial_data=None):
+    """Roll out already validated schemas; never execute a migration Job."""
+    foundation = {"ServiceAccount", "ConfigMap", "ExternalSecret", "NetworkPolicy"}
     event_kinds = {"KafkaNodePool", "Kafka", "KafkaTopic"}
     apply([d for d in documents if d["kind"] in event_kinds])
     for document in documents:
         if document["kind"] in {"Kafka", "KafkaTopic"}:
             wait(document)
+        if document["kind"] == "Kafka":
+            wait_kafka_settled(document)
     apply([d for d in documents if d["kind"] == "KafkaUser"])
     for document in documents:
         if document["kind"] == "KafkaUser":
             wait(document)
-    # The ALB controller must create bindings before admission creates application Pods.
+    # Online rollout needs ALB bindings before Pod admission. Maintenance keeps fixed
+    # 503 routes until application readiness, then rebinds and checks public traffic.
     routing = {"Service", "Ingress"}
-    apply([d for d in documents if d["kind"] in routing])
-    wait_alb_bindings()
-    workloads = [d for d in documents if d["kind"] not in foundation | event_kinds | routing | SCALING_KINDS |
+    maintenance = bool(review and review["migration_mode"] == "maintenance-cutover")
+    apply([d for d in documents if d["kind"] in routing and (not maintenance or d["kind"] == "Service")])
+    # maintenance-cutover는 ScaledObject를 다시 걸지 않으므로 manifest의 replicas로 worker를 되살린다.
+    rollout_documents = documents if maintenance else without_keda_replicas(documents)
+    if not maintenance:
+        wait_alb_bindings()
+    workloads = [d for d in rollout_documents if d["kind"] not in foundation | event_kinds | routing | SCALING_KINDS |
                  {"Namespace", "Job", "ScaledObject", "KafkaUser", "TriggerAuthentication"}]
-    # New document-svc calls converter /convert-source-batch. Roll converter out and
-    # confirm readiness before any other workload so documents never see an old converter.
+    # New document-svc publishes ai.convert.command. Roll the converter worker out and
+    # confirm it runs before any other workload so no command waits for an old worker.
     converter = [d for d in workloads if d["kind"] == "Deployment" and d["metadata"]["name"] == CONVERTER_DEPLOYMENT]
     if not converter:
         raise ValueError(f"{CONVERTER_DEPLOYMENT} Deployment가 manifest에 없습니다")
     apply(converter)
     kubectl("rollout", "status", "deployment/" + CONVERTER_DEPLOYMENT, "--timeout=600s")
-    apply([d for d in workloads if d not in converter])
+    reserve_deployment_headroom(documents)
+    apply([d for d in workloads if d["kind"] != "Deployment"])
+    # API surge requests total 400m. One-at-a-time replacement needs at most
+    # 150m and preserves maxUnavailable=0 / PDB minAvailable=1.
+    apis = {"access-svc", "document-svc", "pipeline-api"}
     for document in workloads:
-        if document["kind"] == "Deployment" and document not in converter:
+        if document["kind"] == "Deployment" and document["metadata"]["name"] in apis:
+            apply([document])
             kubectl("rollout", "status", "deployment/" + document["metadata"]["name"], "--timeout=600s")
-    apply([d for d in documents if d["kind"] == "TriggerAuthentication"])
-    apply([d for d in documents if d["kind"] == "ScaledObject"])
-    for document in documents:
-        if document["kind"] == "ScaledObject":
-            wait(document)
-    # Deployment rollout이 끝난 뒤에 건다. 앞서 적용한 Deployment의 replicas가 HPA의
-    # 현재 판단을 잠시 덮으므로, 교체가 끝난 다음 확장 정책을 올려 되돌림을 줄인다.
-    apply([d for d in documents if d["kind"] in SCALING_KINDS])
+    others = [d for d in workloads if d["kind"] == "Deployment" and d not in converter
+              and d["metadata"]["name"] not in apis]
+    apply(others)
+    for document in others:
+        kubectl("rollout", "status", "deployment/" + document["metadata"]["name"], "--timeout=600s")
+    if not review or review["migration_mode"] != "maintenance-cutover":
+        apply([d for d in documents if d["kind"] == "TriggerAuthentication"])
+        apply([d for d in documents if d["kind"] == "ScaledObject"])
+        for document in documents:
+            if document["kind"] == "ScaledObject":
+                wait(document)
+        # Deployment rollout이 끝난 뒤에 건다. 앞서 적용한 Deployment의 replicas가 HPA의
+        # 현재 판단을 잠시 덮으므로, 교체가 끝난 다음 확장 정책을 올려 되돌림을 줄인다.
+        apply([d for d in documents if d["kind"] in SCALING_KINDS])
+    if maintenance:
+        # Keep 503 until every new workload is ready; no mixed-version public traffic.
+        apply([d for d in documents if d["kind"] == "Ingress"])
+        wait_alb_bindings()
     check_public_routes(config)
     if bootstrap:
         if initial:
@@ -659,13 +862,20 @@ def deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fal
         apply([record])
 
 
+def deploy(config, sha, documents, **kwargs):
+    from aws_maintenance import guarded_deploy
+    return guarded_deploy(SimpleNamespace(**globals()),
+                          config, sha, documents, **kwargs)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("render", "bootstrap", "deploy", "rollback"))
+    parser.add_argument("action", choices=("render", "bootstrap", "deploy", "rollback", "recover"))
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--sha", required=True)
     parser.add_argument("--manifest", type=Path, required=True, help="aws_image_release.py fetch로 받은 게시 release manifest")
     parser.add_argument("--review", type=Path, help="검토된 릴리스별 migration/복원 시험 기록 JSON")
+    parser.add_argument("--recovery-plan", type=Path, help="완료된 migration 이후 실패의 감사 해시를 고정한 명시적 복구 계획")
     parser.add_argument("--bootstrap-probe-recovery", action="store_true", help="검토된 Access probe timeout 1→5초 복구만 허용")
     parser.add_argument("--bootstrap-mail-health-recovery", action="store_true", help="SMTP 반복 health 인증 제외 복구만 허용")
     parser.add_argument("--bootstrap-oauth-recovery", action="store_true", help="준비 완료된 최초 deploy에서 Access OAuth Secret 연결 6개 추가만 허용")
@@ -679,6 +889,15 @@ def main():
     else:
         review = json.loads(args.review.read_text()) if args.review and args.action != "rollback" else None
         report_image_changes(documents)
+        if args.action == "recover":
+            if not args.recovery_plan or any((args.bootstrap_probe_recovery, args.bootstrap_mail_health_recovery,
+                                              args.bootstrap_oauth_recovery)):
+                raise ValueError("recover requires an explicit recovery plan and no bootstrap options")
+            from aws_maintenance import complete_migrated_release
+            return complete_migrated_release(SimpleNamespace(**globals()), config, args.sha, documents,
+                review=review, plan=json.loads(args.recovery_plan.read_text()), images=release_images(config, manifest))
+        if args.recovery_plan:
+            raise ValueError("recovery plan is recover-only")
         deploy(config, args.sha, documents, rollback=args.action == "rollback", review=review,
                bootstrap=args.action == "bootstrap", probe_recovery=args.bootstrap_probe_recovery,
                mail_health_recovery=args.bootstrap_mail_health_recovery, oauth_recovery=args.bootstrap_oauth_recovery,

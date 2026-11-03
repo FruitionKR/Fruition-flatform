@@ -46,6 +46,14 @@ spec:
       host: '*'
     - resource:
         type: topic
+        name: ai.convert.command
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
         name: document.edit.event
         patternType: literal
       operations:
@@ -257,6 +265,49 @@ spec:
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
+  name: kafka-converter
+  namespace: fruition
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+    - resource:
+        type: topic
+        name: ai.convert.command
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: ai.convert.command-worker
+        patternType: literal
+      operations:
+      - Read
+      - Describe
+      host: '*'
+    - resource:
+        type: topic
+        name: ai.task.event
+        patternType: literal
+      operations:
+      - Write
+      - Describe
+      host: '*'
+    - resource:
+        type: cluster
+      operations:
+      - IdempotentWrite
+      host: '*'
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
   name: kafka-edit-event-consumer
   namespace: fruition
   labels:
@@ -326,6 +377,13 @@ spec:
       - Describe
       host: '*'
     - resource:
+        type: topic
+        name: ai.convert.command
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
         type: group
         name: ingest-worker
         patternType: literal
@@ -349,6 +407,13 @@ spec:
     - resource:
         type: group
         name: maintenance-task-worker
+        patternType: literal
+      operations:
+      - Describe
+      host: '*'
+    - resource:
+        type: group
+        name: ai.convert.command-worker
         patternType: literal
       operations:
       - Describe

@@ -2,11 +2,12 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FRONTEND_DIR="$ROOT_DIR/../frontend"
+FRONTEND_DIR="$ROOT_DIR/../frontend/web"
 RUNTIME_DIR="$ROOT_DIR/.runtime"
 FRONTEND_PID=""
 
 source "$ROOT_DIR/scripts/lib/runtime.sh"
+source "$ROOT_DIR/scripts/lib/analytics.sh"
 
 log() {
   printf '[front-up] %s\n' "$*"
@@ -77,6 +78,7 @@ main() {
   log "프론트엔드를 시작합니다."
   (
     cd "$FRONTEND_DIR"
+    local_analytics_env "$PWD"
     npm run dev
   ) &
   FRONTEND_PID="$!"

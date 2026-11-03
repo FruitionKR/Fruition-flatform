@@ -4,7 +4,7 @@
 
 > 원문: docs/backlog/local-runbook.md
 
-모든 통합 명령은 `platform/`을 현재 디렉터리로 실행한다. `../frontend/`, `../Access/`, `../Document/`, `../AI/` checkout은 platform과 같은 상위 디렉터리에 둔다. 서비스 단독 실행법은 각 서비스의 `docs/script.md`가 소유한다.
+모든 통합 명령은 `platform/`을 현재 디렉터리로 실행한다. `../frontend/`, `../Access/`, `../Document/`, `../AI/` checkout은 platform과 같은 상위 디렉터리에 둔다. frontend의 Next.js 프로젝트는 저장소 루트가 아니라 `../frontend/web/`에 있으므로(Fruition-frontend#163) 스크립트는 그 디렉터리에서 `npm`을 실행한다. 서비스 단독 실행법은 각 서비스의 `docs/script.md`가 소유한다.
 
 ## 1. 사전 조건
 
@@ -96,7 +96,7 @@ ORDER BY outcome_label, action;
 | 스크립트 | 역할 | 유지되는 항목 |
 |---|---|---|
 | `scripts/bootstrap.sh` | 필수 도구와 프론트엔드 의존성을 준비한다. `dev-up.sh`가 자동 호출한다. | 해당 없음 |
-| `scripts/dev-up.sh` | 공용 인프라, PDF 변환기, 호스트 백엔드, AI API·워커, 프론트엔드를 순서대로 시작한다. | 실행 중인 supervisor가 전체 호스트 프로세스를 관리한다. |
+| `scripts/dev-up.sh` | 공용 인프라, PDF 변환 worker, 호스트 백엔드, AI API·워커, 프론트엔드를 순서대로 시작한다. | 실행 중인 supervisor가 전체 호스트 프로세스를 관리한다. |
 | `scripts/dev-down.sh` | 이 프로젝트가 등록한 supervisor와 Compose 컨테이너를 종료한다. | 기본값은 로컬 볼륨을 유지한다. |
 | `scripts/front-up.sh` / `front-down.sh` | 프론트엔드만 시작하거나 종료한다. | 백엔드와 Compose 서비스는 유지한다. |
 | `scripts/back-up.sh` / `back-down.sh` | 공용 인프라와 호스트 백엔드를 시작하거나 백엔드만 종료한다. | 종료 후 공용 인프라와 볼륨은 유지한다. |
@@ -118,10 +118,10 @@ ORDER BY outcome_label, action;
 ./scripts/dev-down.sh
 ```
 
-PDF 변환기 `markitdown`(:8010)은 `dev-up.sh`가 함께 시작하고 `dev-down.sh`가 함께 종료한다. 단독으로 다룰 때는 다음 명령을 쓴다. `--env-file`을 생략하면 LLM API key 없이 기동되어 `dev-up.sh`와 동작이 달라진다.
+PDF 변환 worker `markitdown`은 HTTP 포트 없이 Kafka `ai.convert.command`를 소비한다. `dev-up.sh`가 함께 시작하고 `dev-down.sh`가 함께 종료한다. kafka·minio·postgresql 서비스 이름으로 접속하므로 infra·AI와 같은 compose project로 다룬다. `--env-file`을 생략하면 LLM API key 없이 기동되어 `dev-up.sh`와 동작이 달라진다.
 
 ```sh
-docker compose --env-file infra/.env -f infra/compose.converter.yml up -d
+docker compose --env-file infra/.env -f infra/compose.infra.yml -f infra/compose.ai.yml -f infra/compose.converter.yml up -d --no-deps markitdown
 ```
 
 지표 확인용 Prometheus·Grafana도 선택 스택이다. 자세한 절차는 3-6을 본다.
@@ -188,11 +188,11 @@ curl http://localhost:8082/actuator/prometheus   # Prometheus 스크레이프용
 
 ### 3-3. ai-svc (converter → pipeline-api·워커)
 
-PDF→Markdown 변환기(markitdown, :8010).
+PDF→Markdown 변환 worker(markitdown). HTTP 포트가 없어 health 확인 대신 로그로 기동을 본다.
 
 ```sh
-docker compose -f infra/compose.converter.yml up -d
-curl http://localhost:8010/health
+docker compose --env-file infra/.env -f infra/compose.infra.yml -f infra/compose.ai.yml -f infra/compose.converter.yml up -d --no-deps markitdown
+docker logs fruition-markitdown   # "converter worker 기동" 확인
 ```
 
 실제 PDF를 Gemini로 변환하는 Docker E2E는 공용 스크립트로 실행한다. 스크립트는
@@ -233,7 +233,7 @@ lint 결과에 materialized 또는 merged promotion이 있고, 해당 산출물 
 검증 후 converter를 종료한다.
 
 ```sh
-docker compose --env-file infra/.env -f infra/compose.converter.yml down
+docker compose --env-file infra/.env -f infra/compose.infra.yml -f infra/compose.ai.yml -f infra/compose.converter.yml stop markitdown
 ```
 
 pipeline-api(:8000), 임베딩 서버(embedding-server, query·agent worker가 내부 호출)와 워커(ingest/query/agent/maintenance task worker, edit-event-consumer). 백엔드 기동 후 실행(스키마 순서 보장). query·agent worker는 임베딩 서버가 BGE-M3 적재를 마쳐 healthy가 된 뒤 시작한다.
@@ -278,9 +278,10 @@ AI image를 처음 만들거나 AI 코드·의존성이 바뀐 경우에만 위 
 `--build`를 추가한다.
 기존 image로 재검증할 때는 `--build` 없이 `up -d`를 사용한다.
 
-### 3-3-1. 기존 AI 데이터 maintenance cutover (종료)
+### 3-3-1. 기존 AI 데이터 maintenance cutover 종료
 
-core_db의 Wiki·Agent·Skill·checkpoint를 ai_db로 옮기던 일회성 절차는 끝났다. core_db 사본은 Fruition-document#97(V74)이 지우고, 이 절차에 쓰던 `wiki_db_cutover.py`는 Fruition-ai에서 삭제했다. 신규·기존 환경 모두 따로 할 일이 없다.
+Wiki·Agent·Skill·checkpoint의 ai_db 이전 절차는 종료됐다. Document V74는 core_db의 레거시 AI 테이블 23개를 제거하며, AI 저장소의 `wiki_db_cutover.py`도 삭제됐다. 현재 릴리스에서는 복사·권한 전환 스크립트를 실행하지 않는다.
+구버전 설치를 올릴 때는 V74 적용 여부를 먼저 확인하고 [유지보수 전환 절차](aws-maintenance-cutover.md)의 검토·백업·마이그레이션 경로를 따른다.
 
 문서 편집 저장소는 V39가 비어 있는 `document_edit_states`와 `document_content_versions`에 편집 revision을 초기화하는 fresh PostgreSQL cutover다. 기존 Mongo 편집 데이터와 두 PostgreSQL table의 폐기는 대상별 승인 후 수행하며, 기존 편집 상태·write receipt·pending edit event를 import하거나 dual-write하지 않는다. 초기화된 편집 상태의 본문·revision·receipt·content version·asset/reference·적용 감사·outbox를 하나의 core DB transaction으로 기록한다. 결정 근거: [adr/0016](https://github.com/FruitionKR/Fruition-document/blob/main/docs/adr/0016-consolidate-document-body-into-postgres.md).
 
@@ -293,7 +294,7 @@ core_db의 Wiki·Agent·Skill·checkpoint를 ai_db로 옮기던 일회성 절차
 또는 수동 실행.
 
 ```sh
-cd ../frontend
+cd ../frontend/web
 npm install
 npm run dev
 ```
@@ -350,7 +351,7 @@ kafka-exporter는 `compose.infra.yml`이 만드는 네트워크(`fruition-mvp-de
 | 순서 | 패널 | 정상 | 이상 신호 |
 |---|---|---|---|
 | ① | **Traffic** | 평소 수준 | 다른 세 신호를 해석하는 기준선이다. 이것 없이는 지연·에러가 유입 증가 탓인지 코드 탓인지 구분할 수 없다 |
-| ② | **Saturation** | lag 0(또는 올랐다 복귀), DB 사용률 0.5 이하 | lag이 안 내려오면 워커 정지·반복 실패. 점선은 KEDA `lagThreshold`(5). DB 사용률이 1.0에 붙으면 풀(기본 10개)이 마른 것으로, API 지연의 원인이 DB가 아니라 풀인 경우다 |
+| ② | **Saturation** | lag 0(또는 올랐다 복귀), DB 사용률 0.5 이하 | lag이 안 내려오면 워커 정지·반복 실패. 점선은 KEDA `lagThreshold`(ingest 5, agent 6, query 10). DB 사용률이 1.0에 붙으면 풀(기본 10개)이 마른 것으로, API 지연의 원인이 DB가 아니라 풀인 경우다 |
 | ③ | **Latency** | 배포 전과 비슷 | p95·p99가 평소의 3~5배. 트래픽이 없으면 선이 끊기는데 정상이다(rate 분모가 0) |
 | ④ | **Errors** | 0 | 건수가 아니라 **비율**이다. 4xx는 뺀다 — 미로그인 401은 정상 동작이라 신호가 되지 않는다 |
 
@@ -409,11 +410,7 @@ docker compose -f infra/compose.monitoring.yml down
 ./scripts/dev-down.sh
 ```
 
-converter 종료.
-
-```sh
-docker compose -f infra/compose.converter.yml down
-```
+converter는 `dev-down.sh`가 같은 compose project로 함께 종료한다.
 
 모니터링 종료.
 
@@ -456,12 +453,15 @@ LIVE_TASK_ENV_FILE="$PWD/infra/.env" RUN_LIVE_TASK_E2E=1 ../AI/pipeline/.venv/bi
 
 `infra/postgres/init-db-isolation.sh`는 `DB_ISOLATION_TARGET=all/access/core`로 생성 범위를
 선택한다. `all`은 단일 PostgreSQL을 쓰는 로컬 기본값이다. AWS Access RDS에는 `access`,
-Core RDS에는 `core`를 명시한다. `access`는 Access DB·두 role, `core`는 Core/AI DB·네 role만
+Core RDS에는 `core`를 명시한다. `access`는 Access DB·두 role, `core`는 Core/AI DB·다섯 role(AI converter 포함)만
 생성한다. 선택하지 않은 서비스의 환경변수는 필요하지 않다.
 
 - 각 선택 서비스: `{ACCESS,CORE,AI}_DB_NAME`, `*_DB_RUNTIME_USER`, `*_DB_RUNTIME_PASSWORD`,
   `*_DB_MIGRATION_USER`, `*_DB_MIGRATION_PASSWORD`를 제공한다. 이름 중복, 관리 DB 이름,
   관리자와 같은 role, 빈 값은 DB 변경 전에 거부한다.
+- AI 선택 시 converter 전용 role: `AI_DB_CONVERTER_USER`(기본 `ai_converter`), `AI_DB_CONVERTER_PASSWORD`를
+  추가로 제공한다. init은 ai_db CONNECT와 public USAGE만 준다. `ai_model_usage`·작업 journal(`ai_task_runs` 등) 권한은 테이블을 만든 AI 스키마
+  적용 경로가 `AI_DB_CONVERTER_ROLE`로 부여하므로, 다시 init해도 원장·journal 권한은 지워지지 않는다.
 - 관리자: `POSTGRES_ADMIN_USER`, `POSTGRES_ADMIN_PASSWORD`를 제공한다. PostgreSQL 컨테이너
   최초 초기화에서는 `POSTGRES_USER`, `POSTGRES_PASSWORD`를 사용한다. 비밀번호 대신
   libpq `PGPASSFILE`도 사용할 수 있다.
@@ -488,7 +488,14 @@ membership이 있으면 상속 권한을 임의로 변경하지 않고 초기화
 
 검증기는 고유한 임시 테이블을 migration 계정으로 만들고 종료 시 삭제한다. runtime의
 SELECT/INSERT/UPDATE/DELETE·sequence 사용, public CREATE 거부, 관리자 권한·membership
-부재와 같은 인스턴스의 선택 DB 간 양방향 CONNECT/read/write 거부를 확인한다.
+부재와 같은 인스턴스의 선택 DB 간 양방향 CONNECT/read/write 거부를 확인한다. converter는 ai_db 접속,
+public CREATE·임시 테이블 read/write 거부를 확인하고, `ai_model_usage`가 있으면 원장 SQL 형태의 INSERT·id 기준
+UPDATE(롤백)는 성공하고 `SELECT *`·DELETE와 귀속 컬럼(`user_id`·`run_id`·`workspace_id`) UPDATE는 거부되는지 본다.
+
+기존 로컬 볼륨은 초기화 스크립트를 다시 실행하지 않으므로 converter role이 없다. compose로 PostgreSQL 컨테이너를
+다시 만든 뒤(`docker compose --env-file infra/.env -f infra/compose.infra.yml up -d postgresql`)
+`docker exec fruition-postgresql-dev bash /docker-entrypoint-initdb.d/10-db-isolation.sh`로 init만 다시 실행하고
+pipeline-api를 재기동해 원장·journal 권한을 부여한다.
 Access 단독 대상에서는 교차 DB 쌍이 없으므로 이 항목은 수행하지 않는다. 서로 다른 RDS의
 네트워크/인증 경계는 이 스크립트가 검증하지 않으며 실제 AWS 배포 검증에서 별도로 확인한다.
 
@@ -508,11 +515,19 @@ Job 내부 명령과 입력:
 |---|---|---|
 | Access | `java -jar app.jar --migrate-only` | `POSTGRES_HOST/PORT`, `ACCESS_DB_NAME`, `ACCESS_DB_MIGRATION_USER/PASSWORD` |
 | Document | `java -jar app.jar --migrate-only` | `POSTGRES_HOST/PORT`, `CORE_DB_NAME`, `CORE_DB_MIGRATION_USER/PASSWORD` |
-| AI | `python -m app.modules.wiki_ingestion.infrastructure.migrate_ai_schema` | `AI_DB_MIGRATION_URL` |
+| AI | `python -m app.modules.wiki_ingestion.infrastructure.migrate_ai_schema` | `AI_DB_MIGRATION_URL`, `AI_DB_CONVERTER_ROLE=ai_converter` |
 
 Java Job은 migration 이력이 없는 비어 있지 않은 DB를 자동 baseline하지 않는다. bootstrap으로 생성한 빈 DB 또는 기존 Flyway 이력이 정상인 소유 DB를 대상으로 한다. AI 명령은 Agent·Skill·checkpoint를 포함한 `db/ai_schema.sql`을 트랜잭션으로 적용한다.
 
-Secrets Manager 값은 초기 생성 이후 Terraform `ignore_changes`로 보존된다. 기존 환경에 새 MFA/SMTP 키가 없으면 운영자가 Secret 원본에 추가해야 하며 Terraform 재실행만으로 채워졌다고 가정하지 않는다. MFA 키를 임의로 교체하면 기존 TOTP secret 복호화가 불가능하므로 기존 키를 유지·보관한다. Secret 값 변경 후 ExternalSecret 동기화를 확인하고 해당 workload만 재시작한다. 실제 회전·복구 검증은 AWS에서 별도로 수행한다.
+converter worker는 selective repair 호출 전에 `ai_model_usage`에 먼저 기록하고 작업 journal(`ai_task_runs` SELECT·INSERT·UPDATE, `ai_task_changes`·`ai_purged_scopes` SELECT)에 batch run을 등록하므로 전용 계정 `ai_converter`로 ai_db에 접속한다. worker 배포 전에 `AI_DB_CONVERTER_ROLE`을 설정한 `ai-migration` Job이 journal 권한을 부여해야 하며, 배포 DB 사전검증은 이 권한 범위만 허용한다(`fruition-converter`의 `AI_DATABASE_URL` ← `fruition/app`의 `AI_CONVERTER_DATABASE_URL`, `aws-app-database` NetworkPolicy 5432 허용). 기존 환경에는 다음 순서로 적용한다.
+
+1. `terraform apply`로 `random_password.db_role["ai_converter"]`를 만든다.
+2. 기존 Secret은 `ignore_changes`로 키가 추가되지 않으므로 `fruition/app`에 `AI_DB_CONVERTER_PASSWORD`와 `AI_CONVERTER_DATABASE_URL`(`postgresql://ai_converter:<비밀번호>@<core endpoint>:5432/ai_db?sslmode=require`)을 보안 입력 경로로 추가한다. 속성이 없으면 `fruition-converter` ExternalSecret 동기화 전체가 실패한다.
+3. Core endpoint에 `AI_DB_CONVERTER_USER=ai_converter`, `AI_DB_CONVERTER_PASSWORD`를 더해 `DB_ISOLATION_TARGET=core`로 init·validate를 다시 실행한다.
+4. 부여 코드가 들어간 AI 이미지로 `ai-migration` Job을 실행해 원장·journal 권한을 부여한다(release의 `migration_mode`가 `expand-only`여야 Job이 실행된다).
+5. converter worker를 배포하고 Pod 로그에서 consumer group `ai.convert.command-worker` 기동을 확인한다. KEDA ScaledObject `converter`는 lag 1당 1 Pod, 1~3개로 늘린다. SIGTERM 뒤에도 command를 끝내도록 `terminationGracePeriodSeconds`는 7800초다.
+
+Secrets Manager 값은 초기 생성 이후 Terraform `ignore_changes`로 보존된다. 기존 환경에 새 MFA/SMTP 키(환율용 `KOREAEXIM_AUTH_KEY` 포함, 비우면 document-svc 환율 수집 작업이 꺼진다)가 없으면 운영자가 Secret 원본에 추가해야 하며 Terraform 재실행만으로 채워졌다고 가정하지 않는다. MFA 키를 임의로 교체하면 기존 TOTP secret 복호화가 불가능하므로 기존 키를 유지·보관한다. Secret 값 변경 후 ExternalSecret 동기화를 확인하고 해당 workload만 재시작한다. 실제 회전·복구 검증은 AWS에서 별도로 수행한다.
 
 로컬 Compose/kind는 자기 서비스의 자동 migration을 유지한다. kind는 `base/secret.yaml`과 별도로 MFA 키 Secret을 생성해야 Access를 시작할 수 있다. 새 로컬 환경에서만 키를 생성하고 기존 환경에서는 보관한 키 파일을 사용한다. 저장소 밖 권한 600 파일에 줄바꿈 없는 Base64 32바이트를 보관한 뒤 다음처럼 적용한다(키 값을 화면에 출력하지 않는다).
 
@@ -545,7 +560,7 @@ bash scripts/tests/test-service-migrations.sh
 | app_domain | 화면(EKS Fargate)과 같은 출처 API를 ALB 경로로 나누는 공개 앱 호스트(예: fruitiontest.accesscam.org). Terraform `app_domain`과 같은 값 |
 | domain | api. 및 access.를 붙일 공개 도메인 |
 | acm_cert_arn | 두 API 호스트와 `app_domain`을 모두 포함하는 발급 완료 인증서 ARN |
-| document_storage_role_arn, pipeline_storage_role_arn | `storage_role_arns` output의 각 서비스 ARN |
+| document_storage_role_arn, pipeline_storage_role_arn, converter_storage_role_arn | `storage_role_arns` output의 각 서비스 ARN |
 | waf_acl_arn | Terraform `waf_acl_arn` output. 같은 계정·서울 regional ACL 필수 |
 | vpc_cidr, alb_subnet_cidr_1, alb_subnet_cidr_2, smtp_port | `network_deploy_inputs` output의 문자열 값 |
 
@@ -567,7 +582,7 @@ terraform output -json의 각 output은 value 필드로 제공된다. 스토리�
 
 1. 입력과 임시 Kustomize 렌더를 검증한다. 미치환 값과 릴리스에 기록되지 않은 업무 이미지를 거부한다(schema 3은 서비스별 `@digest`, schema 1·2는 릴리스 ID 태그).
 2. AWS 인증 계정·EKS ARN/버전/상태와 현재 kubeconfig endpoint를 대조하고, 플랫폼의 fruition namespace·gp3 StorageClass 존재와 aws-secrets-manager ClusterSecretStore Ready를 읽기 전용으로 확인한다. ServiceAccount·ConfigMap·ExternalSecret·앱 NetworkPolicy만 적용하고 모든 ExternalSecret Ready를 확인한다. 제한 정책 적용 후 기존 `internal-only-ingress` 정책을 이름으로 삭제한다. `kubectl apply`만으로는 과거 정책이 제거되지 않으며 삭제 실패 시 DB gate와 rollout을 진행하지 않는다.
-3. access-db-preflight, document-db-preflight, ai-db-preflight Job이 실제 runtime/migration 로그인, DB·public 스키마·테이블 소유권, 관리자 권한/membership 부재, runtime DML·DDL/교차 CONNECT 경계를 검사한다. 서비스별 runtime/migration 키 두 개만 참조하며 관리자 키는 받지 않는다. app.kubernetes.io/component=db-preflight, app=<서비스>-db-preflight Pod label을 네트워크 정책의 대상으로 사용한다.
+3. access-db-preflight, document-db-preflight, ai-db-preflight Job이 실제 runtime/migration 로그인, DB·public 스키마·테이블 소유권, 관리자 권한/membership 부재, runtime DML·DDL/교차 CONNECT 경계를 검사한다. 서비스별 runtime/migration 키 두 개만 참조하며 관리자 키는 받지 않는다. ai-db-preflight는 `fruition-converter`의 `AI_DATABASE_URL`로 `ai_converter`에도 접속해 같은 URI 계약과, 허용 범위(`ai_model_usage` INSERT·열 단위 UPDATE/SELECT, `ai_task_runs` SELECT·INSERT·UPDATE, `ai_task_changes`·`ai_purged_scopes` SELECT) 밖의 테이블·sequence 권한이 없는지 확인한다(원장·journal 권한 부여 전에도 통과한다). app.kubernetes.io/component=db-preflight, app=<서비스>-db-preflight Pod label을 네트워크 정책의 대상으로 사용한다.
 4. 세 migration Job Complete를 확인한다. 실패하면 runtime 적용을 중단한다. 이후 동일 사전검증으로 실제 변경된 public schema의 pg_dump --schema-only SHA256을 수집한다.
 5. Kafka와 모든 KafkaTopic Ready를 확인한 뒤 runtime을 적용한다. 앱 Pod 생성 전에 access-svc·document-svc·frontend의 ALB TargetGroupBinding 준비를 기다린다. 렌더된 모든 Deployment의 rollout 완료와 모든 KEDA ScaledObject Ready를 확인한다.
 6. `check_public_routes`로 공개 경로를 검증한다. api.<domain>·access.<domain>·`app_domain`의 `/v3/api-docs`와 `/internal/`이 404인지, `app_domain`의 `/healthz`와 `/`가 200인지 확인한다. 화면 확인은 `curl --connect-to`로 ALB 호스트명에 직접 연결하므로 DNS 전환 전에도 수행된다.
@@ -598,7 +613,7 @@ AWS에서는 worker Pod의 노드와 API Pod의 노드가 다른 상태에서 ru
 
 ### AWS 저장소 IAM·Redis ACL·네트워크 검증
 
-AWS는 `S3_CREDENTIALS_MODE=aws`, `AWS_REGION=ap-northeast-2`를 사용한다. Document와 AI의 ServiceAccount에 서로 다른 `storage_role_arns`를 연결하며 기존 MinIO SDK가 AWS 환경 자격증명(session token 포함) → web identity/IAM provider 순서로 갱신한다. AWS 모드는 로컬 S3 키를 사용하지 않고 미리 생성한 bucket만 사용한다. 로컬 Compose/kind는 기본 `local` 모드와 기존 MinIO 키를 유지한다. Access와 converter는 S3 role이 없다. 일반 Kubernetes API token 자동 마운트는 꺼져 있고 IRSA webhook의 audience=sts.amazonaws.com projected token은 별도로 주입된다.
+AWS는 `S3_CREDENTIALS_MODE=aws`, `AWS_REGION=ap-northeast-2`를 사용한다. Document·AI·converter의 ServiceAccount에 서로 다른 `storage_role_arns`를 연결하며 기존 MinIO SDK가 AWS 환경 자격증명(session token 포함) → web identity/IAM provider 순서로 갱신한다. AWS 모드는 로컬 S3 키를 사용하지 않고 미리 생성한 bucket만 사용한다. 로컬 Compose/kind는 기본 `local` 모드와 기존 MinIO 키를 유지한다. Access는 S3 role이 없고, converter role은 `sources/documents/*` 읽기와 `tmp/convert/*` 쓰기만 갖는다. 일반 Kubernetes API token 자동 마운트는 꺼져 있고 IRSA webhook의 audience=sts.amazonaws.com projected token은 별도로 주입된다.
 
 Redis는 ElastiCache 7.1(Redis OSS 7.0 호환) single primary, 저장·전송 암호화, 서비스별 ACL 사용자와 비밀번호를 사용한다. `REDIS_USERNAME`은 workload별 access/document/pipeline, `REDIS_PASSWORD`는 자기 Secret에서만 받고 `REDIS_SSL=true`다. SMTP port는 비밀이 아니므로 Secrets Manager에서 투영하지 않고 배포 JSON→ConfigMap과 NetworkPolicy에서 같은 값을 쓴다. `smtp_port`는 0이 아닌 숫자로 시작하는 정수 문자열이고 Terraform output과 동일하게 입력한다. ALB 두 CIDR은 서로 겹치지 않는 VPC의 진부분 subnet이어야 한다.
 
@@ -707,7 +722,7 @@ eks_addon_versions에는 vpc-cni/coredns/kube-proxy/aws-ebs-csi-driver/metrics-s
 
 Helm install/upgrade는 스크립트의 --version과 --wait를 사용한다. ALB controller에는 실제 EKS VPC ID를 지정해 metadata 추론에 의존하지 않는다. 플랫폼 관리자는 k8s/platform/aws의 Namespace, gp3 StorageClass, ClusterSecretStore, 앱 배포 Role/RoleBinding 및 이름이 제한된 read-only ClusterRole/Binding을 설치한다. gp3는 ebs.csi.aws.com, 암호화, WaitForFirstConsumer, Retain이며 AWS KafkaNodePool은 class=gp3다.
 
-앱 EKS access entry는 fruition:deployers 그룹만 부여한다. runner 호스트 role은 fruition:operators 그룹으로 fruition namespace의 Pod 생성·삭제·로그와 Deployment 조회만 받는 별도 access entry를 가진다(운영 DB 일회성 조회용, `k8s/platform/aws/deploy-rbac.yaml`의 operations-query). runner 호스트에서 `bash scripts/aws-ops-db-query.sh "SELECT ..."`로 사용하며, SELECT/WITH 문 하나만 받아 일회성 `postgres:16-alpine` Pod로 core_db에 `PGSSLMODE=require` 조회 후 Pod를 삭제한다(`AWS_REGION`, `EKS_CLUSTER`로 대상 변경). 주의: 스크립트는 비밀번호를 `fruition-secret` Secret에서 읽지만 AWS overlay가 만드는 runtime Secret은 `fruition-document`이므로 실제 실행 전 Secret 이름을 확인한다. 앱 role은 fruition namespace의 ConfigMap/ServiceAccount/Service/Deployment/Job/Ingress/NetworkPolicy/ExternalSecret/Kafka/ScaledObject를 배포하고 Pod 상태·로그를 조회한다. Secrets/Role/Binding이나 다른 namespace를 직접 읽고 쓰지 못한다. 플랫폼 자원은 이름이 지정된 읽기만 허용한다. 앱 코드도 허용 kind·namespace 밖 apply를 거부한다. 플랫폼 RBAC는 앱 workflow에 넣지 않는다.
+앱 EKS access entry는 fruition:deployers 그룹만 부여한다. runner 호스트 role은 fruition:operators 그룹으로 기존 Pod 상태·로그와 Deployment 조회만 받는 별도 access entry를 가진다(`k8s/platform/aws/deploy-rbac.yaml`의 operations-query). 임의 Pod 생성은 Secret 주입과 명령 실행으로 이어지므로 생성·삭제 권한을 제거했다. `aws-ops-db-query.sh`는 별도 Pod 생성 권한을 가진 관리 주체 전용이며 조회 역할에서 실행하면 권한 검사 단계에서 중단된다. SQL 접두사 검사와 PGOPTIONS는 실수 방지일 뿐 DB 권한을 강제하지 않는다. 운영 조회를 다시 위임하려면 전용 읽기 전용 DB 계정과 서버 측 제한을 먼저 갖춰야 한다. 앱 role은 fruition namespace의 ConfigMap/ServiceAccount/Service/Deployment/Job/Ingress/NetworkPolicy/ExternalSecret/Kafka/ScaledObject를 배포하고 Pod 상태·로그를 조회한다. Secrets/Role/Binding이나 다른 namespace를 직접 읽고 쓰지 못한다. 플랫폼 자원은 이름이 지정된 읽기만 허용한다. 앱 코드도 허용 kind·namespace 밖 apply를 거부한다. 플랫폼 RBAC는 앱 workflow에 넣지 않는다.
 
     # 플랫폼 관리자 또는 별도 권한 검증 담당자가 실제 AWS에서 수행할 검증
     kubectl auth can-i create deployments -n fruition --as-group=fruition:deployers --as=permission-check

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INFRA_DIR="$ROOT_DIR/infra"
-FRONTEND_DIR="$ROOT_DIR/../frontend"
+FRONTEND_DIR="$ROOT_DIR/../frontend/web"
 PIPELINE_DIR="$ROOT_DIR/../AI/pipeline"
 ENV_FILE="$INFRA_DIR/.env"
 ENV_EXAMPLE="$INFRA_DIR/.env.example"

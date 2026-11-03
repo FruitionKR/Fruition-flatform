@@ -64,11 +64,11 @@ kubectl kustomize k8s/overlays/aws   # 렌더 확인
 ## 알려진 제약
 
 - 실행 로그는 S3 `pipeline-runs/{run_id}/pipeline.log`, 상태와 manifest는 ai_db에 저장한다. API·ingest는 독립 `emptyDir` scratch를 사용하며 공유 PVC·same-node affinity가 없다.
-- AI worker·converter·edit-event-consumer·embedding-server는 AI Worker Spot node group의 label/taint에 맞춰 배치한다. node group은 0대에서 Cluster Autoscaler로 확장하며 실제 scale-from-zero·Spot 중단 복구는 AWS에서 검증해야 한다.
+- Kafka AI worker·converter·embedding-server는 AI Worker Spot node group의 label/taint에 맞춰 배치하고, KEDA가 일이 없으면 0으로 줄여 node group도 0대로 내려간다. 첫 작업은 노드 확보·이미지 pull·모델 적재를 기다린다(수 분). edit-event-consumer·pipeline-agent-worker는 상시 1개라 일반 노드에 둔다. 실제 scale-from-zero·Spot 중단 복구는 AWS에서 검증해야 한다.
 - Strimzi broker 1대 — AZ 장애 시 중단 허용, 복구는 operation 재발행 절차(§8.3).
 
 
-AWS overlay는 서비스별 Redis ACL 비밀번호·TLS, Document/AI IRSA, 앱/Job NetworkPolicy를 포함한다. `storage_role_arns`와 `network_deploy_inputs` Terraform output을 배포 JSON에 반영한다. SMTP port는 JSON에서 ConfigMap과 정책으로 동일하게 렌더된다. DB 사전검증 전에 네트워크 정책을 적용한다. 구체적인 prefix·metadata 공유 예외와 실제 AWS 검증은 [아키텍처](../../../docs/architecture.md#aws-저장소통신-권한), [실행 절차](../../../docs/script.md#aws-저장소-iamredis-acl네트워크-검증)를 따른다.
+AWS overlay는 서비스별 Redis ACL 비밀번호·TLS, Document/AI/converter IRSA, 앱/Job NetworkPolicy를 포함한다. `storage_role_arns`와 `network_deploy_inputs` Terraform output을 배포 JSON에 반영한다. SMTP port는 JSON에서 ConfigMap과 정책으로 동일하게 렌더된다. DB 사전검증 전에 네트워크 정책을 적용한다. 구체적인 prefix·metadata 공유 예외와 실제 AWS 검증은 [아키텍처](../../../docs/architecture.md#aws-저장소통신-권한), [실행 절차](../../../docs/script.md#aws-저장소-iamredis-acl네트워크-검증)를 따른다.
 
 앱 deployer는 namespace·StorageClass·ClusterSecretStore·RBAC를 적용하지 않는다. EKS fruition:deployers 그룹으로 fruition namespace의 허용된 리소스만 변경한다. ExternalSecret API는 v1, AWS Kafka는 4.3.0과 암호화 gp3 StorageClass를 사용한다. CRD/controller의 실제 동작과 server-side dry-run은 별도 AWS gate다.
 

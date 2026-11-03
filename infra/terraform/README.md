@@ -7,7 +7,7 @@
 | VPC / EKS | 2 AZ, General 2대, AI Worker 0–2대 Spot, 명시적 API CIDR·addon build |
 | RDS | Access/Core PostgreSQL 16 인스턴스 2대, core/ai는 Core RDS 내 별도 DB·role |
 | Redis | 7.1 single primary replication group, TLS·서비스별 ACL |
-| S3 | versioning, Document/AI IRSA prefix 권한, 정적 앱 key 없음 |
+| S3 | versioning, Document/AI/converter IRSA prefix 권한, 정적 앱 key 없음 |
 | ECR / GitHub | 네 repository immutable SHA, 제한된 ECR/DescribeCluster role, namespace RBAC 그룹 |
 | Secrets Manager | DB·Redis·내부 token·MFA/SMTP 원본, 서비스별 ExternalSecret 투영 |
 | Budget | 계정 전체 월 실제 비용 $400/$550/$650 초과 → SNS → Lambda → Discord, 실패 이벤트 SQS 14일 보관 |
@@ -37,9 +37,15 @@ OAuth 준비: 신규 `fruition/app` Secret에는 `GOOGLE_CLIENT_ID`, `GOOGLE_CLI
 
 이 준비만으로 소셜 로그인이 활성화되지는 않는다. 실제 값 입력 후 `k8s/overlays/aws/external-secrets.yaml`의 Access용 매핑 배포, 동기화 확인, 검토된 앱 배포 절차에 따른 Access Pod 재시작이 별도로 필요하다. `OAUTH_FRONTEND_REDIRECT_URI`와 `CORS_ALLOWED_ORIGINS`는 비밀값이 아니며 AWS ConfigMap과 배포 설정의 프론트 도메인으로 관리한다. 운영 환경에 localhost 값을 복사하지 않는다.
 
-S3의 Document/AI object 권한은 prefix로 제한하지만 신규 객체 404 판별에 필요한 bucket ListBucket metadata는 공유한다. RDS Single-AZ, Redis primary 1개, Kafka broker 1개는 사용자 피드백 profile의 단일 장애점이다. HA·관측성·provider 공정성·실측 부하와 복구는 별도 남은 범위다. ESO 2.9.0의 공식 테스트 표는 Kubernetes 1.36이며 EKS 1.35 실호환 검증을 아직 하지 않았다.
+환율 준비: 신규 `fruition/app` Secret에는 `KOREAEXIM_AUTH_KEY`(한국수출입은행 환율 OpenAPI 인증키)를 빈 값으로 생성하며 `fruition-document` ExternalSecret이 읽는다. 기존 환경은 `ignore_changes` 때문에 apply로 추가되지 않으므로 **document ExternalSecret 매핑을 배포하기 전에** 이 속성을 콘솔/보안 입력 경로로 먼저 추가한다(없으면 ExternalSecret 동기화가 실패한다). 빈 값이면 환율 수집 작업이 꺼진다. 값 입력 후 동기화를 확인하고 document-svc만 재시작한다. document-svc의 `oapi.koreaexim.go.kr:443` 호출은 기존 `aws-app-https` 정책이 허용하므로 NetworkPolicy 변경은 없다.
+
+S3의 Document/AI/converter object 권한은 prefix로 제한하지만 신규 객체 404 판별에 필요한 bucket ListBucket metadata는 공유한다. RDS Single-AZ, Redis primary 1개, Kafka broker 1개는 사용자 피드백 profile의 단일 장애점이다. HA·관측성·provider 공정성·실측 부하와 복구는 별도 남은 범위다. ESO 2.9.0의 공식 테스트 표는 Kubernetes 1.36이며 EKS 1.35 실호환 검증을 아직 하지 않았다.
 
 비용 보호 임계값과 적용 후 WAF 연결 검증은 [비용 보호 운영](../../docs/aws-deployment-costs.md#추가한-비용-보호-설정과-적용-방법)을 따른다. Terraform apply만으로 ALB에 WAF가 연결되지는 않으며 앱 배포 JSON에 `waf_acl_arn`을 반영해야 한다.
+
+ALB 접근 로그는 이 모듈의 `alb_access_logs` 출력에 있는 전용 버킷으로 보낸다. 버킷·전달 정책·배포 역할의 메타데이터 조회 권한을 먼저 적용한 뒤 Ingress를 배포한다. 배포기는 계정·서울 리전으로 동일한 버킷 이름을 계산하므로 배포 JSON에 새 비밀값을 추가하지 않는다. 실제 ALB 설정은 Controller annotation으로 관리하며 이 모듈에서 ALB를 중복 생성하지 않는다. 일반 로그는 30일 만료, `evidence/`는 별도 보존이므로 수명주기 변경 시 주의한다.
+
+접근 코드 게이트는 기본 `waf_access_code_required=true`로 도메인·코드가 비면 계획을 거부한다. `app_domain`은 실제 Ingress Host와 대조한다. 접근 코드 없이 운영하는 의도적인 배포만 `waf_access_code_required=false`를 명시한다. 민감 파일 경로 규칙의 최초 Count 검증은 `waf_sensitive_paths_block=false`, 최종 운영 차단은 기본값 true다. [운영 적용·검증 기록](../../docs/aws-waf-review-2026-10-22.md#7-2026-10-22-운영-적용-기록)을 참고한다.
 
 CloudWatch addon·로그 14일 보존·운영 대시보드·Discord 장애/복구 알림은 [CloudWatch 운영 절차](../../docs/aws-observability.md)를 따른다. 실제 웹훅 입력과 수신 시험은 별도이며 ALB 지표는 생성 후 suffix를 등록해야 한다.
 

@@ -58,6 +58,11 @@ class FrontendRoutingTest(unittest.TestCase):
             "/api/query/runs/req_1/events": "document-svc",
             "/api/meetings/m_1/live": "document-svc",
             "/api/ai-models": "document-svc",
+            # 프로필 사진만 access, 나머지 /api/users 경로는 document다.
+            "/api/users/usr_1/avatar": "access-svc",
+            "/api/users/me/credits": "document-svc",
+            "/api/users/me/usage/charges": "document-svc",
+            "/api/users/me/credit-orders": "document-svc",
             "/api/document-transport": "frontend",
             "/": "frontend",
             "/oauth/callback": "frontend",

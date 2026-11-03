@@ -27,6 +27,7 @@ plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현�
 | ALB 이름표를 넣은 뒤 생긴 입구 경보 3개예요. | `aws_cloudwatch_metric_alarm.operations["alb_5xx"]`, `["alb_latency"]`, `["alb_requests"]` |
 | 절전 중 요청이 오면 컴퓨터를 다시 깨우는 장치예요(1분마다 확인). | `aws_dynamodb_table.request_wake[0]`, `aws_iam_role.request_wake[0]`, `aws_iam_role_policy.request_wake[0]`, `aws_cloudwatch_log_group.request_wake[0]`, `aws_lambda_function.request_wake[0]`, `aws_lambda_function_event_invoke_config.request_wake[0]`, `aws_lambda_permission.request_wake[0]`, `aws_cloudwatch_event_rule.request_wake[0]`, `aws_cloudwatch_event_target.request_wake[0]`, `aws_cloudwatch_metric_alarm.request_wake_errors[0]` |
 | 문지기에 화면 주소 API의 접근 코드 확인 규칙과 AWS 관리 규칙이 더해졌어요. 새 준비물이 아니라 185번 설정이 바뀌는 것이에요. | `aws_wafv2_web_acl.cost_guard` (`frontend-access-code`, AWS 관리 규칙 4종) |
+| 파일 변환 서비스만 쓰는 출입증과 허가 규칙이에요. 원본 읽기와 변환 결과 쓰기(`tmp/convert/`)만 되고, 결과는 1일 뒤 지워져요. | `module.storage_irsa["converter"].aws_iam_role.this[0]`, `module.storage_irsa["converter"].aws_iam_role_policy_attachment.this["storage"]`, `aws_iam_policy.storage["converter"]`, `aws_s3_bucket_lifecycle_configuration.storage`(`expire-tmp-convert`) |
 
 ## 어려운 이름은 이렇게 읽어요
 
@@ -199,6 +200,11 @@ plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현�
 | 93 | DB를 둘 안쪽 구역을 정해요. | `aws_db_subnet_group.main` | DB 배치용 private subnet 집합 |
 | 94 | EKS 컴퓨터만 DB의 정해진 문으로 오게 해요. | `aws_security_group.rds` | EKS 노드에서 PostgreSQL 5432 접근만 허용 |
 
+RDS PostgreSQL 로그 그룹(`aws_cloudwatch_log_group.rds["access"]`, `["core"]`)도 14일 보존으로 Terraform이 관리합니다.
+기존 그룹은 tfvars에 `rds_log_groups_to_import = ["access", "core"]`를 지정하면 선언적 `import` 블록이 가져옵니다.
+`plan`에서 import 대상과 보존 기간 변경을 검토한 뒤 적용합니다. 이미 state에 있는 대상은 다시 import하지 않습니다.
+신규 설치는 기본값 `[]`를 유지해 그룹을 생성합니다. 존재하지 않는 그룹을 import 목록에 넣으면 plan이 실패합니다.
+
 ## Redis — 8개
 
 | 번호 | 쉬운 설명 | 설정에서 찾을 이름 (운영자용) | 정확한 설정 (운영자용) |
@@ -227,7 +233,7 @@ plan 이후 더해져 번호 목록에는 없는 준비물입니다. 모두 현�
 | 111 | document 서비스가 S3의 정해진 이름 범위에서 읽고 쓰고 지우게 해요. | `aws_iam_policy.storage["document"]` | document 서비스별 S3 prefix 읽기·쓰기·삭제 권한 |
 | 112 | pipeline 서비스가 S3의 정해진 이름 범위에서 읽고 쓰고 지우게 해요. | `aws_iam_policy.storage["pipeline"]` | pipeline 서비스별 S3 prefix 읽기·쓰기·삭제 권한 |
 | 113 | 문서와 AI 파일을 넣을 보관함이에요. | `aws_s3_bucket.storage` | 문서·AI 파일 저장용 버킷, 전용 KMS 키(SSE-KMS)로 암호화 |
-| 114 | 임시 파일과 끝내지 못한 업로드를 7일 기준으로 정리해요. 예전 파일은 남을 수 있어요. | `aws_s3_bucket_lifecycle_configuration.storage` | tmp/ 현재 버전 7일 만료·미완료 multipart 7일 정리 |
+| 114 | 임시 파일과 끝내지 못한 업로드를 7일 기준으로 정리해요. 예전 파일은 남을 수 있어요. | `aws_s3_bucket_lifecycle_configuration.storage` | tmp/ 현재 버전 7일 만료·미완료 multipart 7일 정리, 회의 전사 checkpoint(`pipeline-runs/meeting-transcription/`) 1일 만료(`expire-meeting-transcription-checkpoints`) |
 | 115 | 파일 보관함을 누구나 열지 못하게 해요. | `aws_s3_bucket_public_access_block.storage` | 앱 버킷 public access 모두 차단 |
 | 116 | 파일을 고쳐도 예전 모습을 남겨요. | `aws_s3_bucket_versioning.storage` | 파일 이전 버전 보존 활성화 |
 

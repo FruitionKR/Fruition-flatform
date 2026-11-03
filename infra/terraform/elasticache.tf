@@ -24,7 +24,7 @@ resource "aws_security_group" "redis" {
 # AWS가 반환하는 정규화된 ACL 표기로 불필요한 반복 업데이트를 방지한다.
 locals {
   redis_acl = {
-    access   = "on resetchannels -@all +ping +info +hello +client|setname (~auth:mfa:attempts:* ~auth:email-availability:* resetchannels -@all +eval +evalsha +incr +expire +ttl) (~oauth:exchange:* resetchannels -@all +set +getdel) (~authz:role:* resetchannels -@all +scan +del)"
+    access   = "on resetchannels -@all +ping +info +hello +client|setname (~auth:mfa:attempts:* ~auth:email-availability:* ~auth:email-verification-request:* resetchannels -@all +eval +evalsha +incr +expire +ttl) (~auth:login:ip:* ~auth:login:fail:* ~auth:password-change:fail:* resetchannels -@all +eval +evalsha +incr +expire +get +del) (~oauth:exchange:* ~oauth:link:* ~oauth:link-code:* ~oauth:signup:* resetchannels -@all +set +getdel) (~authz:role:* resetchannels -@all +scan +del)"
     document = "on resetchannels -@all +ping +info +hello +client|setname (~authz:role:* resetchannels -@all +get +set) (~query:* resetchannels &query-events -@all +get +set +incr +expire +pexpire +del +exists +lrange +rpush +ltrim +eval +evalsha +publish +subscribe +unsubscribe)"
     pipeline = "on ~wiki:concept-index:* resetchannels -@all +ping +hello +client|setname +get +setex +del"
   }
@@ -66,11 +66,12 @@ resource "aws_elasticache_replication_group" "main" {
   engine               = "redis"
   engine_version       = "7.1"
   node_type            = "cache.t4g.micro"
-  # 단일 노드는 죽으면 세션·권한 projection·SSE relay가 함께 사라져 전원 로그아웃이 된다.
-  # 복제본 1개와 자동 장애 조치로 노드 교체·장애를 견딘다. 두 AZ에 나눠 배치한다.
-  num_cache_clusters         = 2
-  automatic_failover_enabled = true
-  multi_az_enabled           = true
+  # 비용 절감을 위해 복제본 없이 단일 노드로 운영한다.
+  # 노드 장애·교체 시 세션·권한 projection·SSE relay가 사라져 재로그인이 필요할 수 있다.
+  # 자동 장애 조치와 Multi-AZ는 노드 2개 이상이 필요하므로 끈다.
+  num_cache_clusters         = 1
+  automatic_failover_enabled = false
+  multi_az_enabled           = false
   port                       = 6379
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true

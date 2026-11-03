@@ -82,6 +82,8 @@ spec:
                   name: fruition-secret
                   key: TAVILY_API_KEY
             - {name: AI_COMMAND_TOPIC, value: ai.query.command}
+            # 한 pod가 동시에 처리하는 메시지 수. 같은 Kafka 키(세션·워크스페이스)는 순서대로 하나씩 처리한다(ai ADR 0036).
+            - {name: AI_TASK_CONCURRENCY, value: "8"}
             - {name: AI_COMMAND_CONSUMER_GROUP, value: query-task-worker}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
@@ -171,6 +173,8 @@ spec:
                   name: fruition-secret
                   key: TAVILY_API_KEY
             - {name: AI_COMMAND_TOPIC, value: ai.agent.command}
+            # 한 pod가 동시에 처리하는 메시지 수. 같은 Kafka 키(세션·워크스페이스)는 순서대로 하나씩 처리한다(ai ADR 0036).
+            - {name: AI_TASK_CONCURRENCY, value: "4"}
             - {name: AI_COMMAND_CONSUMER_GROUP, value: agent-task-worker}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
@@ -191,6 +195,9 @@ spec:
       labels:
         app: maintenance-task-worker
     spec:
+      # SIGTERM 뒤에도 진행 중인 작업을 끝내고 종료한다. 회의 녹음 전사 마감(MEETING_TRANSCRIPTION_DEADLINE_SECONDS 1500초)에
+      # 종료·정리 여유 300초를 더한 값(= worker max_poll_interval 1800초)이다. 짧으면 rollout·scale-down 때 전사가 끊겨 재전달된다.
+      terminationGracePeriodSeconds: 1800
       containers:
         - name: maintenance-task-worker
           image: fruition-mvp-dev-pipeline-api:latest
@@ -260,7 +267,18 @@ spec:
                   name: fruition-secret
                   key: TAVILY_API_KEY
             - {name: AI_COMMAND_TOPIC, value: ai.maintenance.command}
+            # 한 pod가 동시에 처리하는 메시지 수. 같은 Kafka 키(세션·워크스페이스)는 순서대로 하나씩 처리한다(ai ADR 0036).
+            - {name: AI_TASK_CONCURRENCY, value: "1"}
             - {name: AI_COMMAND_CONSUMER_GROUP, value: maintenance-task-worker}
           resources:
-            requests: {cpu: 100m, memory: 256Mi}
+            # /tmp 1.5Gi와 로그·쓰기 계층 여유를 스케줄러에 예약한다.
+            requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 2Gi}
             limits: {memory: 1Gi}
+          # 회의 녹음 전사: 녹음(최대 500MiB) 다운로드와 디코딩한 chunk WAV를 /tmp에 둔다.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1536Mi

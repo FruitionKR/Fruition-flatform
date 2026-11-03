@@ -39,6 +39,7 @@ for service in ACCESS CORE AI; do
     -e "${service}_DB_RUNTIME_PASSWORD=runtime_test_password" -e "${service}_DB_MIGRATION_USER=${lower}_migration"
     -e "${service}_DB_MIGRATION_PASSWORD=migration_test_password")
 done
+env_args+=(-e AI_DB_CONVERTER_USER=ai_converter -e AI_DB_CONVERTER_PASSWORD=converter_test_password)
 docker exec "${env_args[@]}" "$container" bash /work/init-db-isolation.sh >"$test_dir/bootstrap.log" 2>&1
 cd "$test_dir"
 for service in access document; do
@@ -92,7 +93,7 @@ if env -i PATH="$PATH" "$python_bin" -m app.modules.wiki_ingestion.infrastructur
 fi
 rg -q '필수 migration 설정 누락: AI_DB_MIGRATION_URL' "$test_dir/ai-missing.log"
 for repeat in 1 2; do
-  env -i PATH="$PATH" AI_DB_MIGRATION_URL="postgresql://ai_migration:migration_test_password@127.0.0.1:$port/ai_db" \
+  env -i PATH="$PATH" AI_DB_MIGRATION_URL="postgresql://ai_migration:migration_test_password@127.0.0.1:$port/ai_db" AI_DB_CONVERTER_ROLE=ai_converter \
     "$python_bin" -m app.modules.wiki_ingestion.infrastructure.migrate_ai_schema
 done
 env -i PATH="$PATH" AI_DATABASE_URL="postgresql://ai_runtime:runtime_test_password@127.0.0.1:$port/ai_db" \

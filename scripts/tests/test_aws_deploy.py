@@ -52,6 +52,7 @@ CONFIG = {
     "account_id": "123456789012",
     "document_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-document-storage",
     "pipeline_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-pipeline-storage",
+    "converter_storage_role_arn": "arn:aws:iam::123456789012:role/fruition-converter-storage",
     "vpc_cidr": "10.0.0.0/16",
     "alb_subnet_cidr_1": "10.0.101.0/24",
     "alb_subnet_cidr_2": "10.0.102.0/24",
@@ -86,6 +87,10 @@ class FakeCluster:
         if args[:2] == ["aws", "eks"]:
             return json.dumps({"cluster": {"arn": f"arn:aws:eks:ap-northeast-2:{CONFIG['account_id']}:cluster/fruition-eks",
                                            "endpoint": "https://fixture.eks.amazonaws.com", "version": "1.35", "status": "ACTIVE"}})
+        if args[:3] == ["aws", "s3api", "get-bucket-location"]:
+            return json.dumps({"LocationConstraint": "ap-northeast-2"})
+        if args[:3] == ["aws", "s3api", "get-bucket-policy-status"]:
+            return json.dumps({"PolicyStatus": {"IsPublic": False}})
         if "config" in args and "view" in args:
             return "https://fixture.eks.amazonaws.com"
         if args[0] == "kubectl" and args[3:5] == ["delete", "networkpolicy"]:
@@ -98,6 +103,13 @@ class FakeCluster:
             return self.statuses[path]
         if "logs" in args:
             return self.fingerprint
+        if "get" in args and "pods" in args and "job-name=fruition-deploy-headroom" in args:
+            return json.dumps({"items": [{"status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}]}}]})
+        if "get" in args and "kafka/kafka" in args:
+            return json.dumps({"metadata": {"generation": 2}, "status": {
+                "observedGeneration": 2, "conditions": [{"type": "Ready", "status": "True"}]}})
+        if "get" in args and "pods" in args and any(a.startswith("strimzi.io/cluster=kafka") for a in args):
+            return json.dumps({"items": [{"metadata": {}, "status": {"conditions": [{"type": "Ready", "status": "True"}]}}]})
         if "get" in args and "namespace" in args:
             return json.dumps({"metadata": {"labels": {"elbv2.k8s.aws/pod-readiness-gate-inject": "enabled", "pod-security.kubernetes.io/enforce": "baseline"}}})
         if "get" in args and "targetgroupbindings" in args:
@@ -115,6 +127,29 @@ class FakeCluster:
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_log_destination_preflight_rejects_wrong_region_public_or_missing_policy(self):
+        for region, policy in [("us-east-1", False), ("ap-northeast-2", True), ("ap-northeast-2", None)]:
+            with patch.object(deploy, "run", side_effect=[json.dumps({"LocationConstraint": region}),
+                                                        json.dumps({"PolicyStatus": {"IsPublic": policy}})]) as run:
+                with self.assertRaises(ValueError):
+                    deploy.verify_alb_log_destination(CONFIG)
+                self.assertIn("--expected-bucket-owner", run.call_args.args[0])
+
+    def test_access_logging_uses_account_scoped_destination_and_preserves_attributes(self):
+        for account in ("123456789012", "999999999999"):
+            config = copy.deepcopy(CONFIG)
+            for key, value in config.items():
+                config[key] = value.replace(CONFIG["account_id"], account)
+            documents = deploy.render(config, SHA, MANIFEST)
+            ingress = next(d for d in documents if d["kind"] == "Ingress")
+            raw = ingress["metadata"]["annotations"]["alb.ingress.kubernetes.io/load-balancer-attributes"]
+            attributes = dict(item.split("=", 1) for item in raw.split(","))
+            self.assertEqual("true", attributes["access_logs.s3.enabled"])
+            self.assertEqual(f"fruition-alb-access-logs-{account}-ap-northeast-2", attributes["access_logs.s3.bucket"])
+            self.assertEqual("alb", attributes["access_logs.s3.prefix"])
+            self.assertEqual("true", attributes["routing.http.drop_invalid_header_fields.enabled"])
+            self.assertEqual("120", attributes["idle_timeout.timeout_seconds"])
+
     def test_waf_is_required_and_bound_to_same_account_and_region(self):
         documents = deploy.render(CONFIG, SHA, MANIFEST)
         ingress = next(d for d in documents if d["kind"] == "Ingress")
@@ -251,6 +286,86 @@ class DeploymentTests(unittest.TestCase):
         self.assertLess(converter_apply[0], converter_ready)
         self.assertTrue(others and all(converter_ready < i for i in others))
         self.assertEqual({"document-svc", "access-svc", "pipeline-api"} - {name for _, name in applied}, set())
+
+    def test_api_rollouts_wait_before_starting_the_next_api(self):
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+        apis = {"access-svc", "document-svc", "pipeline-api"}
+        starts = [(i, d["metadata"]["name"]) for i, (_, docs) in enumerate(fake.events)
+                  for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] in apis]
+        release = next(i for i, (args, _) in enumerate(fake.events)
+                       if args[3:6] == ["delete", "job", "fruition-deploy-headroom"])
+        self.assertEqual(3, len(starts))
+        self.assertLess(release, starts[0][0])
+        for (start, name), (next_start, _) in zip(starts, starts[1:]):
+            ready = next(i for i, (args, _) in enumerate(fake.events)
+                         if args[3:6] == ["rollout", "status", "deployment/" + name])
+            self.assertLess(start, ready)
+            self.assertLess(ready, next_start)
+
+    def test_kafka_broker_roll_finishes_before_api_rollout(self):
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+        settled = max(i for i, (args, _) in enumerate(fake.events)
+                      if any(a.startswith("strimzi.io/cluster=kafka") for a in args))
+        first_api = next(i for i, (_, docs) in enumerate(fake.events)
+                         for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "access-svc")
+        self.assertLess(settled, first_api)
+
+    def test_kafka_wait_requires_new_generation_ready_and_rolled_broker(self):
+        kafka = {"kind": "Kafka", "metadata": {"name": "kafka"}}
+        def cr(observed, ready="True"):
+            return json.dumps({"metadata": {"generation": 3}, "status": {
+                "observedGeneration": observed, "conditions": [{"type": "Ready", "status": ready}]}})
+        def pods(*items):
+            return json.dumps({"items": list(items)})
+        ready = {"metadata": {}, "status": {"conditions": [{"type": "Ready", "status": "True"}]}}
+        rolling = {"metadata": {"deletionTimestamp": "2026-11-02T00:00:00Z"}, "status": ready["status"]}
+        responses = [cr(2), pods(ready),            # 옛 generation의 Ready
+                     cr(3, "False"), pods(ready),   # reconcile 중
+                     cr(3), pods(rolling),          # broker 종료 중
+                     cr(3), pods(),                 # 새 broker 생성 전
+                     cr(3), pods(ready)]
+        with patch.object(deploy, "kubectl", side_effect=responses) as kube, patch.object(deploy.time, "sleep") as sleep:
+            deploy.wait_kafka_settled(kafka)
+        self.assertEqual(10, kube.call_count)
+        self.assertEqual(4, sleep.call_count)
+
+    def test_kafka_wait_times_out_before_rolling_apis(self):
+        stale = json.dumps({"metadata": {"generation": 3}, "status": {"observedGeneration": 2, "conditions": []}})
+        clock = iter([0, 0, 601])
+        with patch.object(deploy, "kubectl", side_effect=[stale, json.dumps({"items": []})]), \
+                patch.object(deploy.time, "monotonic", lambda: next(clock)), patch.object(deploy.time, "sleep"), \
+                self.assertRaises(TimeoutError):
+            deploy.wait_kafka_settled({"kind": "Kafka", "metadata": {"name": "kafka"}})
+
+    def test_keda_workers_keep_live_replicas_and_release_record_keeps_manifest(self):
+        # 0으로 줄어 있는 worker를 배포가 1로 되돌리면 AI 노드가 깨어난다. API replicas(HPA 하한)는 그대로 적용한다.
+        fake = FakeCluster()
+        with patch.object(deploy, "run", fake.run):
+            deploy.deploy(CONFIG, SHA, self.documents, review=REVIEW)
+        targets = {d["spec"]["scaleTargetRef"]["name"] for d in self.documents if d["kind"] == "ScaledObject"}
+        self.assertEqual({"ingest-worker", "query-task-worker", "agent-task-worker", "maintenance-task-worker",
+                          "converter", "embedding-server"}, targets)
+        applied = {d["metadata"]["name"]: d for d in fake.applied("Deployment")}
+        for name in targets:
+            self.assertNotIn("replicas", applied[name]["spec"], name)
+        for name in ("access-svc", "document-svc", "pipeline-api", "edit-event-consumer", "pipeline-agent-worker"):
+            self.assertIn("replicas", applied[name]["spec"], name)
+        record = next(d for d in fake.applied("ConfigMap") if d["metadata"]["name"] == deploy.release_name(SHA))
+        saved = {d["metadata"]["name"]: d for d in yaml.safe_load_all(record["data"]["manifest"]) if d["kind"] == "Deployment"}
+        self.assertEqual(1, saved["converter"]["spec"]["replicas"])
+        self.assertEqual(1, next(d for d in self.documents if d["metadata"]["name"] == "converter")["spec"]["replicas"])
+
+    def test_init_container_images_must_be_release_pinned(self):
+        documents = copy.deepcopy(self.documents)
+        worker = next(d for d in documents if d["kind"] == "Deployment" and d["metadata"]["name"] == "query-task-worker")
+        deploy.check_manifest(documents, SHA)
+        worker["spec"]["template"]["spec"]["initContainers"][0]["image"] = "python:3"
+        with self.assertRaisesRegex(ValueError, "immutable"):
+            deploy.check_manifest(documents, SHA)
 
     def test_converter_rollout_failure_prevents_document_rollout(self):
         fake = FakeCluster(fail="deployment/converter")
@@ -398,8 +513,10 @@ class DeploymentTests(unittest.TestCase):
             env = pod["spec"]["containers"][0]["env"]
             refs = [item["valueFrom"]["secretKeyRef"] for item in env if "valueFrom" in item]
             runtime = "pipeline" if service == "ai" else service
-            self.assertEqual({f"fruition-{runtime}", f"fruition-{service}-migration"}, {ref["name"] for ref in refs})
-            self.assertEqual(2, len(refs))
+            # AI는 converter 원장·journal 전용 계정도 확인한다.
+            converter = {"fruition-converter"} if service == "ai" else set()
+            self.assertEqual({f"fruition-{runtime}", f"fruition-{service}-migration"} | converter, {ref["name"] for ref in refs})
+            self.assertEqual(2 + len(converter), len(refs))
             self.assertFalse(any("ADMIN" in ref["key"] for ref in refs))
 
     def test_existing_sha_requires_same_config_manifest_and_actual_schema(self):

@@ -1,5 +1,5 @@
 # MinIO 대체. 문서 원본·snapshot·AI 파일 저장 (§8.5).
-# 서비스별 IRSA와 object prefix 권한을 사용한다. Access·converter는 S3 권한이 없다.
+# 서비스별 IRSA와 object prefix 권한을 사용한다. Access는 S3 권한이 없고, converter는 원본 읽기·tmp/convert 쓰기만 갖는다.
 resource "random_id" "bucket" {
   byte_length = 4
 }
@@ -72,7 +72,7 @@ resource "aws_s3_bucket_cors_configuration" "document_upload" {
   }
 }
 
-# 임시 파일 lifecycle (tmp/ prefix 7일 후 삭제)
+# 임시 파일 lifecycle (tmp/ prefix 7일, 변환 결과 tmp/convert/ 1일, 회의 전사 checkpoint 1일 후 삭제)
 resource "aws_s3_bucket_lifecycle_configuration" "storage" {
   bucket = aws_s3_bucket.storage.id
 
@@ -84,6 +84,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
       days_after_initiation = 7
     }
   }
+  # 회의 녹음(meetings/)의 미완료 multipart도 위 버킷 전체 규칙이 7일 뒤 정리한다.
 
   rule {
     id     = "expire-tmp"
@@ -98,19 +99,87 @@ resource "aws_s3_bucket_lifecycle_configuration" "storage" {
       noncurrent_days = 7
     }
   }
+
+  # converter가 쓰고 document가 병합 직후 읽는 변환 결과. 취소로 남은 object도 여기서 지운다.
+  rule {
+    id     = "expire-tmp-convert"
+    status = "Enabled"
+    filter {
+      prefix = "tmp/convert/"
+    }
+    expiration {
+      days = 1
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  # 회의 전사 chunk checkpoint는 전사문(개인정보)을 담는다. 정상 종료 시 ai가 지우고, 남은 것은 여기서 지운다.
+  rule {
+    id     = "expire-meeting-transcription-checkpoints"
+    status = "Enabled"
+    filter {
+      prefix = "pipeline-runs/meeting-transcription/"
+    }
+    expiration {
+      days = 1
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
+  # 버전 관리 버킷에서 삭제해도 남는 이전 버전·delete marker를 정리한다(ADR 0023).
+  # 규칙이 겹치면 tmp/는 더 짧은 expire-tmp(7일)가 먼저 적용된다.
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+    filter {}
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+    expiration {
+      expired_object_delete_marker = true
+    }
+  }
+
+  # AI 실행 로그는 사용자별로 지우지 않고 기간 만료로 정리한다(AI role에 로그 삭제 권한 없음).
+  rule {
+    id     = "expire-pipeline-runs"
+    status = "Enabled"
+    filter {
+      prefix = "pipeline-runs/"
+    }
+    expiration {
+      days = 30
+    }
+    # 만료로 생긴 delete marker와 덮어쓴 이전 버전이 남지 않게 1일 뒤 제거한다.
+    # 겹치는 규칙은 더 짧은 기간(1일)이 먼저 적용되고, delete marker는 전체 규칙이 정리한다.
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
 }
 
 locals {
   storage_permissions = {
     document = {
-      read   = ["sources/documents/*", "assets/*", "wiki/*", "tmp/document-uploads/*"]
-      write  = ["sources/documents/*", "assets/*", "tmp/document-uploads/*"]
-      delete = ["sources/documents/*", "assets/*"]
+      read   = ["sources/documents/*", "assets/*", "wiki/*", "tmp/document-uploads/*", "tmp/convert/*", "meetings/*"]
+      write  = ["sources/documents/*", "assets/*", "tmp/document-uploads/*", "meetings/*"]
+      delete = ["sources/documents/*", "assets/*", "meetings/*"]
     }
     pipeline = {
-      read   = ["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*"]
+      # meetings/*는 회의 녹음 전사용 읽기 전용, 전사 chunk checkpoint는 pipeline-runs/meeting-transcription/*에 쓰고 지운다.
+      read   = ["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*", "meetings/*"]
       write  = ["wiki/*", "agent-runs/*", "pipeline-runs/*"]
-      delete = ["wiki/*", "agent-runs/*"]
+      delete = ["wiki/*", "agent-runs/*", "pipeline-runs/meeting-transcription/*"]
+    }
+    # converter: 원본 PDF 범위 읽기와 변환 결과 쓰기만 한다. 삭제 권한은 없다.
+    converter = {
+      read   = ["sources/documents/*"]
+      write  = ["tmp/convert/*"]
+      delete = []
     }
   }
 }
@@ -134,14 +203,21 @@ resource "aws_iam_policy" "storage" {
   name     = "${var.project}-${each.key}-storage"
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      { Effect = "Allow", Action = each.key == "document" ? ["s3:GetObject", "s3:GetObjectVersion"] : ["s3:GetObject"], Resource = [for p in each.value.read : "${aws_s3_bucket.storage.arn}/${p}"] },
-      { Effect = "Allow", Action = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"], Resource = [for p in each.value.write : "${aws_s3_bucket.storage.arn}/${p}"] },
-      { Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in each.value.delete : "${aws_s3_bucket.storage.arn}/${p}"] },
-      # 없는 객체의 GET을 403 대신 404로 판별해야 AI journal이 신규 생성을 기록한다.
-      { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [aws_s3_bucket.storage.arn] },
-      # SSE-KMS 객체 읽기/쓰기용 — storage CMK에만 한정.
-      { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = [aws_kms_key.storage.arn] }
-    ]
+    Statement = concat(
+      [
+        { Effect = "Allow", Action = each.key == "document" ? ["s3:GetObject", "s3:GetObjectVersion"] : ["s3:GetObject"], Resource = [for p in each.value.read : "${aws_s3_bucket.storage.arn}/${p}"] },
+        { Effect = "Allow", Action = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"], Resource = [for p in each.value.write : "${aws_s3_bucket.storage.arn}/${p}"] },
+      ],
+      # 삭제 권한이 없는 서비스(converter)는 빈 Resource statement를 만들지 않는다.
+      length(each.value.delete) > 0 ? [
+        { Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in each.value.delete : "${aws_s3_bucket.storage.arn}/${p}"] },
+      ] : [],
+      [
+        # 없는 객체의 GET을 403 대신 404로 판별해야 AI journal이 신규 생성을 기록한다.
+        { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [aws_s3_bucket.storage.arn] },
+        # SSE-KMS 객체 읽기/쓰기용 — storage CMK에만 한정.
+        { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = [aws_kms_key.storage.arn] },
+      ],
+    )
   })
 }

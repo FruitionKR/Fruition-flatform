@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INFRA_DIR="$ROOT_DIR/infra"
-FRONTEND_DIR="$ROOT_DIR/../frontend"
+FRONTEND_DIR="$ROOT_DIR/../frontend/web"
 ENV_FILE="$INFRA_DIR/.env"
 ENV_EXAMPLE="$INFRA_DIR/.env.example"
 COMPOSE_FILE="$INFRA_DIR/compose.infra.yml"
@@ -17,6 +17,7 @@ ACCESS_PID=""
 FRONTEND_PID=""
 
 source "$ROOT_DIR/scripts/lib/runtime.sh"
+source "$ROOT_DIR/scripts/lib/analytics.sh"
 
 log() {
   printf '[dev-up] %s\n' "$*"
@@ -201,11 +202,11 @@ start_infra() {
 }
 
 start_converter() {
-  # PDF→Markdown 변환기. document-svc가 convert 요청 시 127.0.0.1:8010으로 호출한다.
-  log "PDF 변환기(markitdown)를 시작합니다."
+  # PDF→Markdown 변환 worker. Kafka ai.convert.command를 소비하므로 HTTP 포트가 없다.
+  # kafka·minio·postgresql 서비스 이름을 쓰도록 infra와 같은 compose project로 올린다.
+  log "PDF 변환 worker(markitdown)를 시작합니다."
   # 코드 변경이 이미지에 반영되도록 항상 build를 거친다(변경 없으면 cache로 빠르게 끝난다).
-  docker compose --env-file "$ENV_FILE" -f "$CONVERTER_COMPOSE_FILE" up -d --build
-  wait_for_url "http://localhost:8010/health" "PDF 변환기" 120
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$PIPELINE_COMPOSE_FILE" -f "$CONVERTER_COMPOSE_FILE" up -d --build --no-deps markitdown
 }
 
 start_pipeline() {
@@ -225,6 +226,7 @@ start_backend() {
   log "document-svc를 시작합니다. Java 21: $java21_home"
   (
     cd "$ROOT_DIR/../Document"
+    local_analytics_env "$PWD"
     SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-local}" \
       SERVICE_ENV_FILE="$ENV_FILE" JAVA_HOME="$java21_home" ./gradlew bootRun -Porg.gradle.java.installations.paths="$java21_home" \
       2>&1 | tee -a "$LOGS_DIR/document-svc.log"
@@ -236,6 +238,7 @@ start_backend() {
   log "access-svc를 시작합니다. Java 21: $java21_home"
   (
     cd "$ROOT_DIR/../Access"
+    local_analytics_env "$PWD"
     SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-local}" \
       SERVICE_ENV_FILE="$ENV_FILE" JAVA_HOME="$java21_home" ./gradlew bootRun -Porg.gradle.java.installations.paths="$java21_home" \
       2>&1 | tee -a "$LOGS_DIR/access-svc.log"
@@ -257,6 +260,7 @@ start_frontend() {
   log "프론트엔드를 시작합니다."
   (
     cd "$FRONTEND_DIR"
+    local_analytics_env "$PWD"
     npm run dev 2>&1 | tee -a "$LOGS_DIR/frontend.log"
   ) &
   FRONTEND_PID="$!"
@@ -268,7 +272,7 @@ ensure_ports_available() {
   local port
 
   # 8082·8083은 backend actuator 전용 관리 포트다.
-  for port in 3000 8000 8010 8080 8081 8082 8083; do
+  for port in 3000 8000 8080 8081 8082 8083; do
     if runtime_port_in_use "$port"; then
       fail "다른 실행 환경이 이미 포트를 사용 중입니다: $port. 해당 환경을 먼저 종료하세요."
     fi
@@ -310,7 +314,6 @@ main() {
   - Document-svc: http://localhost:8080
   - Access-svc:   http://localhost:8081
   - Pipeline:     http://localhost:8000
-  - Converter:    http://localhost:8010 (PDF→Markdown)
   - Swagger:      http://localhost:8080/swagger-ui.html (document-svc)
                   http://localhost:8081/swagger-ui.html (access-svc)
                   통합 열람은 ./scripts/swagger-up.sh 후 http://localhost:8090

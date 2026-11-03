@@ -10,6 +10,10 @@ from urllib import request, error
 
 
 def validate_review(review, sha):
+    if isinstance(review, dict) and review.get("migration_mode") == "maintenance-cutover":
+        from aws_maintenance import validate_maintenance_review
+        validate_maintenance_review(review, sha)
+        return
     evidence = "installation_test_url" if isinstance(review, dict) and review.get("migration_mode") == "initial-install" else "compatibility_test_url"
     required = {"release_sha", "migration_mode", evidence, "restore_test_url"}
     if not isinstance(review, dict) or set(review) != required:
