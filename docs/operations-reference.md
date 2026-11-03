@@ -511,7 +511,7 @@ base(`k8s/base/configmap.yaml`)에 AWS patch(`k8s/overlays/aws/configmap-aws.yam
 | access JWT 검증 | `JWT_PUBLIC_KEY` 외 | production은 RSA 공개 키 필수 | 비밀 | AP:223-227 |
 | Redis timeout | `REDIS_CONNECT_TIMEOUT` / `REDIS_COMMAND_TIMEOUT` | 2s / 2s | 같음 | AP:147-148 |
 | AI 공급자 | - | `openai,gemini,claude` | 같음 | AP:93 |
-| 복원 미리보기 서명 키 | `RESTORE_PREVIEW_TOKEN_SECRET` | 빈 값이면 Pod마다 무작위 키 | **설정 안 됨** ⚠ | AP:122 |
+| 복원 미리보기 서명 키 | `RESTORE_PREVIEW_TOKEN_SECRET` | 빈 값이면 `INTERNAL_CALLBACK_TOKEN`에서 파생 (모든 Pod 같은 키, document `deb5a22`) | 설정 안 됨 (파생 키 사용) | AP:122 |
 | 환율 API | `KOREAEXIM_ENDPOINT` / `KOREAEXIM_AUTH_KEY` | 수출입은행 URL / 비밀 (비면 갱신 건너뜀) | 비밀 있음 | AP:176-177 |
 
 **업로드 한도**
@@ -620,6 +620,7 @@ CSP는 middleware에서 요청마다 nonce를 붙여 만듭니다. `default-src 
 |---|---|---|---|---|
 | `AI_LIMIT_ENABLED` | `false` | `true` | `k8s/overlays/aws/configmap-aws.yaml:34` → 배포 | 코드 운영 반영, 스위치 꺼짐 |
 | `AI_LIMIT_DAILY_TOKENS` | 10,000,000 (기본값) | 10,000,000 | ConfigMap에 키 추가 → 배포 | 위와 같음 |
+| `SPEECH_SYNTHESIS_ENABLED` (document) | `false` | `true` | `k8s/overlays/aws/configmap-aws.yaml` → 배포 후 document-svc 재시작 | 채팅 답변 듣기(TTS) 비용 스위치. `false`면 합성 403 `SPEECH_SYNTHESIS_DISABLED`, 화면 듣기 버튼 숨김. 음성 입력·회의 받아쓰기는 영향 없음 (document #200, frontend #235, platform #148) |
 | `UPLOAD_LIMITS_ENABLED` | 켜짐 (키 없음) | `true` | ConfigMap에 `"false"` 추가 → 배포 | 운영 |
 | `UPLOAD_USER_QUOTA_BYTES` | 5GB | 5GB | ConfigMap | 운영 |
 | `UPLOAD_MAX_PDF_BYTES` | 100MB | 100MB | ConfigMap. WAF 본문 규칙, multipart 한도와 함께 확인 | 운영 |
@@ -633,7 +634,7 @@ CSP는 middleware에서 요청마다 nonce를 붙여 만듭니다. `default-src 
 | 업로드 시 자동 ingest | 워크스페이스별 `auto_ingest_on_upload`, 기본 꺼짐 | 꺼짐 | 화면의 워크스페이스 설정(OWNER). 조회 실패 시 꺼짐, 60초 캐시 | 운영 |
 | 에이전트 계획 자동 승인 | 사용자별 `agent_auto_approval_settings`(`content_edit`, `organize`), 기본 꺼짐 | 꺼짐 | 사용자 설정 API | **운영 반영** (document #195 / V93, ai #191) |
 | Skill `requires_source` | 코드 동작 | | - | **운영 반영** (ai #192, document #181~#193) |
-| PDF 그림 설명 | 없음 | | - | **미병합.** 로컬 브랜치 `feat/pdf-restore-figure-captions`에만 있고 원격 브랜치·PR이 없습니다 |
+| PDF 그림 설명 (opt-in) | 없음 | | - | **dev 병합, 운영 미배포** (ai #196, document #199, access #57, frontend #234) |
 | `AGENT_SKILLS_ENABLED` | `true` | `false` | ConfigMap | 운영 |
 | `SKILL_API_ENABLED` | `true` | `true` | ConfigMap | 운영 |
 | `JEV_*_ENABLED` 5개 | 모두 꺼짐 | `false` | ConfigMap + `TYPESAFE_API_KEY` | 꺼짐 |
@@ -936,7 +937,7 @@ AI 사용량 지표 5개는 application 로그 그룹의 document-svc WARN 줄�
 | 4 | 운영자 MFA·직접 관리자 권한 | `human-access.tf`는 MFA role 전환을 전제로 함 | `HumanMfaMissing`, `HumanDirectAdministratorAccess` ALARM | MFA 등록 후 `enforce_human_mfa_only=true` |
 | 5 | AI 사용량 경보 | - | `ai_fx_refresh_failed`, `ai_usage_check_needed` ALARM | 환율 갱신 실패 로그와 사용량 확인 필요 항목 점검 |
 | 6 | 감사 로그 helm 값 | `aws-platform-up.sh`에 있음 | EKS API가 사설이라 확인 못 함 | runner에서 `helm get values`로 확인 |
-| 7 | `RESTORE_PREVIEW_TOKEN_SECRET` | 비면 Pod마다 무작위 키 | 운영 미설정, document-svc 2개 | 다중 replica에서 복원 미리보기 토큰이 다른 Pod에서 실패할 수 있습니다. 비밀값 추가를 검토합니다 |
+| 7 | `RESTORE_PREVIEW_TOKEN_SECRET` | 비면 `INTERNAL_CALLBACK_TOKEN`에서 파생 (document `deb5a22`, 운영 릴리스 `images-b7f01174`에 포함) | 운영 미설정, document-svc 2개가 같은 파생 키 사용 | 해소됨. 배포 뒤 복원 미리보기 요청이 아직 없어 실제 동작은 확인 전입니다 |
 | 8 | `LANGSMITH_PROJECT` | base `local-pilot-dev` | 운영도 같음 (추적 꺼짐) | 추적을 켤 때 이름 정리 |
 | 9 | `NEXT_PUBLIC_LEGAL_PAGES_ENABLED` | 화면 기능 있음 | 이미지 빌드에 인자가 없어 켤 수 없음 | 약관 공개 전에 build-arg 경로 추가 |
 | 10 | `discord-delivery-failures` 경보 | - | 알림 대상 없음 | 콘솔 확인 또는 이메일 구독 검토 |
