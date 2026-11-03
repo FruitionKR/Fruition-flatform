@@ -33,3 +33,7 @@ github_oidc_subject_prefix = "repo:FruitionKR@OWNER_ID/Fruition-flatform@REPO_ID
 
 # PDF 직접 업로드를 허용할 프런트엔드 HTTPS origin. 와일드카드 불가, 비우면 CORS 미생성.
 document_upload_allowed_origins = ["https://REPLACE_ME_FRONTEND_HOST"]
+
+# RDS가 이미 만든 로그 그룹만 지정한다. 신규 설치는 []를 유지한다.
+# 기존 환경 예: rds_log_groups_to_import = ["access", "core"]
+rds_log_groups_to_import = []

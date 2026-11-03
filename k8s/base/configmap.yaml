@@ -7,6 +7,11 @@ metadata:
   name: fruition-config
   namespace: fruition
 data:
+  ANALYTICS_ENABLED: "false"
+  ANALYTICS_ENVIRONMENT: "local"
+  POSTHOG_PROJECT_TOKEN: ""
+  POSTHOG_HOST: "http://127.0.0.1:18080"
+  APP_VERSION: "local"
   # --- document-svc / access-svc ---
   SPRING_PROFILES_ACTIVE: "local"
   POSTGRES_HOST: "postgresql"
@@ -63,14 +68,19 @@ data:
   DOCUMENT_INTERNAL_BASE_URL: "http://document-svc:8080"
   # access-svc -> pipeline-api(/internal/ai/purge/*, 데이터 파기)
   AI_INTERNAL_BASE_URL: "http://pipeline-api:8000"
+  AI_PURGE_READ_TIMEOUT: "120s"
   CORS_ALLOWED_ORIGINS: "http://localhost:3000"
   OAUTH_FRONTEND_REDIRECT_URI: "http://localhost:3000/oauth/callback"
   AUTH_REFRESH_COOKIE_SECURE: "false"
+  # access-svc 약관 동의 단계(app.legal.consent-required). 약관 문안 확정 전이라 끈다 — 가입 때 동의를 요구·기록하지 않고
+  # consent_required는 항상 false다. 확정되면 LEGAL_TERMS_VERSION을 확정 버전으로 맞추고 "true"로 바꾼다(기존 회원은 재동의 대상).
+  LEGAL_CONSENT_REQUIRED: "false"
   # --- pipeline-api / ingest-worker ---
   LANGSMITH_TRACING: "false"
   LANGSMITH_PROJECT: "local-pilot-dev"
   LANGSMITH_ENDPOINT: "https://api.smith.langchain.com"
   QUERY_EMBEDDING_MODE: "text-only"
+  EMBEDDING_TIMEOUT_SECONDS: "10"
   QUERY_EVALUATOR_MODE: "web"
   QUERY_EVALUATOR_MAX_ATTEMPTS: "2"
   QUERY_WEB_SEARCH_MAX_RESULTS: "5"

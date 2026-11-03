@@ -8,7 +8,7 @@ on:
       action:
         description: "deploy 또는 동일 schema의 성공 SHA 재배포"
         type: choice
-        options: [deploy, rollback, bootstrap]
+        options: [deploy, rollback, bootstrap, recover]
         default: deploy
       bootstrap_probe_recovery:
         description: "미완료 최초 설치의 Access probe timeout 1→5초 복구 승인"
@@ -114,13 +114,14 @@ jobs:
         run: |
           set -euo pipefail
           EXTRA=()
+          if [ "$ACTION" = recover ]; then EXTRA+=(--recovery-plan "docs/releases/$IMAGE_SHA.recovery.json"); fi
           if [ "$BOOTSTRAP_PROBE_RECOVERY" = true ]; then EXTRA+=(--bootstrap-probe-recovery); fi
           if [ "$BOOTSTRAP_MAIL_HEALTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-mail-health-recovery); fi
           if [ "$BOOTSTRAP_OAUTH_RECOVERY" = true ]; then EXTRA+=(--bootstrap-oauth-recovery); fi
           python scripts/aws_deploy.py "$ACTION" --config "$RUNNER_TEMP/deploy-config.json" --sha "$IMAGE_SHA" --manifest "$RUNNER_TEMP/release.json" --review "docs/releases/$IMAGE_SHA.json" "${EXTRA[@]}"
       - name: Verify large PDF multipart upload, Range read, batch conversion and AI
         # deploy 전용 gate. bootstrap/rollback은 제외하며 실패 시 아래 Discord 알림이 실행된다.
-        if: inputs.action == 'deploy'
+        if: inputs.action == 'deploy' || inputs.action == 'recover'
         env:
           AWS_SMOKE_EMAIL: ${{ secrets.AWS_SMOKE_EMAIL }}
           AWS_SMOKE_PASSWORD: ${{ secrets.AWS_SMOKE_PASSWORD }}

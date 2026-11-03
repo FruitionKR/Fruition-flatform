@@ -1,0 +1,6 @@
+{
+  "release_sha": "ac3d5b03ff89bdd633643938d2506c46628c2c60",
+  "migration_mode": "expand-only",
+  "compatibility_test_url": "https://github.com/FruitionKR/Fruition-document/actions/runs/41444908656",
+  "restore_test_url": "https://github.com/FruitionKR/Fruition-flatform/issues/140"
+}

@@ -89,5 +89,33 @@ class PlatformTests(unittest.TestCase):
         versions = [call[call.index("--version") + 1] for call in calls if "--version" in call]
         self.assertEqual(["3.5.0", "2.9.0", "9.59.0", "1.1.0", "2.20.2"], versions)
 
+    def test_controllers_renew_leases_slower_to_reduce_audit_volume(self):
+        # 2초 주기 lease 갱신과 2분 Strimzi 전체 재조정이 EKS 감사 로그의 큰 몫이었다(2026-11-02).
+        result, calls = self.invoke()
+        self.assertEqual(0, result.returncode, result.stderr)
+        helm = {call[3]: " ".join(call) for call in calls if call[:3] == ["helm", "upgrade", "--install"]}
+        for flag in ("leader-elect-lease-duration=60s", "leader-elect-renew-deadline=40s",
+                     "leader-elect-retry-period=10s"):
+            self.assertIn(f"extraArgs.{flag}", helm["cluster-autoscaler"])
+        strimzi = helm["strimzi"]
+        self.assertIn("fullReconciliationIntervalMs=600000", strimzi)
+        for name, value in (("LEASE_DURATION_MS", "60000"), ("RENEW_DEADLINE_MS", "40000"),
+                            ("RETRY_PERIOD_MS", "10000")):
+            self.assertRegex(strimzi, rf"extraEnvs\[(\d)\]\.name=STRIMZI_LEADER_ELECTION_{name} .*extraEnvs\[\1\]\.value={value}")
+        keda = helm["keda"]
+        for name, value in (("LEASE_DURATION", "60s"), ("RENEW_DEADLINE", "40s"), ("RETRY_PERIOD", "10s")):
+            self.assertRegex(keda, rf"env\[(\d)\]\.name=KEDA_OPERATOR_LEADER_ELECTION_{name} .*env\[\1\]\.value={value}")
+        self.assertIn("extraArgs.metricsAdapter.authorization-webhook-cache-authorized-ttl=60s", keda)
+        # 리더 선출 자체는 끄지 않는다.
+        self.assertFalse(any("leader-elect=false" in line or "leaderElection.enable=false" in line
+                             for line in helm.values()))
+
+    def test_autoscaler_waits_for_worker_grace_period_before_scale_down(self):
+        # 기본 600초면 900초 종료 유예를 쓰는 worker가 노드 축소 중 강제 종료된다.
+        result, calls = self.invoke()
+        self.assertEqual(0, result.returncode, result.stderr)
+        helm = {call[3]: call for call in calls if call[:3] == ["helm", "upgrade", "--install"]}
+        self.assertIn("extraArgs.max-graceful-termination-sec=900", helm["cluster-autoscaler"])
+
 if __name__ == "__main__":
     unittest.main()

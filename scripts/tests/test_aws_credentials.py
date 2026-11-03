@@ -23,13 +23,15 @@ GROUPS = {
     "frontend": "frontend",
 }
 ALLOWED = {
-    "access": {"ACCESS_DB_RUNTIME_PASSWORD", "JWT_SECRET", "INTERNAL_CALLBACK_TOKEN",
+    "access": {"ACCESS_DB_RUNTIME_PASSWORD", "JWT_PRIVATE_KEY", "JWT_PUBLIC_KEY", "JWT_KEY_ID",
+               "JWT_PREVIOUS_PUBLIC_KEY", "JWT_PREVIOUS_KEY_ID", "INTERNAL_CALLBACK_TOKEN",
                "MFA_ENCRYPTION_KEY", "SPRING_MAIL_HOST", "REDIS_PASSWORD",
                "SPRING_MAIL_USERNAME", "SPRING_MAIL_PASSWORD", "MAIL_FROM",
                "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
                "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
                "KAKAO_CLIENT_ID", "KAKAO_CLIENT_SECRET"},
-    "document": {"CORE_DB_RUNTIME_PASSWORD", "JWT_SECRET", "INTERNAL_CALLBACK_TOKEN",
+    "document": {"CORE_DB_RUNTIME_PASSWORD", "JWT_PUBLIC_KEY", "JWT_KEY_ID",
+                 "JWT_PREVIOUS_PUBLIC_KEY", "JWT_PREVIOUS_KEY_ID", "INTERNAL_CALLBACK_TOKEN",
                  "AGENT_INTERNAL_TOKEN", "REDIS_PASSWORD", "KOREAEXIM_AUTH_KEY"},
     "pipeline": {"AI_DATABASE_URL", "INTERNAL_CALLBACK_TOKEN", "AGENT_INTERNAL_TOKEN",
                  "REDIS_PASSWORD", "OPENAI_API_KEY", "GEMINI_API_KEY",
@@ -51,8 +53,13 @@ def render(path: str) -> list[dict]:
 class CredentialsTest(unittest.TestCase):
     def test_aws_runtime_allowlists_and_migration_jobs(self) -> None:
         manifests = render("k8s/overlays/aws")
-        secrets = {m["spec"]["target"]["name"]: {d["secretKey"] for d in m["spec"]["data"]}
+        secrets = {m["spec"]["target"]["name"]: {d["secretKey"] for d in m["spec"].get("data", [])}
                    for m in manifests if m["kind"] == "ExternalSecret"}
+        analytics = next(m for m in manifests if m["kind"] == "ExternalSecret" and m["metadata"]["name"] == "fruition-analytics")
+        template = analytics["spec"]["target"]["template"]
+        self.assertEqual(template["mergePolicy"], "Replace")
+        self.assertEqual(set(template["data"]), {"POSTHOG_PROJECT_TOKEN"})
+        secrets["fruition-analytics"] = set(template["data"])
         access = next(m for m in manifests if m["kind"] == "ExternalSecret" and m["spec"]["target"]["name"] == "fruition-access")
         mappings = {item["secretKey"]: item["remoteRef"] for item in access["spec"]["data"]}
         for provider in ("GOOGLE", "NAVER", "KAKAO"):
@@ -80,6 +87,11 @@ class CredentialsTest(unittest.TestCase):
                 for env in container.get("env", []):
                     if "secretKeyRef" in env.get("valueFrom", {}):
                         ref = env["valueFrom"]["secretKeyRef"]
+                        if ref["name"] == "fruition-analytics":
+                            self.assertNotIn(name, {"converter", "embedding-server"})
+                            self.assertEqual(ref["key"], "POSTHOG_PROJECT_TOKEN")
+                            self.assertTrue(ref["optional"])
+                            continue
                         if name == "document-svc" and ref["name"] in {"kafka-document", "kafka-cluster-ca-cert"}:
                             self.assertEqual(ref["key"], "user.password" if ref["name"] == "kafka-document" else "ca.password")
                             continue
@@ -125,9 +137,9 @@ class CredentialsTest(unittest.TestCase):
                 if name in WORKLOAD_ALLOWED:
                     self.assertEqual(keys, WORKLOAD_ALLOWED[name], name)
                     continue
-                local = local_migration[group] | local_runtime.get(group, set())
+                local = local_migration[group] | local_runtime.get(group, set()) | ({"JWT_SECRET"} if group in {"access", "document"} else set())
                 self.assertLessEqual(keys, ALLOWED[group] | local | ({"S3_ACCESS_KEY", "S3_SECRET_KEY"} if group in {"document", "pipeline", "converter"} else set()))
-                self.assertTrue(local <= keys)
+                self.assertTrue((local - {"JWT_SECRET"}) <= keys)
 
 
 if __name__ == "__main__":

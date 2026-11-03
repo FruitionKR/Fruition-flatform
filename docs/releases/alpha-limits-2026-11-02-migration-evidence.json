@@ -1,0 +1,22 @@
+{
+  "exit_code": 0,
+  "limit_reason": null,
+  "assertions_passed": 21,
+  "final_marker": "MIGRATION_AND_LOGICAL_RESTORE_OK",
+  "harness_sha256": "37d8568d15726cd8001b9d8cfc993126e00ef08ea861a43cc261879ba6c56fc7",
+  "raw_output_sha256": "f046aff0d307103623d5469d3cb14ea2e60fdfcf89df5c1095918b674f17308e",
+  "evidence_url": "https://github.com/FruitionKR/Fruition-flatform/issues/135",
+  "scope": "Exact Access V1-30 then V31, Document V1-84 then V85-V89 (merged main SQL), AI ai_schema.sql 30f5c74 then 6aae9d2 applied twice, synthetic rows, pg_dump -Fc / pg_restore --exit-on-error before and after, index validity, old-shape inserts, duplicate token_hash failure mode; no production data, PITR, or object restore",
+  "controls": {
+    "image": "postgres:16-alpine",
+    "external_network": false,
+    "data": "tmpfs",
+    "source": "read-only copy",
+    "user": "postgres",
+    "memory": "1g",
+    "cpus": 2,
+    "pids_limit": 256,
+    "capabilities": "drop ALL + CHOWN,SETUID,SETGID,DAC_OVERRIDE,FOWNER",
+    "seconds": 300
+  }
+}

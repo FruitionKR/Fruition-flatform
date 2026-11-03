@@ -64,7 +64,7 @@ kubectl kustomize k8s/overlays/aws   # 렌더 확인
 ## 알려진 제약
 
 - 실행 로그는 S3 `pipeline-runs/{run_id}/pipeline.log`, 상태와 manifest는 ai_db에 저장한다. API·ingest는 독립 `emptyDir` scratch를 사용하며 공유 PVC·same-node affinity가 없다.
-- AI worker·converter·edit-event-consumer·embedding-server는 AI Worker Spot node group의 label/taint에 맞춰 배치한다. node group은 0대에서 Cluster Autoscaler로 확장하며 실제 scale-from-zero·Spot 중단 복구는 AWS에서 검증해야 한다.
+- Kafka AI worker·converter·embedding-server는 AI Worker Spot node group의 label/taint에 맞춰 배치하고, KEDA가 일이 없으면 0으로 줄여 node group도 0대로 내려간다. 첫 작업은 노드 확보·이미지 pull·모델 적재를 기다린다(수 분). edit-event-consumer·pipeline-agent-worker는 상시 1개라 일반 노드에 둔다. 실제 scale-from-zero·Spot 중단 복구는 AWS에서 검증해야 한다.
 - Strimzi broker 1대 — AZ 장애 시 중단 허용, 복구는 operation 재발행 절차(§8.3).
 
 

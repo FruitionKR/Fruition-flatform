@@ -128,7 +128,7 @@ ingest Kafka key는 `document_id`라 같은 문서의 순서는 유지하면서 
 
 - 매니페스트: `k8s/base` + `k8s/overlays/aws` (ingress·frontend·external-secrets·API HPA/PDB·Kafka TLS 사용자)
 - IaC: `infra/terraform` (EKS·RDS·ElastiCache·S3·ECR·OIDC·Secrets·budgets·관측(`observability.tf`)·WAF(`cost-guards.tf`)·요청 기반 기동(`request-wake.tf`)·배포 runner)
-- 실제 배포 단위 검증은 `compose.infra.yml` + `compose.ai.yml` + `compose.converter.yml` + `compose.containerized.yml`을 함께 구성한다. document-svc가 `core_db` Flyway를 먼저 적용한 뒤 access-svc와 pipeline API/worker를 기동하며, AI 저장소 maintenance cutover는 [script.md](script.md) 절차를 따른다. `JWT_SECRET`·`INTERNAL_CALLBACK_TOKEN`은 두 앱 동일 값 필수.
+- 실제 배포 단위 검증은 `compose.infra.yml` + `compose.ai.yml` + `compose.converter.yml` + `compose.containerized.yml`을 함께 구성한다. document-svc가 `core_db` Flyway를 먼저 적용한 뒤 access-svc와 pipeline API/worker를 기동한다. 이전 AI 저장소 cutover는 종료됐으며 core 사본은 Document V74에서 제거한다. `JWT_SECRET`·`INTERNAL_CALLBACK_TOKEN`은 두 앱 동일 값 필수.
 - ALB는 `api.<domain>`을 document-svc, `access.<domain>`을 access-svc로 host 라우팅한다.
   화면 호스트(`app_domain`)는 같은 ALB가 경로로 나눈다: `/api/**`는 access-svc·document-svc, 나머지는 frontend. 기존 Vercel `next.config.mjs` rewrite를 대체하며, 브라우저가 ALB를 직접 부르므로 access-svc가 `X-Forwarded-For` 오른쪽 값으로 실제 클라이언트 IP를 얻는다. 상세: [aws-frontend-hosting.md](aws-frontend-hosting.md).
 - actuator는 업무 포트가 아니라 관리 포트로 분리한다(로컬 8082·8083, k8s는 Deployment env `MANAGEMENT_PORT`로 8082 통일).
@@ -300,7 +300,7 @@ S3 값 접근은 서비스 책임에 맞춰 prefix로 제한한다. Document는 
 
 Document·AI·converter에 해당 앱 bucket의 ListBucket은 허용한다. 없는 객체 GET을 404로 구분해야 신규 object journal/로그 조회가 동작하기 때문이며, converter도 같은 공통 정책으로 받는다. 따라서 bucket 내부 key 이름은 공유되는 metadata 예외이며 object 값·쓰기·삭제 권한과 구분한다. 다른 bucket 권한은 없다. [S3 GET의 403/404 계약](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
 
-Redis Access는 `auth:mfa:attempts:*`·`auth:email-availability:*` rate limit, `oauth:exchange:*` 일회용 교환 코드, `authz:role:*` 삭제만 허용한다. Document는 `authz:role:*` 적재/조회와 `query:*` 상태·이벤트, `query-events` pub/sub를 소유한다. AI는 `wiki:concept-index:*`만 읽기/쓰기/삭제한다. selectors로 Access의 projection SET을 거부하고 기본 사용자는 비활성화한다. Access의 workspace 단위 무효화에 쓰는 SCAN은 다른 서비스 key 이름까지 열람 가능한 metadata 예외다. 다른 key 값 조회·변경은 계속 거부한다. Concept write lock은 Redis가 아니라 ai_db advisory lock이다.
+Redis Access는 `auth:mfa:attempts:*`·`auth:email-availability:*`·`auth:login:ip:*`·`auth:login:fail:*`·`auth:password-change:fail:*` rate limit, `oauth:exchange:*`·`oauth:link:*`·`oauth:link-code:*`·`oauth:signup:*` 일회용 OAuth 코드·토큰, `authz:role:*` 삭제만 허용한다. Document는 `authz:role:*` 적재/조회와 `query:*` 상태·이벤트, `query-events` pub/sub를 소유한다. AI는 `wiki:concept-index:*`만 읽기/쓰기/삭제한다. selectors로 Access의 projection SET을 거부하고 기본 사용자는 비활성화한다. Access의 workspace 단위 무효화에 쓰는 SCAN은 다른 서비스 key 이름까지 열람 가능한 metadata 예외다. 다른 key 값 조회·변경은 계속 거부한다. Concept write lock은 Redis가 아니라 ai_db advisory lock이다.
 
 AWS NetworkPolicy는 앱 Deployment와 migration/preflight Job에만 ingress/egress 기본 거부를 적용한다. Access↔Document, Document→Pipeline, AI→Access/Document, query·agent worker→embedding-server(8000)의 실제 target port만 허용한다. ALB public subnet에서 업무 포트와 8082 healthcheck를 허용하고 DNS는 kube-system CoreDNS UDP/TCP 53, DB/Redis는 VPC CIDR의 5432/6379로 제한한다. migration/preflight는 DNS·DB만 갖고 앱은 외부 HTTPS, Access는 동일 설정 SMTP port를 허용한다. private·link-local 목적지는 외부 HTTPS 허용에서 제외한다. Kafka broker는 이 앱 deny 대상에서 제외하므로 Strimzi 내부 통신과 KEDA lag 조회가 유지되며 앱(converter 포함)→broker 9093(mTLS 인증·topic/group ACL listener)만 허용한다. VPC CNI `enableNetworkPolicy=true`를 IaC에서 켠다.
 

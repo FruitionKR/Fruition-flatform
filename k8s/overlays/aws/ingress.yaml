@@ -20,7 +20,8 @@ metadata:
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
     # request smuggling / header injection 방어.
     # idle timeout 120초: 회의 실시간 받아쓰기 WebSocket(ADR-0022). AI가 60초 무이벤트면 닫으므로 그보다 길게.
-    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http.drop_invalid_header_fields.enabled=true,idle_timeout.timeout_seconds=120
+    # Create Terraform alb_access_logs destination before applying this annotation.
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http.drop_invalid_header_fields.enabled=true,idle_timeout.timeout_seconds=120,access_logs.s3.enabled=true,access_logs.s3.bucket=REPLACE_ME_ALB_ACCESS_LOGS_BUCKET,access_logs.s3.prefix=alb
     alb.ingress.kubernetes.io/certificate-arn: "REPLACE_ME_ACM_CERT_ARN"
     alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
     # actuator는 관리 포트로 분리돼 있다. 트래픽 포트(8080/8081)에는 /actuator가 없다.

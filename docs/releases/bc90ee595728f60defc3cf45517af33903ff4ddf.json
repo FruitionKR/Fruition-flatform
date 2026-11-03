@@ -1,0 +1,34 @@
+{
+  "release_sha": "bc90ee595728f60defc3cf45517af33903ff4ddf",
+  "migration_mode": "maintenance-cutover",
+  "expected_predecessor_release": "e84181aec2630da3ec870e5f3496059fda1c1b70",
+  "predecessor_record_sha256": "fe73d08ac8d0588bd077415eff12d3aa099e31dbcc6fc7fafd24fdbecd3c25d7",
+  "before_fingerprints": {
+    "access": "32013f156a89bfaa9b6a5924ff99f96d5c3b7b0b519372a13e0812a7d99f62ee",
+    "document": "334519786a3691ed4694eb331b6a7b441482c8d60d537df27a6321e8f340ac59",
+    "ai": "e03b832a7c3400d49166beadac6d69a480541cad36764b49a49b8e1424867069"
+  },
+  "after_fingerprints": {
+    "access": "22b01c7caa31c6532fbee63c4d5b8f03fa9357ea264402bb6fc42c8cb860b839",
+    "document": "0f0e11c81cacfe773bac9be12558ba0902ca368c2c3f13d9e85a1caf7d993885",
+    "ai": "643e5a0474f8dff319d97a78dc9ccbda2f9c4990c3af2f9d7b0d8fb003bb59a4"
+  },
+  "expected_live_images": {
+    "access-svc/access-svc": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-access-svc@sha256:d7485ee5852b83a26ed683222cc2b2e3c9e74bb38ae4fcc8e239ed72b5cb848d",
+    "agent-task-worker/agent-task-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:738ef4b02c7f25535d2a92ee62f89f6d0ce613ef1d12508589b4935cfc60380f",
+    "converter/converter": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-converter@sha256:2c6526f457c30d3f7bad58b324d40152361438123bc6105c21eb09649c1fd9e4",
+    "document-svc/document-svc": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-document-svc@sha256:f6813e3b8d0b73ec3bbe7210eae2de3b0e42d3c51fa6a8f6278a2b91ae74a932",
+    "edit-event-consumer/edit-event-consumer": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:738ef4b02c7f25535d2a92ee62f89f6d0ce613ef1d12508589b4935cfc60380f",
+    "embedding-server/embedding-server": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:738ef4b02c7f25535d2a92ee62f89f6d0ce613ef1d12508589b4935cfc60380f",
+    "frontend/frontend": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-frontend@sha256:5384ede19aedad648289b7f6e8545f86a717b7d382b682535994feb262697c4f",
+    "ingest-worker/ingest-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:738ef4b02c7f25535d2a92ee62f89f6d0ce613ef1d12508589b4935cfc60380f",
+    "maintenance-task-worker/maintenance-task-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:738ef4b02c7f25535d2a92ee62f89f6d0ce613ef1d12508589b4935cfc60380f",
+    "pipeline-agent-worker/pipeline-agent-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:738ef4b02c7f25535d2a92ee62f89f6d0ce613ef1d12508589b4935cfc60380f",
+    "pipeline-api/pipeline-api": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:738ef4b02c7f25535d2a92ee62f89f6d0ce613ef1d12508589b4935cfc60380f",
+    "query-task-worker/query-task-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:738ef4b02c7f25535d2a92ee62f89f6d0ce613ef1d12508589b4935cfc60380f"
+  },
+  "maintenance_test_url": "https://github.com/FruitionKR/Fruition-flatform/pull/107",
+  "restore_test_url": "https://github.com/FruitionKR/Fruition-flatform/pull/107",
+  "quiescence_test_url": "https://github.com/FruitionKR/Fruition-flatform/pull/107",
+  "data_loss_accepted": true
+}

@@ -58,7 +58,7 @@ erDiagram
 
 ## 5. AI 저장소 cutover 안정화
 
-- Wiki·Agent·Skill·checkpoint는 ID를 보존해 ai_db로 이전한다. core의 기존 source 테이블은 rollback 안정화 기간 동안 read-only로 보존하고 별도 migration에서 제거한다.
+- Wiki·Agent·Skill·checkpoint는 ID를 보존해 ai_db로 이전했다. core의 기존 source 테이블 23개는 안정화 이후 Document V74에서 제거하며, 이전 cutover 스크립트도 삭제됐다.
 - Agent/Skill/checkpoint DDL의 단일 소유자는 Python `ai_schema.sql`이다. 팀 멤버십은 `workspace_members`를 직접 join하지 않고 access-svc 내부 권한 API로 조회한다.
 - Markdown Agent는 ai_db의 `agent_runs`·`agent_jobs`로 실행·취소하고, core_db의 `ai_task_runs`가 채팅·업무 변경까지 복구를 조율한다. 비 Agent 작업은 ai_db의 `ai_task_runs`·`ai_task_changes`를 사용한다. Agent Tool 실행의 역작업은 `agent_tool_executions`에 별도 멱등키로 기록하며, 적용 projection의 `autonomous_tool`은 일반 턴 적용과 도구 역작업의 인가 경계를 구분한다.
 
@@ -68,4 +68,4 @@ erDiagram
 AI 실행 진단 로그는 S3 `pipeline-runs/{run_id}/pipeline.log`에 저장한다. 상태·manifest의 소유권은 ai_db에 있으며, 진단 로그는 업무 object 취소 rollback 대상이 아니다. 실행 재시도는 같은 key에 새 시도 로그를 저장한다. 회의 녹음은 브라우저가 S3 `meetings/{meeting_id}/recording-{uuid}.{ext}`에 직접 multipart로 올리고(최대 500MiB) ai가 읽어 전사한다. 전사 chunk checkpoint는 `pipeline-runs/meeting-transcription/*`에 두며 종료 시 삭제하고 1일 lifecycle이 backstop이다.
 
 
-AWS Redis는 서비스별 ACL 사용자로 분리한다. Access의 `auth:*`·`oauth:exchange:*`, Document의 `query:*`, AI의 `wiki:concept-index:*` 값 접근을 분리하고 `authz:role:*`는 Access 삭제/Document 적재·조회인 명시적 공유 projection이다. Access SCAN의 key 이름 열람 예외가 있다. S3 Document·AI·converter prefix별 값 접근과 앱 bucket ListBucket metadata 예외는 [아키텍처](architecture.md#aws-저장소통신-권한)를 따른다.
+AWS Redis는 서비스별 ACL 사용자로 분리한다. Access의 `auth:*`·`oauth:*`(exchange·link·link-code·signup), Document의 `query:*`, AI의 `wiki:concept-index:*` 값 접근을 분리하고 `authz:role:*`는 Access 삭제/Document 적재·조회인 명시적 공유 projection이다. Access SCAN의 key 이름 열람 예외가 있다. S3 Document·AI·converter prefix별 값 접근과 앱 bucket ListBucket metadata 예외는 [아키텍처](architecture.md#aws-저장소통신-권한)를 따른다.

@@ -17,6 +17,7 @@ ACCESS_PID=""
 FRONTEND_PID=""
 
 source "$ROOT_DIR/scripts/lib/runtime.sh"
+source "$ROOT_DIR/scripts/lib/analytics.sh"
 
 log() {
   printf '[dev-up] %s\n' "$*"
@@ -225,6 +226,7 @@ start_backend() {
   log "document-svc를 시작합니다. Java 21: $java21_home"
   (
     cd "$ROOT_DIR/../Document"
+    local_analytics_env "$PWD"
     SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-local}" \
       SERVICE_ENV_FILE="$ENV_FILE" JAVA_HOME="$java21_home" ./gradlew bootRun -Porg.gradle.java.installations.paths="$java21_home" \
       2>&1 | tee -a "$LOGS_DIR/document-svc.log"
@@ -236,6 +238,7 @@ start_backend() {
   log "access-svc를 시작합니다. Java 21: $java21_home"
   (
     cd "$ROOT_DIR/../Access"
+    local_analytics_env "$PWD"
     SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-local}" \
       SERVICE_ENV_FILE="$ENV_FILE" JAVA_HOME="$java21_home" ./gradlew bootRun -Porg.gradle.java.installations.paths="$java21_home" \
       2>&1 | tee -a "$LOGS_DIR/access-svc.log"
@@ -257,6 +260,7 @@ start_frontend() {
   log "프론트엔드를 시작합니다."
   (
     cd "$FRONTEND_DIR"
+    local_analytics_env "$PWD"
     npm run dev 2>&1 | tee -a "$LOGS_DIR/frontend.log"
   ) &
   FRONTEND_PID="$!"
