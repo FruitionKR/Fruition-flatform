@@ -347,8 +347,8 @@ base(`k8s/base/configmap.yaml`)에 AWS patch(`k8s/overlays/aws/configmap-aws.yam
 | `QUERY_WEB_SEARCH_TIMEOUT_SECONDS` | `10` | 코드 기본 `20` | | `configmap.yaml:87` |
 | `QUERY_MIN_INTERNAL_RELEVANCE_SCORE` | `0.5` | | | `configmap.yaml:88` |
 | `AGENT_SKILLS_ENABLED` | `true` | 코드 기본 `false` | Agent Skills 켬 | `configmap.yaml:89` |
-| `JEV_ROUTING_ENABLED` / `JEV_EVIDENCE_ENABLED` / `JEV_CONCEPT_MERGE_ENABLED` | `false` / `false` / `false` | | Jev(TypeSafe) 기능 꺼짐 | `configmap.yaml:91-93` |
-| `SKILL_API_ENABLED` | `true` | | Skill API 라우터 | `configmap.yaml:94` |
+| `JEV_ROUTING_ENABLED` / `JEV_EVIDENCE_ENABLED` / `JEV_CONCEPT_MERGE_ENABLED` / `JEV_SKILL_INTENT_ENABLED` / `JEV_FOLDER_LOOKUP_ENABLED` / `JEV_EDIT_DETAIL_ENABLED` | 모두 `true` | | Jev(TypeSafe) 기능 켜짐, 오류가 있는 경로만 `false`로 끈다 | `configmap.yaml:91-96` |
+| `SKILL_API_ENABLED` | `true` | | Skill API 라우터 | `configmap.yaml:97` |
 | `ANALYTICS_ENABLED` / `ANALYTICS_ENVIRONMENT` / `APP_VERSION` / `POSTHOG_HOST` / `POSTHOG_PROJECT_TOKEN` | ConfigMap에는 `false`/`local`/`local`/로컬 주소/빈 값. **각 Deployment env가 덮습니다** (2.3) | | | `configmap.yaml:10-14` |
 
 ### 2.3 Deployment별 환경 변수
@@ -590,7 +590,6 @@ base(`k8s/base/configmap.yaml`)에 AWS patch(`k8s/overlays/aws/configmap-aws.yam
 | 에이전트 worker poll | `AGENT_WORKER_POLL_SECONDS` | 1초. lease 90초, heartbeat 30초, 3회 실패 시 종료 | 같음 | `agent_worker.py:67` |
 | 권한 확인 timeout | `ACCESS_AUTHZ_TIMEOUT_SECONDS` | 3초 | 같음 | `workspace_authorization.py:38` |
 | 의미 패치 병렬 | `WIKI_SEMANTIC_MAX_WORKERS` | 4 | 같음 | `generation_loop_adapters.py:50` |
-| Jev | `JEV_SKILL_INTENT_ENABLED`, `JEV_FOLDER_LOOKUP_ENABLED` | `false` | 설정 없음 → 꺼짐 | `jev_client.py:33-34` |
 | Jev timeout / 차단 | `JEV_TIMEOUT_SECONDS` / `JEV_BLOCK_SECONDS` | 30초 / 600초 | 같음 | `jev_client.py:63,214` |
 | 프롬프트 기록 | `LLM_PROMPT_LOG_DIR` | 빈 값 (끔) | 같음 | `chat_completions_llm.py:66` |
 

@@ -34,7 +34,7 @@ cp infra/.env.example infra/.env
 
 - 공통: `JWT_SECRET`
 - AI 기능 사용 시: ai-svc secret env `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` 중 사용할 provider의 키
-- Jev 선택 판단 사용 시: `TYPESAFE_API_KEY`와 켤 경로의 `JEV_ROUTING_ENABLED`·`JEV_EVIDENCE_ENABLED`·`JEV_CONCEPT_MERGE_ENABLED=true`. 키가 없거나 호출이 실패하면 기존 경로로 처리한다.
+- Jev 선택 판단: `TYPESAFE_API_KEY`가 있으면 모든 경로가 켜진다. 오류가 있는 경로만 `JEV_*_ENABLED=false`로 끈다. 키가 없거나 호출이 실패하면 기존 경로로 처리한다.
 - 소셜 로그인 사용 시(선택): `GOOGLE_CLIENT_ID/SECRET`, `NAVER_CLIENT_ID/SECRET`, `KAKAO_CLIENT_ID/SECRET`
 - 이메일 로그인 데모용 고정 인증 코드: `AUTH_EMAIL_DEV_FIXED_CODE`
 

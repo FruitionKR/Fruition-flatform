@@ -142,7 +142,7 @@ kubectl -n fruition rollout restart deploy/maintenance-task-worker
 
 ## Jev 선택 판단 켜기
 
-AI는 Agent 라우팅·질의 근거 선택·ingest 개념 병합을 TypeSafe Jev로 판정할 수 있습니다([Fruition-ai ADR-0027](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/adr/0027-jev-selective-judge.md)). `fruition-config`의 `JEV_ROUTING_ENABLED`·`JEV_EVIDENCE_ENABLED`·`JEV_CONCEPT_MERGE_ENABLED`는 기본 `false`입니다. 켜도 `TYPESAFE_API_KEY`가 비어 있거나 크레딧 소진·호출 실패가 나면 해당 요청은 기존 경로로 처리됩니다.
+AI는 Agent 라우팅·질의 근거 선택·ingest 개념 병합을 TypeSafe Jev로 판정할 수 있습니다([Fruition-ai ADR-0027](https://github.com/FruitionKR/Fruition-ai/blob/main/docs/adr/0027-jev-selective-judge.md)). `fruition-config`의 `JEV_*_ENABLED`는 기본 `true`이고, 오류가 있는 경로만 `false`로 끕니다. 켜져 있어도 `TYPESAFE_API_KEY`가 비어 있거나 크레딧 소진·호출 실패가 나면 해당 요청은 기존 경로로 처리됩니다.
 
 1. **배포 전(필수).** Secrets Manager `fruition/app`에 `TYPESAFE_API_KEY` 속성을 추가합니다. 아직 키가 없으면 빈 문자열로 둡니다. `fruition-pipeline` ExternalSecret이 이 속성을 읽으므로, 속성이 없으면 AI Secret 동기화 전체가 실패해 배포가 멈춥니다. 기존 Secret은 Terraform `ignore_changes` 때문에 apply로 키가 추가되지 않으니 콘솔/보안 입력 경로로 이 속성만 추가합니다.
 2. **키 입력.** 크레딧을 준비한 뒤 `TYPESAFE_API_KEY`에 실제 키를 넣습니다. ExternalSecret 갱신(최대 1시간)을 기다리거나 강제 동기화한 뒤 AI Pod를 재시작해야 새 값을 읽습니다.
