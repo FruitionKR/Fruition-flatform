@@ -275,6 +275,10 @@ services:
       AGENT_BACKEND_URL: http://host.docker.internal:8080
       AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-local-agent-internal}
       AGENT_SKILLS_ENABLED: ${AGENT_SKILLS_ENABLED:-true}
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-fruition-storage}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-fruition}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-fruition_dev_secret}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
