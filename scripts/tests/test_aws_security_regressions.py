@@ -32,6 +32,19 @@ class SecurityRegressionTests(unittest.TestCase):
                 self.assertEqual(log.read_text().splitlines(),
                                  ["-n fruition auth can-i create pods --quiet"])
 
+    def test_db_query_pod_is_outside_service_and_hpa_but_allowed_to_database(self):
+        script = (ROOT / "scripts/aws-ops-db-query.sh").read_text()
+        label = re.search(r"^    app: (\S+)$", script, re.M).group(1)
+        self.assertIn("requests:", script)
+        manifests = list((ROOT / "k8s").rglob("*.yaml"))
+        selected = [path.name for path in manifests
+                    if re.search(rf"selector:\s*\n(\s+matchLabels:\s*\n)?\s+app: {label}\s*$", path.read_text(), re.M)]
+        self.assertEqual(selected, [])
+        policies = (ROOT / "k8s/overlays/aws/networkpolicy.yaml").read_text().split("---")
+        for name in ("aws-app-dns", "aws-app-database"):
+            policy = next(doc for doc in policies if re.search(rf"^  name: {name}$", doc, re.M))
+            self.assertRegex(policy, rf"- {label}\b")
+
     def test_operator_role_has_no_workload_mutation_or_secret_read(self):
         documents = (ROOT / "k8s/platform/aws/deploy-rbac.yaml").read_text().split("---")
         roles = [doc for doc in documents

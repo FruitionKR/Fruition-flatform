@@ -38,7 +38,10 @@ kind: Pod
 metadata:
   name: $POD
   labels:
-    app: document-svc
+    # app: document-svc를 쓰면 이 Pod가 document-svc Service 엔드포인트와 HPA 대상에 들어간다.
+    # document-db-preflight는 aws-app-dns·aws-app-database 허용 목록에 있고 Service·HPA가 고르지 않는다.
+    app: document-db-preflight
+    app.kubernetes.io/component: ops-db-query
 spec:
   restartPolicy: Never
   automountServiceAccountToken: false
@@ -58,6 +61,9 @@ spec:
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 128Mi }
     env:
     - name: PGHOST
       value: "$PGHOST"

@@ -1,5 +1,12 @@
 # 인프라 변경 기록
 
+## 2026-11-06
+
+### 운영 DB 조회 Pod가 document-svc Service와 HPA에 잡히지 않게 한다
+
+- `aws-ops-db-query.sh`의 Pod 라벨을 `app: document-svc`에서 `app: document-db-preflight`로 바꾼다. 이 라벨은 DNS와 DB egress 허용 목록에 이미 있어 NetworkPolicy 변경이 없다.
+- Pod에 자원 요청과 메모리 제한을 넣는다. Service에 묶이지 않으므로 readiness probe는 두지 않는다.
+
 ## 2026-10-31
 
 ### 운영자 조회 권한 제한과 API 요청량 제한 경로 보완
