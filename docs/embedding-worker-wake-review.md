@@ -16,7 +16,7 @@ embedding-server의 KEDA trigger가 query·agent만 감시해 ingest·maintenanc
 
 ## 배포 및 검증 범위
 
-기존 성공 이미지 묶음 a377209ef0d7ef2ac918aee26bc117704c9880ee를 그대로 쓴다. 배포 실행기는 성공 manifest의 고정 리소스를 재사용하고 SCALING_KINDS만 현재 저장소에서 반영하므로 새 이미지를 만들거나 migration을 실행할 필요가 없다. 기존 릴리스 검토 기록과 DB 스냅샷 available 상태를 다시 확인하고 feedback 게이트가 있는 deploy.yml로 적용한다. 운영 검증 결과는 실제 실행 후 별도 보고하며 이 문서는 아직 배포 성공을 주장하지 않는다.
+기존 배포 실행기의 SCALING_KINDS는 HPA만 포함한다. ScaledObject는 성공 manifest에 고정되므로 같은 릴리스로 변경하면 검증에서 차단된다. 이 보호를 유지하고 게시 recipe에 KEDA 설정 파일을 포함해 새 릴리스 식별자를 만든다. 서비스 source/context/build ID는 바꾸지 않으므로 기존 이미지 digest를 모두 재사용하는 설정 배포가 된다. 실제 게시 묶음의 sources/digest가 이전 성공 묶음 a377209ef0d7ef2ac918aee26bc117704c9880ee와 같은지, 새 검토 기록과 DB 스냅샷 available 상태를 확인하고 feedback 게이트가 있는 deploy.yml로 적용한다. 운영 검증 결과는 실제 실행 후 별도 보고하며 이 문서는 아직 배포 성공을 주장하지 않는다.
 
 ## 남은 한계
 
