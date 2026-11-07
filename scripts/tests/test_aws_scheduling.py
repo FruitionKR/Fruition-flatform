@@ -37,6 +37,21 @@ class SchedulingTest(unittest.TestCase):
         pdb = next(r for r in resources if r["kind"] == "PodDisruptionBudget" and r["metadata"]["name"] == "pipeline-api")
         self.assertEqual(1, pdb["spec"]["minAvailable"])
 
+    def test_embedding_scaler_covers_remote_clients_without_forcing_idle_capacity(self):
+        clients = {"query-task-worker", "agent-task-worker", "ingest-worker", "maintenance-task-worker"}
+        for overlay in ("base", "overlays/aws"):
+            resources = list(yaml.safe_load_all(subprocess.check_output(
+                ["kubectl", "kustomize", str(ROOT / "k8s" / overlay)], text=True)))
+            scaler = next(r for r in resources if r["kind"] == "ScaledObject"
+                          and r["metadata"]["name"] == "embedding-server")
+            self.assertEqual(scaler["spec"]["minReplicaCount"], 0)
+            selector = scaler["spec"]["triggers"][0]["metadata"]["podSelector"]
+            self.assertEqual(set(selector.removeprefix("app in (").removesuffix(")").split(",")), clients)
+        compose = yaml.safe_load((ROOT / "infra/compose.ai.yml").read_text())
+        for client in clients:
+            self.assertEqual(compose["services"][client]["depends_on"]["embedding-server"],
+                             {"condition": "service_healthy"})
+
     def test_independent_scratch_and_spot_workers(self):
         terraform = (ROOT / "infra/terraform/eks.tf").read_text()
         self.assertIn('"fruition.io/node-role" = "ai-worker"', terraform)
@@ -186,7 +201,7 @@ class SchedulingTest(unittest.TestCase):
             embedding = scalers["embedding-server"]
             self.assertEqual(1, embedding["maxReplicaCount"])
             self.assertEqual({"type": "kubernetes-workload", "metadata": {
-                "podSelector": "app in (query-task-worker,agent-task-worker)", "value": "1"}}, embedding["triggers"][0])
+                "podSelector": "app in (query-task-worker,agent-task-worker,ingest-worker,maintenance-task-worker)", "value": "1"}}, embedding["triggers"][0])
             # 빈 consumer group의 offset이 지워지면 KEDA는 lag을 topic 끝 offset 전체로 보고 worker를 계속 깨운다.
             kafka = next(r for r in resources if r["kind"] == "Kafka")
             retention_minutes = kafka["spec"]["kafka"]["config"]["offsets.retention.minutes"]
@@ -205,7 +220,7 @@ class SchedulingTest(unittest.TestCase):
             self.assertEqual(pod["containers"][0]["image"], init["image"])
             self.assertFalse(init["securityContext"]["allowPrivilegeEscalation"])
             self.assertEqual(["ALL"], init["securityContext"]["capabilities"]["drop"])
-        # 다른 worker는 embedding-server를 부르지 않으므로 기다리지 않는다.
+        # ingest·maintenance는 서버를 호출하지만 현재 init 대기는 query·agent에만 적용한다.
         for name in (WORKERS | GENERAL_WORKERS) - {"query-task-worker", "agent-task-worker"}:
             self.assertNotIn("initContainers", deployments[name]["spec"]["template"]["spec"])
 

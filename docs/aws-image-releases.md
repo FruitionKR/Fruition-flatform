@@ -47,7 +47,7 @@
 ## 실패·보존·비용
 
 - 게시 실패는 GitHub Actions에서 확인합니다. 이 hosted 게시 workflow는 AWS 운영 SNS 접근권한이 없어 Discord 전송을 하지 않습니다. 배포 실패의 기존 Discord 알림은 유지됩니다.
-- 같은 ID가 이미 완전히 게시되어 있으면 정기 실행은 빌드를 생략합니다. 새 소스는 바뀐 서비스만 빌드합니다. 게시 스크립트나 workflow만 바뀌면 새 릴리스 ID가 생기지만 이미지는 모두 재사용합니다.
+- 같은 ID가 이미 완전히 게시되어 있으면 정기 실행은 빌드를 생략합니다. 새 소스는 바뀐 서비스만 빌드합니다. 게시 스크립트·workflow 또는 `k8s/base/keda-scaledobject.yaml`만 바뀌면 새 릴리스 ID가 생기지만 이미지는 모두 재사용합니다. KEDA 설정은 성공 배포 manifest에 고정되므로 새 ID와 검토 기록으로 배포하며 기존 manifest 불일치 게이트는 유지합니다.
 - ECR은 저장소마다 최근 이미지 60개를 보존합니다(`infra/terraform/ecr.tf`). `b-` 빌드 태그, 이전 릴리스 ID 태그, 태그 없는 하위 이미지를 함께 셉니다. 오래된 GitHub Release가 있어도 이미지가 만료되면 배포/rollback 검증에서 실패합니다. 현재 실행 중인 digest와 rollback 후보 digest가 서비스별 최근 60개 이미지 안에 있는지 확인해야 합니다. 만료된 빌드 태그는 같은 입력이 다시 오면 새로 빌드되지만 digest가 달라 이전 Release로는 검증되지 않습니다.
 
 ## schema 3 전환 시 한 번 일어나는 일

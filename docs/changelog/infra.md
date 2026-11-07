@@ -1,5 +1,9 @@
 # 인프라 변경 기록
 
+## 2026-11-07
+
+- 임베딩 서버의 KEDA 감시 대상에 ingest·maintenance 작업자를 추가해 편입만 실행돼도 서버가 기동하도록 했다. 작업자와 서버의 최소 0대 설정은 유지한다. 성공 manifest 검증을 유지하면서 KEDA 설정 변경 시 기존 이미지를 재사용하는 새 게시 묶음 ID를 만든다. 로컬 Compose도 두 작업자가 임베딩 서버의 healthy 상태를 기다리게 맞췄다. 운영 기동 시간·비용과 남은 cold start 경쟁은 `docs/embedding-worker-wake-review.md`에 기록한다.
+
 ## 2026-11-06
 
 ### 운영 DB 조회 Pod가 document-svc Service와 HPA에 잡히지 않게 한다

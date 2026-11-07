@@ -169,9 +169,9 @@ spec:
         limitToPartitionsWithLag: "true"
         offsetResetPolicy: earliest
 ---
-# embedding-server는 query·agent worker만 HTTP로 부른다(ai ADR-0026, aws networkpolicy aws-internal-embedding-server).
+# embedding-server는 query·agent·ingest·maintenance worker가 HTTP로 부른다(ai ADR-0026).
 # Kafka lag이 아니라 그 worker Pod 수를 따라간다. worker가 하나라도 있으면(Pending·종료 대기 포함) 1, 모두 0이 되면 0.
-# worker는 init container로 이 서버의 /health를 기다린 뒤 소비를 시작한다(overlays/aws kustomization.yaml).
+# query·agent는 init container로 /health를 기다린다. ingest·maintenance에는 별도 준비 대기가 없어 cold start 경쟁은 남는다.
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
@@ -185,5 +185,5 @@ spec:
   triggers:
     - type: kubernetes-workload
       metadata:
-        podSelector: app in (query-task-worker,agent-task-worker)
+        podSelector: app in (query-task-worker,agent-task-worker,ingest-worker,maintenance-task-worker)
         value: "1"
