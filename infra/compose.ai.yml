@@ -166,6 +166,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      embedding-server:
+        condition: service_healthy
       pipeline-api:
         condition: service_healthy
       postgresql:
@@ -226,6 +228,10 @@ services:
       QUERY_EVIDENCE_LIMIT: ${POST_INGEST_EVIDENCE_LIMIT:-3}
       # 후속 편입·lint의 Jev 개념 판정 후보 임베딩. 긴 페이지 임베딩은 계속 워커가 직접 만든다(ai ADR-0026).
       EMBEDDING_SERVICE_URL: http://embedding-server:8000
+    depends_on:
+      <<: *ai-task-depends-on
+      embedding-server:
+        condition: service_healthy
 
   edit-event-consumer:
     image: *pipeline-image
