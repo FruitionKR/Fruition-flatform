@@ -31,6 +31,8 @@ DB bootstrap은 Access endpoint에 DB_ISOLATION_TARGET=access, Core endpoint에 
 
 Secrets Manager는 ignore_changes로 운영 값을 보존한다. 기존 환경에 MFA/SMTP/Redis 키를 추가할 때 Terraform 재실행만으로 채워졌다고 가정하지 않는다. MFA 키를 재생성하면 기존 TOTP secret을 복호화하지 못한다. Redis 사용자 password와 서비스 Secret 값을 같은 보안 입력 경로로 맞춘다. 정적 S3 IAM key 제거·Redis 리소스 교체는 실제 plan에서 별도 검토한다.
 
+MCP PDF 준비: pipeline 역할은 `tmp/convert/mcp/*` 묶음을 읽고 `tmp/convert/mcp/*/*/final.md`에만 단일 PUT을 한다. 기존 converter는 AnyDoc/Heron 전처리 묶음을 쓰고 Document는 세션 이미지 서명과 승인 전 결과 읽기를 맡는다. 검토된 IAM 적용, external 모드를 포함한 converter·pipeline 이미지와 AI schema 배포가 필요하다. 이 권한 변경만으로 MCP가 켜지지는 않으며 기존 MCP 인증·정책 설정을 별도로 충족해야 한다. AWS는 기존 `S3_ENDPOINT`와 IRSA를 사용하고, local 테스트 전용 `MCP_PDF_SOURCE_ENDPOINT`는 설정하지 않는다.
+
 Jev 준비: 신규 `fruition/app` Secret에는 `TYPESAFE_API_KEY`를 빈 값으로 생성한다. 기존 환경은 apply로 추가되지 않으므로 배포 전에 이 속성만 콘솔/보안 입력 경로로 추가한다(`fruition-pipeline` ExternalSecret이 읽는다). 절차는 [Jev 선택 판단 켜기](../../docs/aws-maintenance.md#jev-선택-판단-켜기)를 따른다.
 
 OAuth 준비: 신규 `fruition/app` Secret에는 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`을 빈 값으로 생성한다. 실제 값은 Secrets Manager 콘솔/보안 입력 경로로 입력하며 Terraform 코드·tfvars에 넣지 않는다. 기존 환경은 `ignore_changes = [secret_string]` 때문에 apply로 키가 추가되지 않는다. 기존 DB·JWT·MFA 등 다른 항목을 보존하면서 위 6개 키만 추가한다. 이를 위해 ignore_changes를 제거하거나 Secret 리소스를 재생성하지 않는다.
