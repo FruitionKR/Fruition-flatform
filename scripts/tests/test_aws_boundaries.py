@@ -116,6 +116,18 @@ class BoundaryTests(unittest.TestCase):
                           ("converter_storage_role_arn",CONFIG["pipeline_storage_role_arn"])]:
             with self.assertRaises(ValueError):deploy.validate({**CONFIG,key:value},SHA)
 
+    def test_mcp_pdf_uses_existing_aws_storage_and_pipeline_wiring(self):
+        config = next(d for d in self.docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "fruition-config")["data"]
+        self.assertNotIn("MCP_PDF_SOURCE_ENDPOINT", config)
+        self.assertEqual("https://s3.ap-northeast-2.amazonaws.com", config["S3_ENDPOINT"])
+        self.assertEqual("http://pipeline-api:8000/agent/runs", config["AGENT_RUN_ENDPOINT"])
+        self.assertEqual("ai.convert.command", config["CONVERT_COMMAND_TOPIC"])
+        for app, account in (("document-svc", "fruition-document"), ("pipeline-api", "fruition-pipeline"), ("converter", "fruition-converter")):
+            pod = next(d for d in self.docs if d["kind"] == "Deployment" and d["metadata"]["name"] == app)["spec"]["template"]["spec"]
+            self.assertEqual(account, pod["serviceAccountName"])
+            for container in pod["containers"]:
+                self.assertNotIn("MCP_PDF_SOURCE_ENDPOINT", {e["name"] for e in container.get("env", [])})
+
     def test_storage_policy_preserves_domain_and_rollback_boundaries(self):
         source=(deploy.ROOT / "infra/terraform/s3.tf").read_text()
         scopes={}
@@ -130,6 +142,12 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn("wiki/*",scopes["document"]["read"])
         self.assertIn("meetings/*",scopes["document"]["read"])
         self.assertIn("sources/documents/*",scopes["pipeline"]["read"])
+        self.assertEqual(["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*",
+                          "meetings/*", "tmp/convert/mcp/*"], scopes["pipeline"]["read"])
+        self.assertEqual(["wiki/*", "agent-runs/*", "pipeline-runs/*"], scopes["pipeline"]["write"])
+        # 최종 결과는 4MiB 이하 단일 PUT: multipart·삭제 권한을 추가하지 않는다.
+        self.assertIn('each.key == "pipeline" ? [', source)
+        self.assertIn('{ Effect = "Allow", Action = ["s3:PutObject"], Resource = ["${aws_s3_bucket.storage.arn}/tmp/convert/mcp/*/*/final.md"] }', source)
         self.assertEqual(["wiki/*","agent-runs/*","pipeline-runs/meeting-transcription/*"],scopes["pipeline"]["delete"])
         # converter(ai ADR 0034)는 원본 읽기와 변환 결과 쓰기만 하고, document는 그 결과를 읽는다.
         self.assertEqual({"read":["sources/documents/*"],"write":["tmp/convert/*"],"delete":[]},scopes["converter"])
