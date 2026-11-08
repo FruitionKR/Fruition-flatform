@@ -10,6 +10,18 @@ WORKERS = {"ingest-worker", "pipeline-agent-worker", "query-task-worker", "agent
 
 
 class SchedulingTest(unittest.TestCase):
+    def test_embedding_startup_probe_does_not_route_inference_to_unready_pods(self):
+        resources = list(yaml.safe_load_all(subprocess.check_output(
+            ["kubectl", "kustomize", str(ROOT / "k8s/overlays/aws")], text=True)))
+        services = {r["metadata"]["name"]: r["spec"] for r in resources if r["kind"] == "Service"}
+        self.assertFalse(services["embedding-server"].get("publishNotReadyAddresses", False))
+        startup = services["embedding-server-startup"]
+        self.assertTrue(startup["publishNotReadyAddresses"])
+        self.assertEqual(startup["selector"], services["embedding-server"]["selector"])
+        self.assertEqual(startup["type"], "ClusterIP")
+        config = next(r["data"] for r in resources if r["kind"] == "ConfigMap" and r["metadata"]["name"] == "fruition-config")
+        self.assertEqual(config["EMBEDDING_STARTUP_STATUS_URL"], "http://embedding-server-startup:8000")
+
     def test_independent_scratch_and_spot_workers(self):
         terraform = (ROOT / "infra/terraform/eks.tf").read_text()
         self.assertIn('"fruition.io/node-role" = "ai-worker"', terraform)

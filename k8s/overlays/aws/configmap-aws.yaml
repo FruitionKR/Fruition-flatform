@@ -29,3 +29,5 @@ data:
   # JDBC does not consume the libpq environment variable itself.
   SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_SSLROOTCERT: "/etc/rds-ca/root.crt"
   SPRING_MAIL_PORT: "REPLACE_ME_SMTP_PORT"
+  # Ready 전 임베딩 모델 적재 상태만 확인한다. 일반 연결 오류를 기동 중 안내로 오인하지 않는다.
+  EMBEDDING_STARTUP_STATUS_URL: "http://embedding-server-startup:8000"
