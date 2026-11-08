@@ -1,5 +1,11 @@
 # 인프라 변경 기록
 
+## 2026-11-08
+
+### 임베딩 서버 기동 상태 조회 경로 추가
+
+- Ready 전 Pod의 기동 상태를 확인하는 내부 Service와 AI 설정을 추가했다. 추론은 기존 Ready 전용 Service를 사용한다. dev 기준 AWS 관련 테스트 8개와 Kustomize 렌더링을 확인했다.
+
 ## 2026-11-07
 
 - 임베딩 서버의 KEDA 감시 대상에 ingest·maintenance 작업자를 추가해 편입만 실행돼도 서버가 기동하도록 했다. 작업자와 서버의 최소 0대 설정은 유지한다. 성공 manifest 검증을 유지하면서 KEDA 설정 변경 시 기존 이미지를 재사용하는 새 게시 묶음 ID를 만든다. 로컬 Compose도 두 작업자가 임베딩 서버의 healthy 상태를 기다리게 맞췄다. 운영 기동 시간·비용과 남은 cold start 경쟁은 `docs/embedding-worker-wake-review.md`에 기록한다.
