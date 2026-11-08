@@ -47,6 +47,20 @@ export JAVA_HOME_21="$JAVA_HOME"
 
 `JAVA_HOME_21`은 프로젝트 구동 스크립트가 사용하고, `JAVA_HOME`은 직접 실행한 Gradle wrapper가 사용한다.
 
+### 격리 MCP 로컬 환경
+
+공용 `infra/.env`와 기존 Compose project를 사용하지 않는 MCP 전용 환경이다. 현재 Access·Document checkout은 캐시된 Gradle 의존성으로 빌드하고, 현재 AI pipeline checkout은 읽기 전용으로 마운트한다. production에서는 MCP 기본값을 바꾸지 않는다.
+
+```sh
+./scripts/mcp-test-up.sh
+# 종료(볼륨과 private fixture는 보존)
+./scripts/mcp-test-down.sh
+```
+
+기본 진입점은 `https://localhost:58443`, MCP resource는 `https://localhost:58443/mcp`다. 로컬 CA는 `/tmp/fruition-mcp-test/tls-ca.crt`, 생성된 synthetic 계정·token은 권한 600인 `/tmp/fruition-mcp-test/credentials.json`에만 저장되며 값을 로그나 문서에 복사하지 않는다. consent UI는 현재 frontend checkout을 `/tmp/fruition-mcp-test/frontend/web`에 복사하고 이미 설치된 Node 26.3/Next 15.5.28 의존성을 연결해 `127.0.0.1:58300`에서 실행한다. PID와 로그는 각각 `/tmp/fruition-mcp-test/frontend.pid`, `/tmp/fruition-mcp-test/frontend.log`에 남고 `mcp-test-down.sh`는 등록된 PID만 종료한다. 이 조합은 로컬 기능 검증용이며 출시는 여전히 선언된 Node 24에서 별도 자격 검증해야 한다.
+
+실제 Claude 연결은 자체 서명 인증서나 localhost로 검증할 수 없다. 승인된 공개 HTTPS hostname과 정확한 Claude CIMD client ID를 별도 private env의 `MCP_TEST_ORIGIN`, `MCP_TEST_REAL_CLIENT_ID`에 고정하고, 동일 origin의 gateway HTTP 포트로 승인된 tunnel/ingress를 연결해야 한다. 스크립트는 tunnel, DNS, cloud resource를 만들지 않는다.
+
 pipeline 테스트를 로컬에서 처음 실행할 때만 가상환경을 만들고 requirements를 설치합니다.
 
 ```sh
