@@ -1,0 +1,172 @@
+name: fruition-mcp-test
+
+services:
+  postgresql:
+    container_name: fruition-mcp-test-postgresql
+    ports: !override
+      - "127.0.0.1:${MCP_TEST_POSTGRES_PORT:-55490}:5432"
+
+  kafka:
+    container_name: fruition-mcp-test-kafka
+    ports: !override
+      - "127.0.0.1:${MCP_TEST_KAFKA_PORT:-59092}:9092"
+
+  kafka-init:
+    container_name: fruition-mcp-test-kafka-init
+
+  redis:
+    container_name: fruition-mcp-test-redis
+    ports: !override
+      - "127.0.0.1:${MCP_TEST_REDIS_PORT:-56380}:6379"
+
+  minio:
+    container_name: fruition-mcp-test-minio
+    ports: !override
+      - "127.0.0.1:${MCP_TEST_MINIO_PORT:-59050}:9000"
+      - "127.0.0.1:${MCP_TEST_MINIO_CONSOLE_PORT:-59051}:9001"
+
+  minio-init:
+    container_name: fruition-mcp-test-minio-init
+
+  pipeline-api:
+    image: fruition-pipeline-dev:local
+    build: !reset null
+    container_name: fruition-mcp-test-pipeline-api
+    volumes:
+      - "${MCP_TEST_AI_PIPELINE_DIR:?MCP_TEST_AI_PIPELINE_DIR is required}:/app:ro"
+    environment:
+      DOCUMENT_INTERNAL_BASE_URL: http://document-svc:8080
+      ACCESS_INTERNAL_BASE_URL: http://access-svc:8081
+      EMBEDDING_SERVICE_URL: http://embedding-server:8000
+      OPENAI_API_KEY: ""
+      GEMINI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      TAVILY_API_KEY: ""
+      JEV_ROUTING_ENABLED: "false"
+      JEV_EVIDENCE_ENABLED: "false"
+      JEV_CONCEPT_MERGE_ENABLED: "false"
+      MCP_WIKI_SEARCH_MAX_STRING_CHARS: "512"
+      MCP_WIKI_SEARCH_MAX_PAGE_SIZE: "20"
+      MCP_WIKI_SEARCH_MAX_CANDIDATES: "100"
+      MCP_WIKI_SEARCH_MAX_CANDIDATE_BYTES: "262144"
+      MCP_WIKI_SEARCH_DEADLINE_MS: "5000"
+      MCP_WIKI_SEARCH_MAX_REQUEST_BYTES: "65536"
+      MCP_WIKI_SEARCH_MAX_RESPONSE_BYTES: "1048576"
+      MCP_WIKI_SEARCH_MAX_SCAN_PAGES: "100"
+      MCP_WIKI_SEARCH_MAX_SCAN_UNITS: "10000"
+      MCP_WIKI_SEARCH_MAX_VECTOR_DIMENSIONS: "4096"
+      MCP_WIKI_SEARCH_CURSOR_HMAC_KEY: "${MCP_TEST_AI_CURSOR_SECRET:?MCP_TEST_AI_CURSOR_SECRET is required}"
+      MCP_WIKI_PAGE_MAX_ID_CHARS: "255"
+      MCP_WIKI_PAGE_MAX_METADATA_BYTES: "65536"
+      MCP_WIKI_PAGE_MAX_BODY_BYTES: "524288"
+      MCP_WIKI_PAGE_MAX_RESPONSE_BYTES: "1048576"
+      MCP_WIKI_PAGE_DEADLINE_MS: "5000"
+      MCP_WIKI_PAGE_DB_CONNECT_TIMEOUT_MS: "1000"
+      MCP_WIKI_PAGE_DB_STATEMENT_TIMEOUT_MS: "3000"
+      MCP_WIKI_PAGE_STORAGE_CONNECT_TIMEOUT_MS: "1000"
+      MCP_WIKI_PAGE_STORAGE_READ_TIMEOUT_MS: "3000"
+    ports: !override
+      - "127.0.0.1:${MCP_TEST_PIPELINE_PORT:-58000}:8000"
+
+  embedding-server:
+    image: fruition-pipeline-dev:local
+    build: !reset null
+    container_name: fruition-mcp-test-embedding-server
+    volumes:
+      - "${MCP_TEST_AI_PIPELINE_DIR:?MCP_TEST_AI_PIPELINE_DIR is required}:/app:ro"
+
+  document-svc:
+    image: fruition-mcp-test-document:local
+    build: !reset null
+    container_name: fruition-mcp-test-document
+    environment:
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      JWT_SECRET: ""
+      JWT_ISSUER: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}"
+      JWT_AUDIENCE: fruition-api
+      JWT_PUBLIC_KEY: "${MCP_TEST_JWT_PUBLIC_KEY:?MCP_TEST_JWT_PUBLIC_KEY is required}"
+      JWT_KEY_ID: "${MCP_TEST_JWT_KEY_ID:?MCP_TEST_JWT_KEY_ID is required}"
+      MCP_ENABLED: "true"
+      MCP_RESOURCE_URI: "${MCP_TEST_RESOURCE_URI:?MCP_TEST_RESOURCE_URI is required}"
+      MCP_AUTHORIZATION_SERVER_URI: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}"
+      MCP_ALLOWED_ORIGINS: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}"
+      MCP_REVIEW_ORIGIN: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}"
+      MCP_WIKI_SEARCH_URI: https://mcp-test-gateway:9443/internal/mcp/wiki/search
+      MCP_CURSOR_SECRET: "${MCP_TEST_DOCUMENT_CURSOR_SECRET:?MCP_TEST_DOCUMENT_CURSOR_SECRET is required}"
+      MCP_MAX_PAGE_SIZE: "20"
+      MCP_MAX_CANDIDATES: "100"
+      MCP_MAX_RESPONSE_BYTES: "1048576"
+      MCP_MAX_CURSOR_BYTES: "8192"
+      MCP_MAX_SOURCE_BLOCKS: "500"
+      MCP_MAX_SOURCE_BYTES: "1048576"
+      MCP_MAX_DOCUMENT_BLOCKS_PER_PAGE: "100"
+      MCP_MAX_DOCUMENT_CONTENT_BYTES: "524288"
+      MCP_DEPENDENCY_TIMEOUT_SECONDS: "5"
+      MCP_WIKI_MAX_SOURCE_DOCUMENTS: "20"
+      MCP_WIKI_MAX_TOTAL_SOURCE_BYTES: "10485760"
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/run/mcp-test/truststore.p12 -Djavax.net.ssl.trustStorePassword=${MCP_TEST_TRUSTSTORE_PASSWORD:?MCP_TEST_TRUSTSTORE_PASSWORD is required}"
+    volumes:
+      - "${MCP_TEST_RUNTIME_DIR:?MCP_TEST_RUNTIME_DIR is required}/truststore.p12:/run/mcp-test/truststore.p12:ro"
+    ports: !override
+      - "127.0.0.1:${MCP_TEST_DOCUMENT_PORT:-58080}:8080"
+
+  access-svc:
+    image: fruition-mcp-test-access:local
+    build: !reset null
+    container_name: fruition-mcp-test-access
+    environment:
+      JWT_SECRET: ""
+      JWT_ISSUER: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}"
+      JWT_AUDIENCE: fruition-api
+      JWT_PUBLIC_KEY: "${MCP_TEST_JWT_PUBLIC_KEY:?MCP_TEST_JWT_PUBLIC_KEY is required}"
+      JWT_PRIVATE_KEY: "${MCP_TEST_JWT_PRIVATE_KEY:?MCP_TEST_JWT_PRIVATE_KEY is required}"
+      JWT_KEY_ID: "${MCP_TEST_JWT_KEY_ID:?MCP_TEST_JWT_KEY_ID is required}"
+      JWT_SIGNING_MODE: rsa
+      MCP_OAUTH_ENABLED: "true"
+      MCP_OAUTH_FRONTEND_AUTHORIZATION_URI: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}/mcp/authorize"
+      APP_MCP_OAUTH_ISSUER: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}"
+      APP_MCP_OAUTH_RESOURCE: "${MCP_TEST_RESOURCE_URI:?MCP_TEST_RESOURCE_URI is required}"
+      APP_MCP_OAUTH_AUTHORIZATION_CODE_TTL: 2m
+      APP_MCP_OAUTH_ACCESS_TOKEN_TTL: 15m
+      APP_MCP_OAUTH_REFRESH_TOKEN_TTL: 8h
+      APP_MCP_OAUTH_PENDING_AUTHORIZATION_TTL: 5m
+      APP_MCP_OAUTH_CLIENT_METADATA_MAX_RESPONSE_BYTES: "65536"
+      APP_MCP_OAUTH_CLIENT_METADATA_TIMEOUT: 2s
+      CORS_ALLOWED_ORIGINS: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}"
+      OAUTH_FRONTEND_REDIRECT_URI: "${MCP_TEST_ORIGIN:?MCP_TEST_ORIGIN is required}/oauth/callback"
+      AUTH_REFRESH_COOKIE_SECURE: "true"
+    ports: !override
+      - "127.0.0.1:${MCP_TEST_ACCESS_PORT:-58081}:8081"
+
+  mcp-test-gateway:
+    image: python:3.12-slim-trixie
+    container_name: fruition-mcp-test-gateway
+    restart: unless-stopped
+    command: ["python", "/opt/mcp-test/gateway.py"]
+    environment:
+      MCP_TEST_CLIENT_ID: "${MCP_TEST_CLIENT_ID:?MCP_TEST_CLIENT_ID is required}"
+      MCP_TEST_CLIENT_REDIRECT_URI: "${MCP_TEST_CLIENT_REDIRECT_URI:-http://127.0.0.1/callback}"
+      MCP_TEST_FRONTEND_UPSTREAM: "http://host.docker.internal:${MCP_TEST_FRONTEND_PORT:-58300}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "${MCP_TEST_ROOT_DIR:?MCP_TEST_ROOT_DIR is required}/scripts/mcp-test-gateway.py:/opt/mcp-test/gateway.py:ro"
+      - "${MCP_TEST_RUNTIME_DIR:?MCP_TEST_RUNTIME_DIR is required}/tls.crt:/run/mcp-test/tls.crt:ro"
+      - "${MCP_TEST_RUNTIME_DIR:?MCP_TEST_RUNTIME_DIR is required}/tls.key:/run/mcp-test/tls.key:ro"
+    ports:
+      - "127.0.0.1:${MCP_TEST_GATEWAY_HTTP_PORT:-58480}:8080"
+      - "127.0.0.1:${MCP_TEST_GATEWAY_HTTPS_PORT:-58443}:8443"
+    depends_on:
+      document-svc:
+        condition: service_healthy
+      access-svc:
+        condition: service_healthy
+      pipeline-api:
+        condition: service_healthy
+
+  frontend:
+    image: fruition-mcp-test-frontend:local
+    container_name: fruition-mcp-test-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MCP_TEST_FRONTEND_PORT:-58300}:3000"
