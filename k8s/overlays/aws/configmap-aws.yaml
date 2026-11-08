@@ -35,3 +35,5 @@ data:
   # 채팅 답변 듣기(TTS)는 비용 때문에 끈다. document-svc가 합성 요청을 403으로 거절하고 화면은 듣기 버튼을 숨긴다.
   # 음성 입력·회의 받아쓰기는 영향 없음. 다시 켤 때 "true"로 바꾸고 document-svc를 재시작한다(프론트 재빌드 불필요).
   SPEECH_SYNTHESIS_ENABLED: "false"
+  # Ready 전 임베딩 모델 적재 상태만 확인한다. 일반 연결 오류를 기동 중 안내로 오인하지 않는다.
+  EMBEDDING_STARTUP_STATUS_URL: "http://embedding-server-startup:8000"
