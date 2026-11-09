@@ -208,3 +208,20 @@ class RecoveryTests(unittest.TestCase):
         rollout.assert_not_called()
         self.assertTrue(any(d["metadata"]["name"] == self.prefix + "-recovery-failed"
                             for d in self.fake.applied("ConfigMap")))
+
+    def test_prior_successful_recovery_history_does_not_block_another_release(self):
+        old = "d" * 40
+        self.fake.resources["configmaps"] += [
+            deploy.install_record(maintenance.PREFIX + old + "-started", {}),
+            deploy.install_record(maintenance.PREFIX + old + "-recovery-started", {}),
+            deploy.install_record(deploy.release_name(old), {})]
+        self.recover()
+        deploy.authenticated_smoke.assert_called_once()
+
+    def test_prior_unresolved_recovery_still_blocks_before_mutation(self):
+        self.fake.resources["configmaps"].append(
+            deploy.install_record(maintenance.PREFIX + "d" * 40 + "-recovery-started", {}))
+        with self.assertRaisesRegex(ValueError, "another unresolved"):
+            self.recover()
+        self.assertFalse(self.fake.applied("ConfigMap"))
+        self.assertFalse(self.fake.applied("Deployment"))
