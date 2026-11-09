@@ -108,6 +108,24 @@ class PreservationTests(unittest.TestCase):
         self.assertNotIn("cat /tmp/existing-credit-users.csv", script)
 
 
+    def test_combined_job_preserves_analytics_secret_and_kubernetes_dollar_escaping(self):
+        api = SimpleNamespace(preflight_job=deploy.preflight_job, job=Mock(),
+                              kubectl=Mock(return_value="credit exemptions verified"))
+        preservation.prepare_credit_exemptions(api, {**CONFIG, "analytics_enabled": "true"}, evidence(),
+                                              job_name="existing-credit-exemptions-continuation")
+        job = api.job.call_args.args[0]
+        container = job["spec"]["template"]["spec"]["containers"][0]
+        env = {e["name"]: e for e in container["env"]}
+        self.assertEqual("fruition-analytics", env["POSTHOG_PROJECT_TOKEN"]["valueFrom"]["secretKeyRef"]["name"])
+        script = container["command"][2]
+        # Kubelet collapses $$ before the shell receives a command argument.
+        self.assertEqual(script, script.replace("$$", "$"))
+        self.assertIn("DO $credit$ BEGIN", script)
+        self.assertIn("END $credit$;", script)
+        self.assertEqual("existing-credit-exemptions-continuation", job["metadata"]["name"])
+        api.kubectl.assert_called_once_with("logs", "job/existing-credit-exemptions-continuation")
+
+
 class LosslessOrderingTests(unittest.TestCase):
     def setUp(self):
         self.documents = deploy.render(CONFIG, SHA, MANIFEST)

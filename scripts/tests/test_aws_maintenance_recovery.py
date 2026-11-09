@@ -225,3 +225,60 @@ class RecoveryTests(unittest.TestCase):
             self.recover()
         self.assertFalse(self.fake.applied("ConfigMap"))
         self.assertFalse(self.fake.applied("Deployment"))
+
+    def continuation_plan(self):
+        self.pre_rollout_plan()
+        prior_started = deploy.install_record(self.prefix + "-recovery-started", {"plan": maintenance.canonical(self.plan)})
+        prior_failed = deploy.install_record(self.prefix + "-recovery-failed", {"containment": "requested"})
+        self.fake.resources["configmaps"] += [prior_started, prior_failed]
+        job = {"metadata": {"name": "existing-credit-exemptions", "uid": "11111111-2222-3333-4444-555555555555"},
+               "spec": {"backoffLimit": 0}, "status": {"failed": 1}}
+        self.fake.resources["jobs"].append(job)
+        self.plan["credit_preflight_continuation"] = {
+            "started_data_sha256": maintenance.digest(prior_started["data"]),
+            "failed_data_sha256": maintenance.digest(prior_failed["data"]),
+            "job_uid": job["metadata"]["uid"], "job_spec_sha256": maintenance.digest(job["spec"])}
+        return job
+
+    def test_credit_continuation_preserves_prior_attempt_and_uses_new_job(self):
+        self.continuation_plan()
+        original = deploy.kubectl
+        def kubectl(*args, **kwargs):
+            if args == ("logs", "job/existing-credit-exemptions"): return "analytics token missing or invalid"
+            return original(*args, **kwargs)
+        before = copy.deepcopy(self.fake.resources["configmaps"])
+        with patch.object(deploy, "kubectl", side_effect=kubectl), patch("aws_data_preservation.verify_after"), \
+             patch("aws_data_preservation.prepare_credit_exemptions") as credits, patch.object(deploy, "complete_rollout"):
+            self.recover()
+        self.assertEqual(before, self.fake.resources["configmaps"])
+        self.assertEqual("existing-credit-exemptions-continuation", credits.call_args.kwargs["job_name"])
+        self.assertTrue(any(d["metadata"]["name"] == self.prefix + "-credit-preflight-recovery-started"
+                            for d in self.fake.applied("ConfigMap")))
+
+    def test_credit_continuation_rejects_changed_prior_audit(self):
+        self.continuation_plan()
+        self.plan["credit_preflight_continuation"]["failed_data_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "prior recovery audit"):
+            self.recover()
+        self.assertFalse(self.fake.applied("ConfigMap"))
+
+    def test_credit_continuation_rejects_other_failure_or_repeat(self):
+        self.continuation_plan()
+        # The fake logs do not match the one reviewed failure before DB access.
+        with self.assertRaisesRegex(ValueError, "pre-DB failure"):
+            self.recover()
+        self.fake.resources["configmaps"].append(
+            deploy.install_record(self.prefix + "-credit-preflight-recovery-started", {}))
+        with self.assertRaisesRegex(ValueError, "cannot repeat"):
+            self.recover()
+        self.assertFalse(self.fake.applied("ConfigMap"))
+
+    def test_completed_credit_continuation_does_not_lock_future_deploy(self):
+        self.fake.resources["configmaps"] += [
+            deploy.install_record(self.prefix + "-credit-preflight-recovery-started", {}),
+            deploy.install_record(deploy.release_name(SHA), {})]
+        ordinary = {"release_sha": SHA, "migration_mode": "none",
+            "compatibility_test_url": self.plan["incident_url"], "restore_test_url": self.plan["incident_url"]}
+        with patch.object(deploy, "_deploy") as continuation:
+            deploy.deploy(CONFIG, SHA, self.documents, review=ordinary)
+        continuation.assert_called_once()
