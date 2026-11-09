@@ -23,13 +23,18 @@ def validate_maintenance_review(review, sha):
                 "predecessor_record_sha256", "before_fingerprints", "after_fingerprints",
                 "expected_live_images", "maintenance_test_url", "restore_test_url",
                 "quiescence_test_url", "data_loss_accepted"}
+    if review.get("data_loss_accepted") is False:
+        required.add("preservation")
     if set(review) != required or review["release_sha"] != sha:
         raise ValueError("maintenance review fields/release do not match")
     predecessor = review["expected_predecessor_release"]
     if not isinstance(predecessor, str) or not re.fullmatch(r"[0-9a-f]{40}", predecessor) or predecessor == sha:
         raise ValueError("maintenance requires a distinct predecessor release")
-    if review["data_loss_accepted"] is not True:
-        raise ValueError("maintenance requires the explicitly reviewed data-loss acceptance")
+    if review["data_loss_accepted"] is False:
+        from aws_data_preservation import validate_preservation
+        validate_preservation(review["preservation"])
+    elif review["data_loss_accepted"] is not True:
+        raise ValueError("maintenance requires an explicit loss policy")
     for values in (review["before_fingerprints"], review["after_fingerprints"]):
         if not isinstance(values, dict) or set(values) != SERVICES or any(
                 not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{64}", v) for v in values.values()):
@@ -239,6 +244,9 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
     if current != review["after_fingerprints"]:
         raise ValueError("recovery requires all three rehearsed after schemas; no SQL repair is allowed")
     assert_quiescent(api, documents)
+    if review["data_loss_accepted"] is False:
+        from aws_data_preservation import verify_after
+        verify_after(api, config, review["preservation"])
     create_record(api, prefix + "-recovery-started", {"plan": canonical(plan), "fingerprints": canonical(current)})
     try:
         api.complete_rollout(config, sha, documents, current=current, review=review, settings=settings)
@@ -301,6 +309,9 @@ def guarded_deploy(api, config, sha, documents, **kwargs):
     if api.fingerprints(config, require_quiescent=True) != review["before_fingerprints"]:
         raise ValueError("live before fingerprints differ from review")
     assert_quiescent(api, documents)
+    if review["data_loss_accepted"] is False:
+        from aws_data_preservation import verify_before
+        verify_before(api, config, review["preservation"])
     data = {"review": canonical(review), "config": canonical(config),
             "manifest": yaml.safe_dump_all(documents, sort_keys=False),
             "predecessor_record": canonical(predecessor["data"])}

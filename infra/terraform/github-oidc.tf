@@ -85,3 +85,18 @@ resource "aws_iam_role_policy" "github_deploy_eks" {
     ]
   })
 }
+
+# 무손실 배포에서 운영자가 만든 암호화 백업의 대상·완료 상태만 확인한다.
+# snapshot 생성/삭제·DB 변경 권한은 배포 role에 주지 않는다.
+resource "aws_iam_role_policy" "github_deploy_backup_read" {
+  name = "lossless-backup-verification"
+  role = aws_iam_role.github_deploy.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["rds:DescribeDBInstances", "rds:DescribeDBSnapshots"]
+      Resource = "*"
+    }]
+  })
+}
