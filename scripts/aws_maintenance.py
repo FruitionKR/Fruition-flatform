@@ -215,6 +215,8 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
     for name in records:
         if name.startswith(PREFIX) and name.endswith("-started") and name != prefix + "-started":
             other = name[len(PREFIX):-len("-started")]
+            if other.endswith("-recovery"):
+                other = other[:-len("-recovery")]
             if api.release_name(other) not in records:
                 raise ValueError("another unresolved maintenance attempt exists")
     for suffix, key in (("-started", "started_data_sha256"), ("-failed", "failed_data_sha256")):
