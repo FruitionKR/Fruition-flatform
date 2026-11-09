@@ -34,7 +34,7 @@ cp infra/.env.example infra/.env
 
 - 공통: `JWT_SECRET`
 - AI 기능 사용 시: ai-svc secret env `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` 중 사용할 provider의 키
-- Jev 선택 판단 사용 시: `TYPESAFE_API_KEY`와 켤 경로의 `JEV_ROUTING_ENABLED`·`JEV_EVIDENCE_ENABLED`·`JEV_CONCEPT_MERGE_ENABLED=true`. 키가 없거나 호출이 실패하면 기존 경로로 처리한다.
+- Jev 선택 판단: `TYPESAFE_API_KEY`가 있으면 모든 경로가 켜진다. 오류가 있는 경로만 `JEV_*_ENABLED=false`로 끈다. 키가 없거나 호출이 실패하면 기존 경로로 처리한다.
 - 소셜 로그인 사용 시(선택): `GOOGLE_CLIENT_ID/SECRET`, `NAVER_CLIENT_ID/SECRET`, `KAKAO_CLIENT_ID/SECRET`
 - 이메일 로그인 데모용 고정 인증 코드: `AUTH_EMAIL_DEV_FIXED_CODE`
 
@@ -292,64 +292,10 @@ AI image를 처음 만들거나 AI 코드·의존성이 바뀐 경우에만 위 
 `--build`를 추가한다.
 기존 image로 재검증할 때는 `--build` 없이 `up -d`를 사용한다.
 
-### 3-3-1. 기존 AI 데이터 maintenance cutover
+### 3-3-1. 기존 AI 데이터 maintenance cutover 종료
 
-신규 빈 환경에는 필요 없다. 기존 `core_db`의 Wiki·Agent·Skill·checkpoint를 옮길 때는 먼저 외부 요청을 차단하고 `pipeline-api`를 내려 lint/restore/reingest/Agent mutation을 막는다. Wiki와 Agent 실행이 모두 terminal 상태가 된 뒤 관련 worker를 내린다.
-
-```sh
-docker compose --env-file infra/.env \
-  -f infra/compose.infra.yml -f infra/compose.ai.yml \
-  stop pipeline-api agent-task-worker pipeline-agent-worker
-docker compose --env-file infra/.env -f infra/compose.infra.yml \
-  exec -T postgresql sh -c \
-  'PGPASSWORD="$CORE_DB_MIGRATION_PASSWORD" exec psql -U "$CORE_DB_MIGRATION_USER" -d "$CORE_DB_NAME" -At' <<'SQL'
-select count(*) from pipeline_runs where status not in ('succeeded','failed','notify_pending');
-select count(*) from agent_runs where status not in ('completed','partial_failed','failed','conflicted','rejected','cancelled');
-SQL
-docker compose --env-file infra/.env \
-  -f infra/compose.infra.yml -f infra/compose.ai.yml \
-  stop ingest-worker
-```
-
-두 결과가 0인지 확인하고 core/ai DB snapshot 식별자를 기록한다. 먼저 두 runtime role의 core Wiki·Agent·Skill·checkpoint DML을 차단한다. `copy`는 active run 0건과 이 권한 차단 상태를 다시 검증한 뒤, 하나의 `REPEATABLE READ READ ONLY` source transaction에서 ID 보존 stream copy와 row count·PK·canonical content hash·고아 참조 검증을 수행한다.
-
-```sh
-../AI/pipeline/.venv/bin/python ../AI/pipeline/wiki_db_cutover.py lock-core-writes
-../AI/pipeline/.venv/bin/python ../AI/pipeline/wiki_db_cutover.py copy \
-  --writes-stopped \
-  --core-snapshot-id '<core snapshot ID>' \
-  --ai-snapshot-id '<ai snapshot ID>'
-```
-
-`copy` 또는 row count·PK·hash·고아 참조 검증이 실패하면 연결을 전환하지 말고 즉시 write fence를 복구한다. 실패한 target transaction은 rollback되므로 ai_db의 부분 복사본을 덮어쓰지 않는다. rollback 명령은 `core_runtime`과 `ai_runtime`의 source table·sequence 권한을 복구하고 두 role의 실제 write를 검증한다.
-
-```sh
-../AI/pipeline/.venv/bin/python ../AI/pipeline/wiki_db_cutover.py rollback-core-permissions
-```
-
-외부 요청 차단은 유지한 채 새 이미지의 `pipeline-api`만 올린다.
-
-```sh
-docker compose --env-file infra/.env \
-  -f infra/compose.infra.yml -f infra/compose.ai.yml \
-  up -d --build pipeline-api
-```
-
-내부 pipeline API로 ingest/query/lint/restore/agent smoke test를 모두 실행하고, 다섯 기능이 성공한 경우에만 `ai_runtime`의 core 권한을 완전히 회수하고 core source table을 read-only로 유지한 뒤 worker를 재개한다.
-
-```sh
-../AI/pipeline/.venv/bin/python ../AI/pipeline/wiki_db_cutover.py \
-  finalize-core-permissions --smoke-tested ingest query lint restore agent
-docker compose --env-file infra/.env \
-  -f infra/compose.infra.yml -f infra/compose.ai.yml \
-  start ingest-worker
-```
-
-smoke test가 실패하면 worker를 재개하지 않는다. 구버전 이미지와 core DB 연결로 되돌린 뒤 다음 명령으로 core source write 권한을 복구한다.
-
-```sh
-../AI/pipeline/.venv/bin/python ../AI/pipeline/wiki_db_cutover.py rollback-core-permissions
-```
+Wiki·Agent·Skill·checkpoint의 ai_db 이전 절차는 종료됐다. Document V74는 core_db의 레거시 AI 테이블 23개를 제거하며, AI 저장소의 `wiki_db_cutover.py`도 삭제됐다. 현재 릴리스에서는 복사·권한 전환 스크립트를 실행하지 않는다.
+구버전 설치를 올릴 때는 V74 적용 여부를 먼저 확인하고 [유지보수 전환 절차](aws-maintenance-cutover.md)의 검토·백업·마이그레이션 경로를 따른다.
 
 문서 편집 저장소는 V39가 비어 있는 `document_edit_states`와 `document_content_versions`에 편집 revision을 초기화하는 fresh PostgreSQL cutover다. 기존 Mongo 편집 데이터와 두 PostgreSQL table의 폐기는 대상별 승인 후 수행하며, 기존 편집 상태·write receipt·pending edit event를 import하거나 dual-write하지 않는다. 초기화된 편집 상태의 본문·revision·receipt·content version·asset/reference·적용 감사·outbox를 하나의 core DB transaction으로 기록한다. 결정 근거: [adr/0016](https://github.com/FruitionKR/Fruition-document/blob/main/docs/adr/0016-consolidate-document-body-into-postgres.md).
 
@@ -790,7 +736,7 @@ eks_addon_versions에는 vpc-cni/coredns/kube-proxy/aws-ebs-csi-driver/metrics-s
 
 Helm install/upgrade는 스크립트의 --version과 --wait를 사용한다. ALB controller에는 실제 EKS VPC ID를 지정해 metadata 추론에 의존하지 않는다. 플랫폼 관리자는 k8s/platform/aws의 Namespace, gp3 StorageClass, ClusterSecretStore, 앱 배포 Role/RoleBinding 및 이름이 제한된 read-only ClusterRole/Binding을 설치한다. gp3는 ebs.csi.aws.com, 암호화, WaitForFirstConsumer, Retain이며 AWS KafkaNodePool은 class=gp3다.
 
-앱 EKS access entry는 fruition:deployers 그룹만 부여한다. runner 호스트 role은 fruition:operators 그룹으로 fruition namespace의 Pod 생성·삭제·로그와 Deployment 조회만 받는 별도 access entry를 가진다(운영 DB 일회성 조회용, `k8s/platform/aws/deploy-rbac.yaml`의 operations-query). runner 호스트에서 `bash scripts/aws-ops-db-query.sh "SELECT ..."`로 사용하며, SELECT/WITH 문 하나만 받아 일회성 `postgres:16-alpine` Pod로 core_db에 `PGSSLMODE=require` 조회 후 Pod를 삭제한다(`AWS_REGION`, `EKS_CLUSTER`로 대상 변경). 주의: 스크립트는 비밀번호를 `fruition-secret` Secret에서 읽지만 AWS overlay가 만드는 runtime Secret은 `fruition-document`이므로 실제 실행 전 Secret 이름을 확인한다. 앱 role은 fruition namespace의 ConfigMap/ServiceAccount/Service/Deployment/Job/Ingress/NetworkPolicy/ExternalSecret/Kafka/ScaledObject를 배포하고 Pod 상태·로그를 조회한다. Secrets/Role/Binding이나 다른 namespace를 직접 읽고 쓰지 못한다. 플랫폼 자원은 이름이 지정된 읽기만 허용한다. 앱 코드도 허용 kind·namespace 밖 apply를 거부한다. 플랫폼 RBAC는 앱 workflow에 넣지 않는다.
+앱 EKS access entry는 fruition:deployers 그룹만 부여한다. runner 호스트 role은 fruition:operators 그룹으로 기존 Pod 상태·로그와 Deployment 조회만 받는 별도 access entry를 가진다(`k8s/platform/aws/deploy-rbac.yaml`의 operations-query). 임의 Pod 생성은 Secret 주입과 명령 실행으로 이어지므로 생성·삭제 권한을 제거했다. `aws-ops-db-query.sh`는 별도 Pod 생성 권한을 가진 관리 주체 전용이며 조회 역할에서 실행하면 권한 검사 단계에서 중단된다. SQL 접두사 검사와 PGOPTIONS는 실수 방지일 뿐 DB 권한을 강제하지 않는다. 운영 조회를 다시 위임하려면 전용 읽기 전용 DB 계정과 서버 측 제한을 먼저 갖춰야 한다. 앱 role은 fruition namespace의 ConfigMap/ServiceAccount/Service/Deployment/Job/Ingress/NetworkPolicy/ExternalSecret/Kafka/ScaledObject를 배포하고 Pod 상태·로그를 조회한다. Secrets/Role/Binding이나 다른 namespace를 직접 읽고 쓰지 못한다. 플랫폼 자원은 이름이 지정된 읽기만 허용한다. 앱 코드도 허용 kind·namespace 밖 apply를 거부한다. 플랫폼 RBAC는 앱 workflow에 넣지 않는다.
 
     # 플랫폼 관리자 또는 별도 권한 검증 담당자가 실제 AWS에서 수행할 검증
     kubectl auth can-i create deployments -n fruition --as-group=fruition:deployers --as=permission-check

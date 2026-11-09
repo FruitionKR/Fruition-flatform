@@ -16,6 +16,14 @@ resource "aws_kms_alias" "secrets" {
 resource "aws_secretsmanager_secret" "app" {
   name       = "${var.project}/app"
   kms_key_id = aws_kms_key.secrets.arn
+
+  # 교체 증적 태그는 회전 절차(scripts/aws_jwt_keys.py 등)가 소유 — 지우면 credential-guard 기한 경보가 울린다.
+  lifecycle {
+    ignore_changes = [
+      tags["fruition:db-credentials-rotated-at"],
+      tags["fruition:jwt-signing-key-rotated-at"],
+    ]
+  }
 }
 
 resource "random_password" "internal_callback_token" {

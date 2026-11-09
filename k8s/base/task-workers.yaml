@@ -271,7 +271,8 @@ spec:
             - {name: AI_TASK_CONCURRENCY, value: "1"}
             - {name: AI_COMMAND_CONSUMER_GROUP, value: maintenance-task-worker}
           resources:
-            requests: {cpu: 100m, memory: 256Mi}
+            # /tmp 1.5Gi와 로그·쓰기 계층 여유를 스케줄러에 예약한다.
+            requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 2Gi}
             limits: {memory: 1Gi}
           # 회의 녹음 전사: 녹음(최대 500MiB) 다운로드와 디코딩한 chunk WAV를 /tmp에 둔다.
           volumeMounts:

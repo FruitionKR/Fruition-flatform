@@ -84,9 +84,29 @@ resource "aws_sns_topic_subscription" "operations" {
 
 locals {
   operations_alarm_descriptions = {
-    waf_blocked       = "WAF 지속 차단: 5분 100건 초과가 최근 3구간 중 2구간입니다. 규칙·IP·경로를 확인하세요."
-    waf_blocked_burst = "WAF 대량 차단: 5분 동안 1,000건을 초과했습니다. 공격 규모와 서비스 영향을 확인하세요."
-    alb_elb_5xx       = "ALB 자체 5xx가 5분 10건 초과로 최근 3구간 중 2구간입니다. 기동 상태와 대상 연결을 확인하세요."
+    notification_test      = "운영 알림 전달 테스트입니다. 실제 서비스 장애 여부와 무관합니다."
+    pod_cpu                = "애플리케이션 Pod CPU 사용률 경보입니다. 트래픽, CPU 제한과 과부하 Pod를 확인하세요."
+    pod_memory             = "애플리케이션 Pod 메모리 사용률 경보입니다. 메모리 제한, 누수와 OOM 종료 기록을 확인하세요."
+    application_log_volume = "애플리케이션 로그 유입량 경보입니다. 반복 오류와 과도한 로그 출력을 확인하세요."
+    node_cpu               = "노드 CPU 사용률 경보입니다. 노드별 부하와 Pod 배치를 확인하세요."
+    node_memory            = "노드 메모리 사용률 경보입니다. 메모리 사용량이 큰 Pod와 노드 여유 용량을 확인하세요."
+    failed_nodes           = "비정상 노드 수 경보입니다. 노드 Ready 상태와 Kubernetes 이벤트를 확인하세요."
+    telemetry_missing      = "노드 모니터링 데이터 수집 경보입니다. 노드 실행 상태와 CloudWatch 에이전트를 확인하세요."
+    nat_egress             = "NAT 외부 전송량 경보입니다. 대량 다운로드, 외부 API 호출과 재시도를 확인하세요."
+    redis_memory           = "Redis 메모리 사용률 경보입니다. 키 수, TTL과 메모리 제거 정책을 확인하세요."
+    rds_access_space       = "인증 DB 저장 공간 경보입니다. 남은 용량, 테이블·인덱스 증가량을 확인하세요."
+    rds_core_space         = "핵심 DB 저장 공간 경보입니다. 남은 용량, 테이블·인덱스 증가량을 확인하세요."
+    rds_access_cpu         = "인증 DB CPU 사용률 경보입니다. 실행 중인 쿼리, 연결 수와 부하를 확인하세요."
+    rds_core_cpu           = "핵심 DB CPU 사용률 경보입니다. 실행 중인 쿼리, 연결 수와 부하를 확인하세요."
+    rds_access_memory      = "인증 DB 여유 메모리가 15분 연속 100MiB 아래입니다(micro 1GB, 정상 상태는 약 150–200MiB). 스왑·연결 수·오래 실행 중인 쿼리를 확인하고, 지속되면 인스턴스 크기 조정이 필요한지 확인하세요."
+    rds_access_swap        = "인증 DB 스왑 사용량이 64MiB를 넘었습니다. 메모리가 부족해 디스크로 밀려난 상태이니 여유 메모리, 연결 수와 small 복귀 여부를 확인하세요."
+    rds_access_connections = "인증 DB 연결 수가 60을 넘었습니다(micro 최대 약 80). access-svc Pod 수·Hikari 풀 크기와 마이그레이션 작업, 남은 운영 접속을 확인하세요."
+    alb_5xx                = "애플리케이션 서버 오류(5xx) 경보입니다. 대상 서비스 로그와 배포 상태를 확인하세요."
+    alb_latency            = "애플리케이션 응답 지연 경보입니다. 느린 쿼리, 외부 API와 서비스 부하를 확인하세요."
+    alb_requests           = "ALB 요청 수 경보입니다. 트래픽 급증 원인과 요청 경로를 확인하세요."
+    waf_blocked            = "WAF 지속 차단: 5분 100건 초과가 최근 3구간 중 2구간입니다. 규칙·IP·경로를 확인하세요."
+    waf_blocked_burst      = "WAF 대량 차단: 5분 동안 1,000건을 초과했습니다. 공격 규모와 서비스 영향을 확인하세요."
+    alb_elb_5xx            = "ALB 자체 5xx가 5분 10건 초과로 최근 3구간 중 2구간입니다. 기동 상태와 대상 연결을 확인하세요."
   }
   operations_metrics = merge({
     notification_test = { namespace = "Fruition/Operations", metric = "NotificationTest", dimensions = { Environment = "feedback" }, stat = "Sum", threshold = 0, comparison = "GreaterThanThreshold", periods = 1, missing = "notBreaching" }
@@ -112,6 +132,11 @@ locals {
     for name, db in { access = aws_db_instance.access, core = aws_db_instance.core } : "rds_${name}_cpu" => {
       namespace              = "AWS/RDS", metric = "CPUUtilization", dimensions = { DBInstanceIdentifier = db.identifier }, stat = "Average", threshold = 80, comparison = "GreaterThanThreshold", periods = 3, missing = "missing"
     }
+    }, {
+    # access DB는 db.t4g.micro(1GB)라 메모리·스왑·연결 수를 따로 지켜본다.
+    rds_access_memory      = { namespace = "AWS/RDS", metric = "FreeableMemory", dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }, stat = "Average", threshold = 104857600, comparison = "LessThanThreshold", periods = 3, datapoints = 3, missing = "missing" }
+    rds_access_swap        = { namespace = "AWS/RDS", metric = "SwapUsage", dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }, stat = "Maximum", threshold = 67108864, comparison = "GreaterThanThreshold", periods = 1, missing = "missing" }
+    rds_access_connections = { namespace = "AWS/RDS", metric = "DatabaseConnections", dimensions = { DBInstanceIdentifier = aws_db_instance.access.identifier }, stat = "Maximum", threshold = 60, comparison = "GreaterThanThreshold", periods = 2, missing = "missing" }
     }, var.observability_alb_arn_suffix == "" ? {} : {
     alb_5xx = { namespace = "AWS/ApplicationELB", metric = "HTTPCode_Target_5XX_Count", dimensions = { LoadBalancer = var.observability_alb_arn_suffix }, stat = "Sum", threshold = 10, comparison = "GreaterThanThreshold", periods = 1, datapoints = 1, missing = "notBreaching" }
     # Allow one wake-up window, but detect persistent ALB-generated failures too.
@@ -124,12 +149,12 @@ locals {
 resource "aws_cloudwatch_metric_alarm" "operations" {
   for_each            = local.operations_metrics
   alarm_name          = "${var.project}-ops-${each.key}"
-  alarm_description   = lookup(local.operations_alarm_descriptions, each.key, "See docs/aws-observability.md: ${each.key}. ALARM and recovery are sent to Discord.")
+  alarm_description   = lookup(local.operations_alarm_descriptions, each.key, "운영 지표 ${each.key}의 상태 알림입니다. 확인 절차: docs/aws-observability.md.")
   namespace           = each.value.namespace
   metric_name         = each.value.metric
   dimensions          = each.value.dimensions
   statistic           = each.value.stat
-  period              = 300
+  period              = each.value.namespace == "ContainerInsights" ? 600 : 300
   evaluation_periods  = each.value.periods
   datapoints_to_alarm = try(each.value.datapoints, each.value.periods)
   threshold           = each.value.threshold
@@ -228,7 +253,7 @@ resource "aws_cloudwatch_log_metric_filter" "ai_usage" {
 resource "aws_cloudwatch_metric_alarm" "ai_usage" {
   for_each            = local.ai_usage_alarms
   alarm_name          = "${var.project}-ops-${each.key}"
-  alarm_description   = "${each.value.description} See docs/aws-observability.md. ALARM and recovery are sent to Discord."
+  alarm_description   = "${each.value.description} 확인 절차: docs/aws-observability.md."
   namespace           = "Fruition/AIUsage"
   metric_name         = aws_cloudwatch_log_metric_filter.ai_usage[each.key].metric_transformation[0].name
   statistic           = "Sum"
@@ -268,7 +293,7 @@ resource "aws_cloudwatch_dashboard" "operations" {
     [for i, key in sort(keys(local.operations_metrics)) : {
       type = "metric", x = (i % 3) * 8, y = 2 + floor(i / 3) * 6, width = 8, height = 6
       properties = {
-        title   = key, region = var.region, period = 300, stat = local.operations_metrics[key].stat, view = "timeSeries"
+        title   = key, region = var.region, period = local.operations_metrics[key].namespace == "ContainerInsights" ? 600 : 300, stat = local.operations_metrics[key].stat, view = "timeSeries"
         metrics = [concat([local.operations_metrics[key].namespace, local.operations_metrics[key].metric], flatten([for k, v in local.operations_metrics[key].dimensions : [k, v]]))]
       }
     }],

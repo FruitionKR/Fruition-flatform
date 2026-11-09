@@ -163,13 +163,30 @@ module "eks" {
 
 # 기존 모듈과 같은 버전·설정·충돌 처리·노드 생성 후 설치 순서를 유지한다.
 locals {
+  ebs_csi_leader_election_args = [
+    "--leader-election-lease-duration=60s",
+    "--leader-election-renew-deadline=40s",
+    "--leader-election-retry-period=10s",
+  ]
   eks_addons = {
     coredns    = { addon_version = var.eks_addon_versions["coredns"] }
     kube-proxy = { addon_version = var.eks_addon_versions["kube-proxy"] }
     vpc-cni    = { addon_version = var.eks_addon_versions["vpc-cni"], configuration_values = jsonencode({ enableNetworkPolicy = "true" }) }
     # Strimzi Kafka PVC용 EBS gp3
     aws-ebs-csi-driver = {
-      addon_version            = var.eks_addon_versions["aws-ebs-csi-driver"]
+      addon_version = var.eks_addon_versions["aws-ebs-csi-driver"]
+      # Only the Unix socket is ephemeral; EBS volumes remain persistent.
+      # 감사 로그 절감(2026-11-02): sidecar lease 갱신 5초→10초. VolumeSnapshot CRD가 없어 404 list/watch만
+      # 반복하던 snapshotter는 끈다(스냅샷 미사용). 리더 Pod 비정상 종료 시 인계는 최대 약 60초.
+      configuration_values = jsonencode({
+        controller = { podAnnotations = { "cluster-autoscaler.kubernetes.io/safe-to-evict-local-volumes" = "socket-dir" } }
+        sidecars = {
+          provisioner = { additionalArgs = local.ebs_csi_leader_election_args }
+          attacher    = { additionalArgs = local.ebs_csi_leader_election_args }
+          resizer     = { additionalArgs = local.ebs_csi_leader_election_args }
+          snapshotter = { forceEnable = false }
+        }
+      })
       service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
     }
     # API HPA가 CPU 사용률을 읽으려면 필요하다. 없으면 HPA가 <unknown>으로 멈춘다.

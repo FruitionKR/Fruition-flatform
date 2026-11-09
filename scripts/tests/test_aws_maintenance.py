@@ -69,6 +69,8 @@ class MaintenanceCluster(FakeCluster):
         if any(d["kind"] == "Ingress" and "alb.ingress.kubernetes.io/actions.maintenance" not in
                d["metadata"].get("annotations", {}) for d in self.events[-1][1]):
             self.resources.pop("targetgroupbindings", None)
+        if "job-name=fruition-deploy-headroom" in args or any(a.startswith("strimzi.io/cluster=kafka") for a in args):
+            return result
         if args[0] == "kubectl" and args[3] == "get" and args[4] in self.resources:
             return json.dumps({"items": self.resources[args[4]]})
         return result
@@ -265,6 +267,10 @@ class MaintenanceTests(unittest.TestCase):
         self.assertFalse(any(d["metadata"]["name"] == deploy.release_name("c" * 40) for d in configs))
         self.assertFalse(self.fake.applied("HorizontalPodAutoscaler"))
         self.assertFalse(self.fake.applied("ScaledObject"))
+        # ScaledObject를 다시 걸지 않으므로 0으로 멈춘 KEDA worker는 manifest replicas로 되살린다.
+        workers = {d["metadata"]["name"]: d["spec"] for d in self.fake.applied("Deployment")}
+        for name in ("converter", "ingest-worker", "query-task-worker", "embedding-server"):
+            self.assertEqual(1, workers[name]["replicas"], name)
         events = self.fake.events
         routes = next(i for i, (_, docs) in enumerate(events) if any(d["kind"] == "Ingress" for d in docs))
         ready = [i for i, (args, _) in enumerate(events) if "rollout" in args]

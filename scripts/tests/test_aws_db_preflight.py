@@ -20,7 +20,9 @@ class PreflightDatabaseTests(unittest.TestCase):
         cls.addClassCleanup(lambda: subprocess.run(["docker", "rm", "-fv", cls.container], capture_output=True))
         cls.command(["docker", "run", "-d", "--name", cls.container, "-e", "POSTGRES_PASSWORD=isolated_test_admin",
                  "-e", "POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256",
-                 "-v", f"{ROOT / 'infra/postgres'}:/work:ro", "postgres:16-alpine"])
+                 "postgres:16-alpine"])
+        # bind mount는 Docker VM이 공유하지 않는 경로(예: colima의 $HOME 밖)에서 비어 있으므로 복사한다.
+        cls.command(["docker", "cp", f"{ROOT / 'infra/postgres'}/.", f"{cls.container}:/work"])
         for _ in range(60):
             result = subprocess.run(["docker", "exec", cls.container, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], capture_output=True)
             if result.returncode == 0:
@@ -50,7 +52,12 @@ class PreflightDatabaseTests(unittest.TestCase):
 
     @staticmethod
     def command(args, input=None):
-        return subprocess.run(args, input=input, text=True, capture_output=True, check=True).stdout.strip()
+        try:
+            return subprocess.run(args, input=input, text=True, capture_output=True, check=True).stdout.strip()
+        except subprocess.CalledProcessError as error:
+            # 기본 메시지에는 출력이 빠져 psql 접속 실패 등을 진단할 수 없다. 출력에는 임시 테스트 값만 있다.
+            error.add_note(f"stdout:\n{error.stdout}\nstderr:\n{error.stderr}")
+            raise
 
     @classmethod
     def sql(cls, sql, database="postgres"):

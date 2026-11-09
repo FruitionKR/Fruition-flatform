@@ -1,0 +1,4 @@
+[
+  { "email": "loadtest-01@example.com", "password": "<시험 계정 비밀번호>" },
+  { "email": "loadtest-02@example.com", "password": "<시험 계정 비밀번호>" }
+]

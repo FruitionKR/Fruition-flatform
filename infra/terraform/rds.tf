@@ -47,18 +47,43 @@ resource "aws_db_parameter_group" "postgres16" {
 }
 
 # RDS가 내보내는 로그의 그룹을 먼저 만들어 14일 보관 기간을 건다(없으면 RDS가 만료 없는 그룹을 자동 생성한다).
-# 이미 자동 생성된 그룹이 있으면 `terraform import 'aws_cloudwatch_log_group.rds["access"]' /aws/rds/instance/<project>-access-postgres/postgresql` (core도 같은 방식)로 가져온다.
+# 기존 그룹은 rds_log_groups_to_import에 지정해 plan에서 import를 검토한다.
+variable "rds_log_groups_to_import" {
+  description = "이미 존재하는 RDS 로그 그룹만 지정한다. 신규 설치는 빈 집합으로 생성한다."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for name in var.rds_log_groups_to_import : contains(["access", "core"], name)])
+    error_message = "RDS 로그 그룹은 access 또는 core만 지정할 수 있습니다."
+  }
+}
+
+import {
+  for_each = var.rds_log_groups_to_import
+  to       = aws_cloudwatch_log_group.rds[each.key]
+  id       = "/aws/rds/instance/${var.project}-${each.key}-postgres/postgresql"
+}
+
 resource "aws_cloudwatch_log_group" "rds" {
   for_each          = toset(["access", "core"])
   name              = "/aws/rds/instance/${var.project}-${each.key}-postgres/postgresql"
   retention_in_days = 14
 }
 
+variable "access_db_apply_immediately" {
+  description = "access DB 변경을 유지 관리 기간을 기다리지 않고 바로 적용할지 정한다. 재시작이 따르는 변경이면 Single-AZ라 몇 분 접속이 끊긴다."
+  type        = bool
+  default     = false
+}
+
 resource "aws_db_instance" "access" {
   identifier     = "${var.project}-access-postgres"
   engine         = "postgres"
   engine_version = "16"
-  instance_class = "db.t4g.small"
+  # 30일 FreeableMemory 최소 0.98GB·연결 최대 30으로 small 메모리의 절반 이상이 남아 micro로 줄인다.
+  instance_class = "db.t4g.micro"
+  # 기본은 다음 유지 관리 기간에 적용한다. 크기 변경처럼 바로 반영할 때만 -var로 켠다.
+  apply_immediately = var.access_db_apply_immediately
 
   allocated_storage = 30
   storage_type      = "gp3"
@@ -73,9 +98,9 @@ resource "aws_db_instance" "access" {
   ca_cert_identifier     = "rds-ca-rsa2048-g1"
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
-  # 로그인이 막히면 전체 서비스가 막힌다. access DB만 먼저 Multi-AZ로 올린다.
-  # core DB는 부하 근거가 생길 때 같은 방식으로 검토한다(2026-10-04 기준 CPU 평균 8%).
-  multi_az            = true
+  # 비용 절감을 위해 core DB와 같이 Single-AZ로 운영한다. 백업 7일·암호화·삭제 보호는 유지한다.
+  # Multi-AZ 해제는 중단 없이 다음 유지 관리 기간에 적용된다(ModifyDBInstance MultiAZ).
+  multi_az            = false
   publicly_accessible = false
 
   backup_retention_period   = 7

@@ -1,5 +1,13 @@
 # 요청으로 EKS 노드 깨우기
 
+AI 작업자만 0개인 상태는 아래의 전체 서비스 절전과 다릅니다. API가 접수한 채팅·작업은 Kafka 대기열에 남으며,
+화면은 첫 진행 없이 5초가 지나면 약 2~3분의 준비 대기 안내를 표시합니다. 중복 요청 없이 준비 후 자동 처리합니다.
+임베딩 서버 연결 실패 때는 `EMBEDDING_STARTUP_STATUS_URL`의 내부 `/health`를 최대 2초 확인합니다.
+`embedding-server-startup` Service만 Ready 전 Pod를 노출하며 실제 추론은 기존 Ready 전용 Service를 사용합니다.
+상태 응답이 명시적으로 `ai_service_starting`일 때만 기동 안내로 바꿉니다. Pod 없음·상태 조회 실패·일반 5xx는
+기동으로 단정하지 않고, 모델 적재 실패나 기동 5분 초과도 기존 장애 안내를 유지합니다.
+이 동작에는 AI·document·frontend 코드와 플랫폼 설정 배포가 모두 필요합니다.
+
 `request_wake_enabled = true`이면 EKS 밖의 Lambda가 1분마다 절전 상태를 확인합니다. 노드가 모두 종료된 `asleep` 상태에서 기존 ALB에 HTTPS 요청이 들어와 `HTTPCode_ELB_5XX_Count`가 발생하면 일반 노드의 최소·희망 수를 2대로 복구합니다. 같은 때에 AI 노드 그룹의 희망 수를 1대로 올립니다(최소 0 유지). AI 작업자는 최소 1개라 깨어나면 어차피 AI 노드가 필요하므로, 일반 노드가 뜬 뒤 Cluster Autoscaler를 기다리지 않고 함께 띄웁니다. 두 그룹의 Launch 중단도 해제하므로 이후 확장·축소는 KEDA와 Cluster Autoscaler가 맡습니다. ALB의 라우팅·도메인·WAF는 그대로 사용합니다.
 
 **첫 요청은 보관하거나 재실행하지 않습니다.** ALB가 502·503·504 등을 반환할 수 있으며 지표 전달과 노드·Kafka·API 기동에 수분이 걸립니다. 기동 후 요청을 다시 보내야 합니다. 업로드·결제·문서 수정 등의 요청을 무조건 자동 재시도하면 안 됩니다. 이 변경에는 로딩 화면이나 프런트엔드 재시도가 포함되지 않습니다.
@@ -20,7 +28,7 @@
 
 ### 실제 Fargate에서 확인
 
-플랫폼 배포 뒤, 노드가 깨어 있을 때 runner(세션 관리자)에서 실행합니다. 절전 중에는 ALB controller webhook 때문에 Pod를 새로 만들 수 없습니다.
+플랫폼 배포 뒤, 노드가 깨어 있을 때 EKS 사설 API에 접근할 수 있는 환경에서 별도 관리 주체의 AWS 인증으로 실행합니다. runner 기본 역할(`fruition:operators`)은 조회 전용이므로 점검 Pod를 생성할 수 없습니다. 기존 관리자 접근 경로를 사용하고, 점검을 위해 운영자 역할의 Pod 생성 권한을 다시 열지 않습니다. 절전 중에는 ALB controller webhook 때문에 Pod를 새로 만들 수 없습니다.
 
 ```bash
 bash scripts/aws-frontend-wake-check.sh          # DNS·IRSA·상태 조회·권한 경계

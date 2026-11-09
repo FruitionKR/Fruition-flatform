@@ -54,6 +54,10 @@ spec:
       default.replication.factor: 1
       min.insync.replicas: 1
       auto.create.topics.enable: false
+      # KEDA가 worker를 0으로 줄이면 consumer group이 빈 채로 남는다. 기본값(7일)이 지나 commit offset이
+      # 지워지면 KEDA Kafka scaler는 offsetResetPolicy earliest에서 lag을 topic 끝 offset 전체로 계산해
+      # 처리할 메시지가 없어도 worker와 AI 노드를 계속 깨워 둔다. 오래 쉬는 group의 offset도 1년 보존한다.
+      offsets.retention.minutes: 525600
   entityOperator:
     topicOperator:
       # AdminClient는 브로커를 못 찾으면 백오프 없이 재부트스트랩을 반복하고

@@ -13,7 +13,14 @@
     "enabled": false
   },
   "containerLogs": {
-    "enabled": true
+    "enabled": true,
+    "fluentBit": {
+      "config": {
+        "extraFiles": {
+          "application-log.conf": "[INPUT]\n  Name                tail\n  Tag                 application.*\n  Exclude_Path        /var/log/containers/cloudwatch-agent*, /var/log/containers/fluent-bit*, /var/log/containers/aws-node*, /var/log/containers/kube-proxy*\n  Path                /var/log/containers/*.log\n  multiline.parser    docker, cri\n  DB                  /var/fluent-bit/state/flb_container.db\n  Mem_Buf_Limit       50MB\n  Skip_Long_Lines     On\n  Refresh_Interval    10\n  Rotate_Wait         30\n  storage.type        filesystem\n  Read_from_Head      ${READ_FROM_HEAD}\n\n[INPUT]\n  Name                tail\n  Tag                 application.*\n  Path                /var/log/containers/fluent-bit*\n  multiline.parser    docker, cri\n  DB                  /var/fluent-bit/state/flb_log.db\n  Mem_Buf_Limit       5MB\n  Skip_Long_Lines     On\n  Refresh_Interval    10\n  Read_from_Head      ${READ_FROM_HEAD}\n\n[INPUT]\n  Name                tail\n  Tag                 application.*\n  Path                /var/log/containers/cloudwatch-agent*\n  multiline.parser    docker, cri\n  DB                  /var/fluent-bit/state/flb_cwagent.db\n  Mem_Buf_Limit       5MB\n  Skip_Long_Lines     On\n  Refresh_Interval    10\n  Read_from_Head      ${READ_FROM_HEAD}\n\n[FILTER]\n  Name                aws\n  Match               application.*\n  az                  false\n  ec2_instance_id     false\n  Enable_Entity       true\n\n[FILTER]\n  Name                kubernetes\n  Match               application.*\n  Kube_URL            https://kubernetes.default.svc:443\n  Kube_Tag_Prefix     application.var.log.containers.\n  Merge_Log           On\n  Merge_Log_Key       log_processed\n  K8S-Logging.Parser  On\n  K8S-Logging.Exclude Off\n  Labels              Off\n  Annotations         Off\n  Use_Kubelet         On\n  Kubelet_Port        10250\n  Buffer_Size         0\n  Use_Pod_Association On\n\n[FILTER]\n  Name                grep\n  Match               application.*\n  Exclude             log ^INFO:[ ]+[^ ]+[ ]+-[ ]+\"(GET|HEAD) /health(z)? HTTP/[0-9.]+\" 200 OK[[:space:]]*$\n\n[OUTPUT]\n  Name                cloudwatch_logs\n  Match               application.*\n  region              ${AWS_REGION}\n  log_group_name      /aws/containerinsights/${CLUSTER_NAME}/application\n  log_stream_prefix   ${HOST_NAME}-\n  auto_create_group   true\n  extra_user_agent    container-insights\n  add_entity          true\n"
+        }
+      }
+    }
   },
   "tolerations": [
     {
@@ -23,15 +30,113 @@
   "agent": {
     "config": {
       "agent": {
-        "metrics_collection_interval": 300
+        "region": "ap-northeast-2",
+        "metrics_collection_interval": 600
+      }
+    },
+    "resources": {
+      "requests": {
+        "cpu": "50m",
+        "memory": "128Mi"
       },
-      "logs": {
-        "metrics_collected": {
-          "kubernetes": {
-            "cluster_name": "fruition-eks",
-            "enhanced_container_insights": true,
-            "accelerated_compute_metrics": false,
-            "metrics_collection_interval": 300
+      "limits": {
+        "cpu": "500m",
+        "memory": "512Mi"
+      }
+    },
+    "otelConfig": {
+      "receivers": {
+        "awscontainerinsightreceiver/cost": {
+          "region": "ap-northeast-2",
+          "cluster_name": "fruition-eks",
+          "collection_interval": "600s",
+          "collection_role": "ALL",
+          "container_orchestrator": "eks",
+          "enable_control_plane_metrics": false,
+          "accelerated_compute_metrics": false,
+          "leader_lock_name": "cwagent-clusterleader",
+          "leader_lock_using_config_map_only": true,
+          "prefer_full_pod_name": true
+        }
+      },
+      "processors": {
+        "filter/cost": {
+          "metrics": {
+            "include": {
+              "match_type": "strict",
+              "metric_names": [
+                "node_cpu_utilization",
+                "node_memory_utilization",
+                "cluster_failed_node_count",
+                "pod_cpu_utilization",
+                "pod_memory_utilization"
+              ]
+            }
+          }
+        },
+        "batch/cost": {
+          "timeout": "5s"
+        }
+      },
+      "exporters": {
+        "awsemf/cost": {
+          "region": "ap-northeast-2",
+          "namespace": "ContainerInsights",
+          "log_group_name": "/aws/containerinsights/fruition-eks/performance",
+          "log_stream_name": "cost-{NodeName}",
+          "dimension_rollup_option": "NoDimensionRollup",
+          "resource_to_telemetry_conversion": {
+            "enabled": true
+          },
+          "metric_declarations": [
+            {
+              "dimensions": [
+                [
+                  "ClusterName"
+                ]
+              ],
+              "metric_name_selectors": [
+                "^node_cpu_utilization$",
+                "^node_memory_utilization$",
+                "^cluster_failed_node_count$"
+              ]
+            },
+            {
+              "dimensions": [
+                [
+                  "ClusterName",
+                  "Namespace"
+                ]
+              ],
+              "metric_name_selectors": [
+                "^pod_cpu_utilization$",
+                "^pod_memory_utilization$"
+              ],
+              "label_matchers": [
+                {
+                  "label_names": [
+                    "Namespace"
+                  ],
+                  "regex": "^fruition$"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "service": {
+        "pipelines": {
+          "metrics/cost": {
+            "receivers": [
+              "awscontainerinsightreceiver/cost"
+            ],
+            "processors": [
+              "filter/cost",
+              "batch/cost"
+            ],
+            "exporters": [
+              "awsemf/cost"
+            ]
           }
         }
       }

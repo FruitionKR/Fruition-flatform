@@ -66,6 +66,103 @@ class BudgetDiscordTests(unittest.TestCase):
                 notifier.handler(event(message, topic), None)
             read.assert_not_called()
 
+    def test_threshold_evidence_is_explained_in_korean(self):
+        topic = TOPIC.replace("budget", "operations")
+        with patch.dict(os.environ, {"OPERATIONS_TOPIC_ARN": topic}):
+            payload = notifier.discord_payload({"TopicArn": topic, "Message": json.dumps({
+                "AlarmName": "fruition-ops-node_cpu", "NewStateValue": "ALARM",
+                "AlarmDescription": "노드 CPU 사용률 경보입니다.",
+                "NewStateReason": "Threshold Crossed: 3 out of the last 3 datapoints [91.2 (23/10/26 01:00:00)] were greater than the threshold (80.0).",
+                "Trigger": {"MetricName": "node_cpu_utilization", "Threshold": 80,
+                            "ComparisonOperator": "GreaterThanThreshold", "Period": 300,
+                            "EvaluationPeriods": 3, "DatapointsToAlarm": 2}})})
+        content = payload["content"]
+        self.assertIn("측정값이 설정된 경보 조건을 충족", content)
+        self.assertIn("node_cpu_utilization 값이 80 초과", content)
+        self.assertIn("300초씩 최근 3구간 중 2구간", content)
+        self.assertIn("측정값(시각): 91.2 (23/10/26 01:00:00)", content)
+        self.assertIn("실제 장애 원인은 관련 로그·자원 상태를 확인", content)
+
+    def test_missing_data_ok_does_not_claim_actual_recovery(self):
+        reason = ("Threshold Crossed: no datapoints were received for 1 period and "
+                  "1 missing datapoint was treated as [NonBreaching].")
+        for trigger in (None, {"TreatMissingData": "breaching"}, {"TreatMissingData": "ignore"},
+                        {"TreatMissingData": "missing"}, {"TreatMissingData": "unknown"},
+                        {"TreatMissingData": ["notBreaching"]}):
+            with self.subTest(trigger=trigger):
+                summary = notifier.alarm_diagnosis({"NewStateValue": "OK", "NewStateReason": reason, "Trigger": trigger})
+                self.assertIn("측정 데이터가 누락", summary)
+                self.assertIn("실제 복구 여부는 추가 확인", summary)
+
+    def test_not_breaching_ok_explains_policy_without_claiming_recovery(self):
+        summary = notifier.alarm_diagnosis({
+            "NewStateValue": "OK", "Trigger": {"TreatMissingData": "notBreaching"},
+            "NewStateReason": "Threshold Crossed: no datapoints were received for 1 period and "
+                              "1 missing datapoint was treated as [NonBreaching]."})
+        self.assertIn("누락 데이터를 임계값 미초과로 처리하도록 설정되어 정상으로 판정", summary)
+        self.assertIn("누락 데이터 처리: notBreaching (임계값 미초과로 처리)", summary)
+        for claim in ("0건", "복구됐", "복구 완료", "추가 확인이 필요"):
+            self.assertNotIn(claim, summary)
+
+    def test_missing_data_alarm_does_not_blame_gap_alone(self):
+        for policy, label in (("breaching", "임계값 초과로 처리"), ("missing", "전부 누락 시 데이터 없음 상태"),
+                              ("ignore", "현재 상태 유지"), ("notBreaching", "임계값 미초과로 처리")):
+            with self.subTest(policy=policy):
+                summary = notifier.alarm_diagnosis({
+                    "NewStateValue": "ALARM", "Trigger": {"TreatMissingData": policy},
+                    "NewStateReason": "Threshold Crossed: no datapoints were received for 3 periods and "
+                                      "3 missing datapoints were treated as [Breaching]."})
+                self.assertIn("누락만으로 경보가 됐는지는 이 이벤트로 단정할 수 없으니", summary)
+                self.assertIn(f"누락 데이터 처리: {policy} ({label})", summary)
+        summary = notifier.alarm_diagnosis({"NewStateValue": "ALARM", "NewStateReason": "no datapoints"})
+        self.assertNotIn("누락 데이터 처리:", summary)
+
+    def test_range_without_datapoints_to_alarm_does_not_assume_n_of_n(self):
+        trigger = {"MetricName": "BlockedRequests", "Threshold": 100.0, "ComparisonOperator": "GreaterThanThreshold",
+                   "Period": 300, "EvaluationPeriods": 3}
+        summary = notifier.alarm_diagnosis({"NewStateValue": "ALARM", "Trigger": trigger})
+        self.assertIn("평가 범위: 300초씩 최근 3구간\n", summary)
+        self.assertNotIn("구간 중", summary)
+
+    def test_malformed_optional_metadata_still_delivers_core_alarm(self):
+        topic = TOPIC.replace("budget", "operations")
+        response = MagicMock(status=200)
+        response.read.return_value = b'{"id":"123"}'
+        response.__enter__.return_value = response
+        for trigger in ({"ComparisonOperator": [], "Threshold": 80}, {"ComparisonOperator": {}, "Threshold": 80},
+                        {"ComparisonOperator": "GreaterThanThreshold", "Threshold": [80], "MetricName": {},
+                         "Period": "300", "EvaluationPeriods": True, "TreatMissingData": {}}, "trigger"):
+            opener = MagicMock()
+            opener.open.return_value = response
+            message = json.dumps({"AlarmName": "fruition-ops-node_cpu", "NewStateValue": "ALARM",
+                                  "OldStateValue": ["OK"], "Trigger": trigger,
+                                  "NewStateReason": "Threshold Crossed: no datapoints were received"})
+            with self.subTest(trigger=trigger), patch.dict(os.environ, {"OPERATIONS_TOPIC_ARN": topic}), \
+                 patch.object(notifier, "read_webhook", return_value=URL), \
+                 patch.object(notifier, "build_opener", return_value=opener):
+                self.assertEqual({"delivered": 1}, notifier.handler(event(message, topic), None))
+                content = json.loads(opener.open.call_args.args[0].data)["content"]
+                self.assertIn("AWS 운영 경보 [ALARM]\nfruition-ops-node_cpu\n상태: 경보\n", content)
+                self.assertNotIn("경보 조건:", content)
+                self.assertNotIn("누락 데이터 처리:", content)
+
+    def test_unknown_and_insufficient_data_do_not_invent_evidence(self):
+        for trigger in (None, {}, {"Metrics": []}):
+            with self.subTest(trigger=trigger):
+                summary = notifier.alarm_diagnosis({"NewStateValue": "ALARM", "Trigger": trigger})
+                self.assertIn("상세 발생 원인은 추가 확인", summary)
+                self.assertNotIn("경보 조건:", summary)
+        self.assertIn("측정 데이터가 부족", notifier.alarm_diagnosis({"NewStateValue": "INSUFFICIENT_DATA"}))
+
+    def test_recovery_and_all_threshold_operators(self):
+        for operator, label in notifier.COMPARISONS.items():
+            with self.subTest(operator=operator):
+                summary = notifier.alarm_diagnosis({"NewStateValue": "OK", "Trigger": {
+                    "ComparisonOperator": operator, "Threshold": 0}})
+                self.assertIn(f"값이 0 {label}", summary)
+                self.assertIn("경보 조건을 충족하지 않아", summary)
+                self.assertNotIn("원인 확인:", summary)
+
     def setUp(self):
         env = patch.dict(os.environ, {"SNS_TOPIC_ARN": TOPIC, "WEBHOOK_SECRET_ARN": "secret-arn"})
         env.start()
@@ -89,6 +186,39 @@ class BudgetDiscordTests(unittest.TestCase):
         self.assertEqual({"parse": []}, payload["allowed_mentions"])
         self.assertNotIn(URL, " ".join(logs.output))
         self.assertNotIn("$551", " ".join(logs.output))
+
+    def test_exceeded_budget_is_explained_in_korean_with_original_last(self):
+        message = ("AWS Budget Notification November 02, 2026\nAWS Account 123456789012\n\n"
+                   "Dear AWS Customer,\n\nYou requested that we alert you when the ACTUAL Cost associated "
+                   "with your fruition-monthly-100 budget is greater than $100.00 for the current month.\n\n"
+                   "Budget Name: fruition-monthly-100\nBudget Type: Cost\nBudgeted Amount: $100.00\n"
+                   "Alert Type: ACTUAL\nAlert Threshold: > $100.00\nACTUAL Amount: $123.45\n")
+        content = notifier.discord_payload({"Subject": "AWS Budgets: fruition-monthly-100 has exceeded "
+                                                       "your alert threshold", "Message": message})["content"]
+        self.assertTrue(content.startswith("AWS 예산 알림\n예산 이름: fruition-monthly-100\n"))
+        self.assertIn("알림 기준: 실제 사용액 > $100.00\n", content)
+        self.assertIn("현재 실제 사용액: $123.45 (월 예산 $100.00)", content)
+        self.assertIn("하루 최대 3회 갱신", content)
+        self.assertIn("자동으로 멈추지는 않습니다", content)
+        self.assertIn("확인할 일:", content)
+        self.assertTrue(content.endswith("\n\n" + message))
+        self.assertLess(content.index("확인할 일:"), content.index("원문:\nAWS Budgets: fruition-monthly-100"))
+
+    def test_unparseable_budget_message_falls_back_with_original(self):
+        for message in ("Actual spend: $551.00", "Budget Name: x\nAlert Threshold: >\nACTUAL Amount: $1"):
+            with self.subTest(message=message):
+                content = notifier.discord_payload({"Message": message})["content"]
+                self.assertIn("형식을 자동으로 해석하지 못했습니다", content)
+                self.assertNotIn("예산 이름:", content)
+                self.assertTrue(content.endswith("원문:\nBudget notification\n\n" + message))
+
+    def test_long_parsed_budget_keeps_korean_and_truncates(self):
+        message = "Budget Name: b\nAlert Threshold: > $50.00\nACTUAL Amount: $60.00\n" + "😀" * 3000
+        content = notifier.discord_payload({"Message": message})["content"]
+        self.assertLessEqual(len(content.encode("utf-16-le")) // 2, 2000)
+        self.assertIn("현재 실제 사용액: $60.00", content)
+        self.assertIn("원문:\nBudget notification\n\nBudget Name: b", content)
+        self.assertTrue(content.endswith("(이하 생략)"))
 
     def test_long_unicode_message_fits_discord_limit(self):
         result = notifier.discord_payload({"Message": "😀" * 3000})

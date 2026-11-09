@@ -148,6 +148,14 @@ def context_tree(repo, root, context):
     return entry["sha"]
 
 
+def recipe_digest():
+    # ScaledObject는 성공 manifest에 고정된다. 설정만 바뀌어도 새 묶음을 만들되
+    # 서비스 build ID는 그대로 두어 기존 immutable 이미지를 재사용한다.
+    return hashlib.sha256(Path(__file__).read_bytes() +
+                          (ROOT / ".github/workflows/publish-images.yml").read_bytes() +
+                          (ROOT / "k8s/base/keda-scaledobject.yaml").read_bytes()).hexdigest()
+
+
 def discover(path):
     sources, roots = {}, {}
     for repo in REPOS:
@@ -166,8 +174,7 @@ def discover(path):
         tree = context_tree(repo, roots[repo], context)
         builds[service] = {"context_tree": tree, "dockerfile": dockerfile,
                            "tag": "b-" + build_id(service, repo, tree, dockerfile, BUILDER_VERSION)}
-    recipe = hashlib.sha256(Path(__file__).read_bytes() +
-                            (ROOT / ".github/workflows/publish-images.yml").read_bytes()).hexdigest()
+    recipe = recipe_digest()
     release = identity(sources, recipe, builds, BUILDER_VERSION)
     repo = os.environ["GITHUB_REPOSITORY"]
     existing = github(f"repos/{repo}/releases/tags/images-{release}", missing_ok=True)

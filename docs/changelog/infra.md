@@ -1,5 +1,61 @@
 # 인프라 변경 기록
 
+## 2026-11-08
+
+### 임베딩 서버 기동 상태 조회 경로 추가
+
+- Ready 전 Pod의 기동 상태를 확인하는 내부 Service와 AI 설정을 추가했다. 추론은 기존 Ready 전용 Service를 사용한다. dev 기준 AWS 관련 테스트 8개와 Kustomize 렌더링을 확인했다.
+
+## 2026-11-07
+
+- 임베딩 서버의 KEDA 감시 대상에 ingest·maintenance 작업자를 추가해 편입만 실행돼도 서버가 기동하도록 했다. 작업자와 서버의 최소 0대 설정은 유지한다. 성공 manifest 검증을 유지하면서 KEDA 설정 변경 시 기존 이미지를 재사용하는 새 게시 묶음 ID를 만든다. 로컬 Compose도 두 작업자가 임베딩 서버의 healthy 상태를 기다리게 맞췄다. 운영 기동 시간·비용과 남은 cold start 경쟁은 `docs/embedding-worker-wake-review.md`에 기록한다.
+
+## 2026-11-06
+
+### 운영 DB 조회 Pod가 document-svc Service와 HPA에 잡히지 않게 한다
+
+- `aws-ops-db-query.sh`의 Pod 라벨을 `app: document-svc`에서 `app: document-db-preflight`로 바꾼다. 이 라벨은 DNS와 DB egress 허용 목록에 이미 있어 NetworkPolicy 변경이 없다.
+- Pod에 자원 요청과 메모리 제한을 넣는다. Service에 묶이지 않으므로 readiness probe는 두지 않는다.
+
+## 2026-10-31
+
+### 운영자 조회 권한 제한과 API 요청량 제한 경로 보완
+
+- 운영자 operations-query에서 Pod 생성·삭제 권한을 제거하고 상태·로그·Deployment 조회만 유지한다. DB 조회와 화면 기동 점검은 별도 관리 주체의 Pod 생성 권한을 먼저 확인한다. SQL 문자열 검사는 DB 권한 경계가 아니다.
+- WAF 전체 API 요청량 제한에서 URL 디코딩 후 경로를 정규화해 /api/ 접두사를 비교한다.
+- RBAC·WAF와 운영 스크립트 권한 거절을 포함한 AWS 테스트 273개, Terraform 두 root validate, fmt·Bash 문법·비밀정보 검사를 통과했다. Docker DB 시험은 마운트 가능한 원래 작업 폴더의 동일 소스로 검증했다.
+- 운영 관리자 접근과 RBAC 서버 dry-run을 확인했다. WAF 저장 계획은 ACL 한 개의 경로 변환만 실질적으로 바꾸며, 운영 반영 후 권한·설정을 재조회한다.
+
+## 2026-10-29
+
+### 운영 경보 Discord 메시지 한국어 판정 근거
+
+- CloudWatch SNS 이벤트의 경보 조건·평가 구간·측정값을 한국어로 설명하고 영어 원문 사유를 보존한다. 데이터 누락으로 OK가 된 경우 실제 복구 확인이 필요함을 안내하며 근본 원인을 추정하지 않는다.
+- 운영 지표별 알람 설명과 점검 안내를 한국어로 보강했다. 임계값과 예산 알림 경로는 유지하며 운영 반영에는 Lambda 코드와 알람 설명의 Terraform 배포가 필요하다.
+- AWS 회귀 테스트 266개, 로컬 종료 테스트 2개, Terraform fmt/validate와 비밀정보 검사를 통과했다. 운영 배포·Discord 발송은 수행하지 않았다.
+
+### PR #131 리뷰: 누락 데이터 처리 설정과 비정상 진단 정보
+
+- `notBreaching` 경보가 데이터 누락으로 OK가 되면 매번 "실제 복구 여부 추가 확인"으로 안내됐다. 이제 SNS `Trigger.TreatMissingData`를 표시하고, 그 설정에 따라 정상 판정됐다고만 설명한다. 실제 0건이나 복구 완료는 단정하지 않는다. 설정이 없거나 알 수 없으면 기존처럼 추가 확인을 안내하고, 누락이 포함된 ALARM은 누락을 유일한 원인으로 단정하지 않는다.
+- 비표준 입력에서 `ComparisonOperator`·`OldStateValue`가 list/dict이면 `TypeError`로 알림 전체가 실패했다. 진단용 부가 정보는 타입을 확인한 뒤 비정상 값의 줄만 생략하고, 필수 필드(`AlarmName`, `NewStateValue`) 검증은 유지한다. `DatapointsToAlarm`이 없는 비표준 입력은 N-of-N을 가정하지 않고 평가 구간만 표시한다.
+
+### PR #130 리뷰: converter 종료 순서 보장
+
+- `dev-down.sh --graceful`에서도 의존성 없는 converter와 DB가 동시에 종료돼 drain 중 연결이 끊겼다. converter의 `stop`을 먼저 완료한 뒤 전체 `down`을 실행하고, `stop` 실패 시 인프라·볼륨을 보존한다.
+- 기본·graceful·볼륨 삭제·조합 옵션과 stop 실패를 회귀 테스트 2개로 검증했다. 기존 코드에서 실패하고 수정 후 통과하며 AWS IaC CI에도 이 테스트를 연결했다.
+- 격리된 실제 Docker 프로젝트에서 수정 전 `conv-term → db-term → conv-db-GONE`, 수정 후 `conv-term → conv-db-alive → db-term`을 확인했다. 시험 컨테이너·네트워크는 정리했고 운영 환경은 변경하지 않았다.
+
+### #90 인프라 후속 작업과 운영 확인
+
+- Kafka scaler에 lag가 있는 파티션 수 제한, 120초 확장 안정화, 분당 1 Pod 확장 제한을 추가했다. 장기 실행을 누락시키는 persistent lag 제외는 사용하지 않는다. 정확한 대기 작업 지표 분리는 여전히 별도 개선이다.
+- maintenance worker의 임시 저장소 2Gi 예약, 임베딩 10초·AI 파기 120초 환경변수, 기존 RDS 로그 그룹의 선택적 선언형 import를 추가했다. 신규 환경에서는 import 목록을 비운다.
+- 로컬 종료에 converter를 명시적으로 포함하고 기본 대기를 30초로 제한했다. `--graceful`은 7800초를 기다린다. 시간 초과로 끊긴 작업은 재전달될 수 있다.
+- 삭제된 Wiki cutover 스크립트의 실행 안내와 전용 환경변수를 정리했다. 운영 core_db에서 V74 성공을 읽기 전용 조회로 확인했다.
+- 운영 읽기 전용 확인(2026-10-29): access의 현재 ID 전체(삭제 유예 포함)와 AI reconciliation 대상 10개 workspace/5개 user 소스를 비교하고 export 이전 1시간 안전 여유를 적용했다. workspace 후보 0, user 후보 3, 시각 근거 부족·최근 생성 제외 0건이다. 이는 현재 파기 후보 수이며 과거 `--apply` 실행 여부를 증명하지 않는다. 데이터 파기는 수행하지 않았다.
+- 운영 음성 원장: `speech_synthesis` / `gpt-realtime-2.1-mini` 성공 1건(마지막 2026-10-23 08:31:46 UTC), 취소 2건. 실제 공급사 TTS 성공 근거이며 사용자 기기의 청취 성공까지 증명하지 않는다. 현재 회의·회의 전사 segment는 모두 0건이라 실시간 회의와 iOS 무음 스위치는 별도 실측이 필요하다.
+- 검증: AWS 회귀 테스트 266개, 로컬 종료 옵션 테스트 1개(3개 모드), Terraform fmt/validate, Bash 문법 및 diff 공백 검사를 통과했다.
+- 운영 확인은 SSM runner의 일회성 읽기 전용 DB Pod로 수행하고 Pod를 삭제했다. Secret·개인 ID·본문은 결과에 기록하지 않았다. 이 변경의 Kubernetes/Terraform 운영 적용은 수행하지 않았다.
+
 ## 2026-10-23
 
 ### 이메일 인증 요청 Redis 권한 복구
@@ -65,3 +121,10 @@
 
 - 운영 JWT 전환 검증용 수동 Security authentication smoke workflow를 추가했다. feedback 환경의 검증 계정으로 공개 HTTPS 로그인·Access/Document 조회·refresh 교체·변조 서명 거부를 확인하고 테스트 세션을 로그아웃한다. 문서 생성·변경과 AWS 설정 변경은 수행하지 않으며 자격증명·응답 본문은 로그나 artifact에 남기지 않는다. 독립 회귀 테스트 7개를 통과했다.
 - self-hosted runner 공통 계약에 맞춰 AWS_EC2_METADATA_DISABLED를 명시하고 관련 테스트 10개를 통과했다.
+
+
+## 2026-11-09 — 무손실 유지보수 전환
+
+- 기존 중단 배포의 predecessor·이미지·스키마·중지·실패 차단을 유지하며 `data_loss_accepted=false`에 실제 backup/restore 근거와 전후 기존 행 데이터 digest 검사를 추가했다.
+- 데이터 보존 검사 뒤 기존 가입자 크레딧 면제를 Pod 내부에서 반영하고 기존 잔액·예약·원장을 보존한 경우에만 새 앱을 재개한다.
+- 기존 유지보수 회귀 테스트 26개와 신규 검사 11개, 실제 격리 PostgreSQL의 컬럼 추가·데이터 변조 감지 및 면제 SQL 재실행 검증을 통과했다. 운영 반영 전 실제 전후 schema·data fingerprint와 backup/restore 근거를 별도로 확보해야 한다.

@@ -75,6 +75,24 @@ class ImageReleaseTests(unittest.TestCase):
         self.assertEqual("feedback", deploy["jobs"]["deploy"]["environment"])
         self.assertEqual({"workflow_dispatch"}, set(deploy.get("on", deploy.get(True))))
 
+    def test_keda_config_changes_release_recipe_without_changing_image_build_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github/workflows").mkdir(parents=True)
+            (root / "k8s/base").mkdir(parents=True)
+            (root / ".github/workflows/publish-images.yml").write_text("publish")
+            scaler = root / "k8s/base/keda-scaledobject.yaml"
+            scaler.write_text("query,agent")
+            with patch.object(release, "ROOT", root):
+                before = release.recipe_digest()
+                scaler.write_text("query,agent,ingest,maintenance")
+                after = release.recipe_digest()
+            self.assertNotEqual(before, after)
+            original = manifest()
+            changed = {**original, "recipe": after}
+            self.assertNotEqual(release.identity(original["sources"], before, original["builds"], original["builder_version"]),
+                                release.identity(changed["sources"], after, changed["builds"], changed["builder_version"]))
+
     def test_identity_tracks_each_service_revision_and_recipe(self):
         data = manifest()
         release.validate_manifest(data, data["release_sha"])
