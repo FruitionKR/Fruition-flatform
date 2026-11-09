@@ -188,9 +188,19 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
     settings = api.validate_deploy_inputs(config, sha, documents, review=review, images=images)
     if review["migration_mode"] != "maintenance-cutover":
         raise ValueError("recovery requires the original maintenance review")
+    before_rollout = isinstance(plan, dict) and plan.get("mode") == "complete-before-rollout"
     required = {"release_sha", "mode", "started_data_sha256", "failed_data_sha256", "incident_url"}
+    if before_rollout:
+        required |= {"after_fingerprints", "schema_equivalence_url"}
+        fingerprints = plan.get("after_fingerprints")
+        if (review.get("data_loss_accepted") is not False
+                or not isinstance(fingerprints, dict) or set(fingerprints) != SERVICES
+                or any(not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{64}", v) for v in fingerprints.values())
+                or not isinstance(plan.get("schema_equivalence_url"), str)
+                or not re.fullmatch(r"https://github\.com/FruitionKR/Fruition-flatform/pull/[0-9]+", plan["schema_equivalence_url"])):
+            raise ValueError("pre-rollout recovery requires reviewed schema equivalence and lossless evidence")
     if (not isinstance(plan, dict) or set(plan) != required or plan["release_sha"] != sha
-            or plan["mode"] != "complete-after-migrations"
+            or plan["mode"] not in {"complete-after-migrations", "complete-before-rollout"}
             or any(not isinstance(plan[k], str) or not re.fullmatch(r"[0-9a-f]{64}", plan[k])
                    for k in ("started_data_sha256", "failed_data_sha256"))
             or not isinstance(plan["incident_url"], str)
@@ -226,8 +236,10 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
                        for c in d["spec"]["template"]["spec"]["containers"]}
     live_images = {d["metadata"]["name"] + "/" + c["name"]: c["image"]
                    for d in deployments for c in d["spec"]["template"]["spec"]["containers"]}
+    if before_rollout:
+        expected_images = review["expected_live_images"]
     if live_images != expected_images:
-        raise ValueError("recovery requires the already rolled out target images")
+        raise ValueError("recovery requires the reviewed rollout stage images")
     jobs = {j["metadata"]["name"]: j for j in items(api, "jobs")}
     for target in (d for d in documents if d["kind"] == "Job"):
         job = jobs.get(target["metadata"]["name"], {})
@@ -236,6 +248,8 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
         if (job.get("status", {}).get("succeeded") != 1 or job.get("status", {}).get("failed", 0)
                 or [(c["name"], c["image"]) for c in actual] != [(c["name"], c["image"]) for c in expected]):
             raise ValueError("recovery requires successful original target migration jobs")
+    if before_rollout and "existing-credit-exemptions" in jobs:
+        raise ValueError("pre-rollout recovery requires credit exemptions not yet attempted")
     routes = maintenance_routes(api)
     if items(api, "targetgroupbindings"):
         raise ValueError("recovery requires maintenance routing without ALB bindings")
@@ -243,14 +257,18 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
         if api.http_status("https://" + host + "/", "--retry", "0") != "503":
             raise ValueError("recovery public route is not under maintenance")
     current = api.fingerprints(config, require_quiescent=True)
-    if current != review["after_fingerprints"]:
-        raise ValueError("recovery requires all three rehearsed after schemas; no SQL repair is allowed")
+    expected_schema = plan["after_fingerprints"] if before_rollout else review["after_fingerprints"]
+    if current != expected_schema:
+        raise ValueError("recovery requires all three reviewed after schemas; no SQL repair is allowed")
     assert_quiescent(api, documents)
     if review["data_loss_accepted"] is False:
         from aws_data_preservation import verify_after
         verify_after(api, config, review["preservation"])
     create_record(api, prefix + "-recovery-started", {"plan": canonical(plan), "fingerprints": canonical(current)})
     try:
+        if before_rollout:
+            from aws_data_preservation import prepare_credit_exemptions
+            prepare_credit_exemptions(api, config, review["preservation"])
         api.complete_rollout(config, sha, documents, current=current, review=review, settings=settings)
     except BaseException:
         cleanup_failed = False
