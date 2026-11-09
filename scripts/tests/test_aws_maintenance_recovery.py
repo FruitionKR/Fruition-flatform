@@ -143,3 +143,68 @@ class RecoveryTests(unittest.TestCase):
         with patch.object(deploy, "_deploy") as continuation:
             deploy.deploy(CONFIG, SHA, self.documents, review=ordinary)
         continuation.assert_called_once()
+
+    def pre_rollout_plan(self):
+        from test_aws_data_preservation import evidence
+        self.review["data_loss_accepted"] = False
+        self.review["preservation"] = evidence()
+        self.plan.update(mode="complete-before-rollout",
+                         after_fingerprints={s: "b" * 64 for s in maintenance.SERVICES},
+                         schema_equivalence_url="https://github.com/FruitionKR/Fruition-flatform/pull/1")
+        for d in self.fake.resources["deployments"]:
+            for c in d["spec"]["template"]["spec"]["containers"]:
+                c["image"] = self.review["expected_live_images"][d["metadata"]["name"] + "/" + c["name"]]
+        self.started["data"]["review"] = maintenance.canonical(self.review)
+        self.plan["started_data_sha256"] = maintenance.digest(self.started["data"])
+
+    def test_pre_rollout_preserves_data_then_exempts_before_starting_apps(self):
+        self.pre_rollout_plan()
+        order = []
+        with patch("aws_data_preservation.verify_after", side_effect=lambda *a: order.append("verify")), \
+             patch("aws_data_preservation.prepare_credit_exemptions", side_effect=lambda *a: order.append("credits")), \
+             patch.object(deploy, "complete_rollout", side_effect=lambda *a, **k: order.append("rollout")):
+            self.recover()
+        self.assertEqual(["verify", "credits", "rollout"], order)
+        self.assertFalse(any(d["metadata"]["name"].endswith("-migration") for d in self.fake.applied("Job")))
+
+    def test_pre_rollout_data_mismatch_never_changes_credits_or_apps(self):
+        self.pre_rollout_plan()
+        with patch("aws_data_preservation.verify_after", side_effect=ValueError("changed data")), \
+             patch("aws_data_preservation.prepare_credit_exemptions") as credits:
+            with self.assertRaisesRegex(ValueError, "changed data"):
+                self.recover()
+        credits.assert_not_called()
+        self.assertFalse(self.fake.applied("Deployment"))
+        self.assertFalse(self.fake.applied("ConfigMap"))
+
+    def test_pre_rollout_rejects_wrong_schema_and_prior_credit_attempt(self):
+        for cause in ("schema", "credits", "images", "evidence"):
+            with self.subTest(cause=cause):
+                # Independent fixtures avoid a failed attempt affecting the next check.
+                review, plan = copy.deepcopy(self.review), copy.deepcopy(self.plan)
+                deployments = copy.deepcopy(self.fake.resources["deployments"])
+                jobs = copy.deepcopy(self.fake.resources["jobs"])
+                started = copy.deepcopy(self.started["data"])
+                self.pre_rollout_plan()
+                if cause == "schema": self.plan["after_fingerprints"]["ai"] = "f" * 64
+                if cause == "credits": self.fake.resources["jobs"].append({"metadata": {"name": "existing-credit-exemptions"}})
+                if cause == "images": self.fake.resources["deployments"][0]["spec"]["template"]["spec"]["containers"][0]["image"] = "wrong"
+                if cause == "evidence": self.plan.pop("schema_equivalence_url")
+                with self.assertRaises(ValueError): self.recover()
+                self.assertFalse(self.fake.applied("Deployment"))
+                self.assertFalse(self.fake.applied("ConfigMap"))
+                self.review, self.plan = review, plan
+                self.fake.resources["deployments"] = deployments
+                self.fake.resources["jobs"] = jobs
+                self.started["data"] = started
+
+    def test_pre_rollout_credit_failure_retains_maintenance_and_audit(self):
+        self.pre_rollout_plan()
+        with patch("aws_data_preservation.verify_after"), \
+             patch("aws_data_preservation.prepare_credit_exemptions", side_effect=ValueError("credit check failed")), \
+             patch.object(deploy, "complete_rollout") as rollout:
+            with self.assertRaisesRegex(ValueError, "credit check failed"):
+                self.recover()
+        rollout.assert_not_called()
+        self.assertTrue(any(d["metadata"]["name"] == self.prefix + "-recovery-failed"
+                            for d in self.fake.applied("ConfigMap")))
