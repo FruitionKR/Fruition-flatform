@@ -6,6 +6,8 @@ metadata:
   name: fruition-config
   namespace: fruition
 data:
+  # Required by the internal MCP reader even while public OAuth stays disabled.
+  SPRING_APPLICATION_JSON: '{"app":{"mcp":{"oauth":{"client-metadata":{"max-response-bytes":65536,"timeout":"2s"}}}}}'
   SPRING_PROFILES_ACTIVE: "production"
   # 먼저 document V117 배포 및 기존 가입자 면제 명단 반영을 완료한다.
   BILLING_ENFORCE: "true"
