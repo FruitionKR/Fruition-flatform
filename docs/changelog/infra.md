@@ -121,3 +121,10 @@
 
 - 운영 JWT 전환 검증용 수동 Security authentication smoke workflow를 추가했다. feedback 환경의 검증 계정으로 공개 HTTPS 로그인·Access/Document 조회·refresh 교체·변조 서명 거부를 확인하고 테스트 세션을 로그아웃한다. 문서 생성·변경과 AWS 설정 변경은 수행하지 않으며 자격증명·응답 본문은 로그나 artifact에 남기지 않는다. 독립 회귀 테스트 7개를 통과했다.
 - self-hosted runner 공통 계약에 맞춰 AWS_EC2_METADATA_DISABLED를 명시하고 관련 테스트 10개를 통과했다.
+
+
+## 2026-11-09 — 무손실 유지보수 전환
+
+- 기존 중단 배포의 predecessor·이미지·스키마·중지·실패 차단을 유지하며 `data_loss_accepted=false`에 실제 backup/restore 근거와 전후 기존 행 데이터 digest 검사를 추가했다.
+- 데이터 보존 검사 뒤 기존 가입자 크레딧 면제를 Pod 내부에서 반영하고 기존 잔액·예약·원장을 보존한 경우에만 새 앱을 재개한다.
+- 기존 유지보수 회귀 테스트 26개와 신규 검사 11개, 실제 격리 PostgreSQL의 컬럼 추가·데이터 변조 감지 및 면제 SQL 재실행 검증을 통과했다. 운영 반영 전 실제 전후 schema·data fingerprint와 backup/restore 근거를 별도로 확보해야 한다.

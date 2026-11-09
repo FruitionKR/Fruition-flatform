@@ -728,6 +728,10 @@ def _deploy(config, sha, documents, *, rollback=False, review=None, bootstrap=Fa
         current = fingerprints(config)
         if review["migration_mode"] == "maintenance-cutover" and current != review["after_fingerprints"]:
             raise ValueError("maintenance after fingerprints differ from rehearsed schema")
+    if review and review.get("data_loss_accepted") is False:
+        from aws_data_preservation import verify_after, prepare_credit_exemptions
+        verify_after(SimpleNamespace(**globals()), config, review["preservation"])
+        prepare_credit_exemptions(SimpleNamespace(**globals()), config, review["preservation"])
     complete_rollout(config, sha, documents, current=current, review=review, settings=settings,
                      existing=existing, bootstrap=bootstrap, initial=initial,
                      initial_data=initial_data if initial else None)

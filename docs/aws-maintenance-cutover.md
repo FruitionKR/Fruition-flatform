@@ -204,3 +204,33 @@ Access→AI→Document migration 및 리허설 after 스키마 대조와 새 앱
   전후 DB fingerprint, 실제 restore/maintenance/quiescence 근거, 외부 writer/queue 정책, 새 앱 smoke 결과.
 - runner Docker 부재는 사실이다. primary가 실제 격리 시험 환경을 확정해야 한다. 이 PR의 단위/로컬 PostgreSQL 시험은
   운영 데이터 migration 리허설을 대신하지 않는다. worker는 production mutation이나 실제 analytics 이벤트를 수행하지 않았다.
+
+
+## 데이터 손실을 허용하지 않는 전환
+
+`data_loss_accepted: false`는 기존 필드를 지우거나 검사를 건너뛰는 옵션이 아니다.
+기존 review에 `preservation`을 추가해야 하며 아래 실제 근거가 없으면 시작하지 않는다.
+
+- `databases`: access/document/ai 각각 `tables`(정렬된 전체 기존 public 테이블의 `name`, 순서대로 된 `columns`)와 `sha256`.
+  flyway_schema_history는 `max_installed_rank`도 기록한다. 마이그레이션이 추가하는 이력 뒤쪽은 제외하지만 기존 이력 내용은 비교한다.
+- `restored_sha256`: 별도 격리 PostgreSQL로 실제 복원한 세 DB의 같은 투영 데이터 digest. 원본과 모두 같아야 한다.
+- `snapshots`: access/core의 수동 암호화 RDS snapshot `id`, 중지 후 UTC 경계 `created_after`.
+  도구가 실제 대상 DB 리소스 ID·완료·암호화·생성 시각을 조회한다. 복원 시험을 snapshot 생성만으로 대신할 수 없다.
+- `credit_exemption_cutoff`: 신규 가입과 기존 쓰기를 중지한 뒤 고정한 `YYYY-MM-DDTHH:MM:SSZ` 전환 시각.
+
+무손실 모드는 마이그레이션 전에 실제 전체 테이블·컬럼 목록이 근거와 일치하는지 검사한다.
+마이그레이션 뒤에는 기존 컬럼만 같은 순서로 투영한 모든 행을 정렬·해시해 비교한다.
+추가 테이블·컬럼은 허용하되 기존 행 삭제·값 변경은 서비스 재개 전에 차단한다.
+DB 원문·자격 증명은 Job 로그에 남기지 않는다. 실패하면 기존 유지보수 실패 처리를 그대로 따른다.
+이 검사는 row 데이터 보존을 검사하며 S3 객체·Kafka·외부 writer 보존 증거를 대신하지 않는다.
+해당 writer를 중지하고 queue·object를 삭제하지 않는 계획과 실제 복원 시험을 함께 검토한다.
+
+데이터 일치 후 같은 중단 구간에서 access 가입자 전체를 Pod 내부 CSV로 읽고 core의
+`credit_accounts.limit_exempt`만 반영한다. 사용 이력이 없는 가입자도 포함한다. 기존 잔액·예약액이
+달라지거나 원장 행 수가 바뀌면 트랜잭션을 롤백한다. 원문 명단은 Job 로그나 저장소로 내보내지 않는다.
+이 단계가 통과하기 전에는 `BILLING_ENFORCE=true`를 쓰는 새 앱을 시작하지 않는다.
+신규 가입을 포함한 공개 라우팅은 모든 새 앱 준비 후 복구한다.
+
+주의: 면제 반영은 `updated_at` 등 검토된 업무 데이터 변경을 포함한다. 그 이후 실패했다면
+원래 데이터 digest를 임의로 바꾸거나 실패 기록을 삭제해 재시도하지 않는다. 실제 부분 실행 결과와
+면제 이후 데이터에 맞는 별도 복구 계획이 필요하며 기존 recover 역시 데이터 불일치 시 거부한다.
