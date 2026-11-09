@@ -1,0 +1,1701 @@
+{
+  "release_sha": "fb06bf2333d759bacfcb51b8f8d0d80f5e660ab0",
+  "migration_mode": "maintenance-cutover",
+  "expected_predecessor_release": "8947e59a9de7d0ef6d749c54c3e6278073911996",
+  "predecessor_record_sha256": "29c1acc7c4b32750c8871ee337fbca5d4f789ebc498bea5017af660f09e0ea7f",
+  "before_fingerprints": {
+    "access": "c5736b4c00a5d8d992091d0add4790e4198ad3effb3e54f2e296320c0cf4d33c",
+    "document": "2ec14e82f9a8f52ea41aa5fe071f67ecabf6511e0b74be0a15d1eb1d1810df07",
+    "ai": "7febf9ab9b2e868a5ce74bdb0a3208122cd5ab5150bbbf38f9a06ab2bc33574a"
+  },
+  "after_fingerprints": {
+    "access": "1383de6e2c6588008d676df4e7a79576d0929c19c2770e58da3a394e4c86cc0a",
+    "document": "5239db4ae7f9c432f0f73edba3a9c7e1d2434a0bdb6254c05388c645f651d4ce",
+    "ai": "f46374f6c70af56261600b335881cd2d83a2726272a588ff1753a17e17fec1b4"
+  },
+  "expected_live_images": {
+    "access-svc/access-svc": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-access-svc@sha256:07d5014279fe321980cd5bddcbad2a5bb6f54243c8559683837694dba07f6d23",
+    "agent-task-worker/agent-task-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:98a10c3bb13fff32a813f719efc7253040979360f7537f33da8cd8e18b83f2ec",
+    "converter/converter": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-converter@sha256:c5ae2a17b206cd4bd8f50e5c5ee334cabbcdef4b47a2d3eff02d177fe8f8cf06",
+    "document-svc/document-svc": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-document-svc@sha256:1e0d68a2ca7a805b264fb3622244aba9058ae282915ac9b409024fff274c9251",
+    "edit-event-consumer/edit-event-consumer": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:98a10c3bb13fff32a813f719efc7253040979360f7537f33da8cd8e18b83f2ec",
+    "embedding-server/embedding-server": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:98a10c3bb13fff32a813f719efc7253040979360f7537f33da8cd8e18b83f2ec",
+    "frontend/frontend": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-frontend@sha256:c2b8b0399b50cb3bb14bfe98e4e9085c95623257997918dc9a09545e65e42b40",
+    "ingest-worker/ingest-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:98a10c3bb13fff32a813f719efc7253040979360f7537f33da8cd8e18b83f2ec",
+    "maintenance-task-worker/maintenance-task-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:98a10c3bb13fff32a813f719efc7253040979360f7537f33da8cd8e18b83f2ec",
+    "pipeline-agent-worker/pipeline-agent-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:98a10c3bb13fff32a813f719efc7253040979360f7537f33da8cd8e18b83f2ec",
+    "pipeline-api/pipeline-api": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:98a10c3bb13fff32a813f719efc7253040979360f7537f33da8cd8e18b83f2ec",
+    "query-task-worker/query-task-worker": "273366117740.dkr.ecr.ap-northeast-2.amazonaws.com/fruition-pipeline@sha256:98a10c3bb13fff32a813f719efc7253040979360f7537f33da8cd8e18b83f2ec"
+  },
+  "maintenance_test_url": "https://github.com/FruitionKR/Fruition-flatform/pull/180",
+  "restore_test_url": "https://github.com/FruitionKR/Fruition-flatform/pull/180",
+  "quiescence_test_url": "https://github.com/FruitionKR/Fruition-flatform/pull/180",
+  "data_loss_accepted": false,
+  "preservation": {
+    "databases": {
+      "access": {
+        "tables": [
+          {
+            "name": "analytics_outbox",
+            "columns": [
+              "uuid",
+              "event",
+              "distinct_id",
+              "occurred_at",
+              "properties",
+              "attempts",
+              "next_attempt_at",
+              "last_error_code",
+              "sent_at",
+              "dead"
+            ]
+          },
+          {
+            "name": "data_purge_requests",
+            "columns": [
+              "kind",
+              "target_id",
+              "attempts",
+              "next_attempt_at",
+              "last_error",
+              "created_at"
+            ]
+          },
+          {
+            "name": "email_change_notifications",
+            "columns": [
+              "id",
+              "user_id",
+              "recipient_email",
+              "masked_new_email",
+              "changed_at",
+              "status",
+              "attempts",
+              "next_attempt_at",
+              "last_error",
+              "created_at",
+              "locale"
+            ]
+          },
+          {
+            "name": "email_verifications",
+            "columns": [
+              "id",
+              "email",
+              "purpose",
+              "code_hash",
+              "code_expires_at",
+              "attempt_count",
+              "confirmed_at",
+              "token_hash",
+              "token_expires_at",
+              "consumed_at",
+              "created_at"
+            ]
+          },
+          {
+            "name": "flyway_schema_history",
+            "columns": [
+              "installed_rank",
+              "version",
+              "description",
+              "type",
+              "script",
+              "checksum",
+              "installed_by",
+              "installed_on",
+              "execution_time",
+              "success"
+            ],
+            "max_installed_rank": 34
+          },
+          {
+            "name": "idempotency_records",
+            "columns": [
+              "id",
+              "user_id",
+              "endpoint_scope",
+              "idempotency_key",
+              "request_hash",
+              "response_status",
+              "resource_id",
+              "response_body",
+              "created_at",
+              "expires_at",
+              "status",
+              "claim_token"
+            ]
+          },
+          {
+            "name": "spring_session",
+            "columns": [
+              "primary_id",
+              "session_id",
+              "creation_time",
+              "last_access_time",
+              "max_inactive_interval",
+              "expiry_time",
+              "principal_name"
+            ]
+          },
+          {
+            "name": "spring_session_attributes",
+            "columns": [
+              "session_primary_id",
+              "attribute_name",
+              "attribute_bytes"
+            ]
+          },
+          {
+            "name": "user_avatars",
+            "columns": [
+              "user_id",
+              "image"
+            ]
+          },
+          {
+            "name": "user_consents",
+            "columns": [
+              "id",
+              "user_id",
+              "terms_version",
+              "privacy_version",
+              "age_confirmed",
+              "marketing_opt_in",
+              "consented_at"
+            ]
+          },
+          {
+            "name": "user_mfa",
+            "columns": [
+              "user_id",
+              "secret_cipher",
+              "secret_nonce",
+              "activated_at",
+              "last_used_counter",
+              "created_at"
+            ]
+          },
+          {
+            "name": "user_mfa_challenges",
+            "columns": [
+              "id",
+              "user_id",
+              "token_hash",
+              "expires_at",
+              "consumed_at",
+              "created_at"
+            ]
+          },
+          {
+            "name": "user_mfa_recovery_codes",
+            "columns": [
+              "id",
+              "user_id",
+              "code_hash",
+              "consumed_at",
+              "created_at"
+            ]
+          },
+          {
+            "name": "user_oauth_accounts",
+            "columns": [
+              "id",
+              "created_at",
+              "provider",
+              "provider_user_id",
+              "user_id"
+            ]
+          },
+          {
+            "name": "user_refresh_tokens",
+            "columns": [
+              "id",
+              "created_at",
+              "expires_at",
+              "revoked_at",
+              "token_hash",
+              "user_id",
+              "user_agent",
+              "family_id"
+            ]
+          },
+          {
+            "name": "users",
+            "columns": [
+              "id",
+              "created_at",
+              "display_name",
+              "email",
+              "password_hash",
+              "updated_at",
+              "provider",
+              "avatar_content_type",
+              "avatar_hash",
+              "locale"
+            ]
+          },
+          {
+            "name": "workspace_icons",
+            "columns": [
+              "workspace_id",
+              "image"
+            ]
+          },
+          {
+            "name": "workspace_invitations",
+            "columns": [
+              "id",
+              "workspace_id",
+              "email",
+              "role",
+              "token_hash",
+              "expires_at",
+              "invited_by",
+              "accepted_at",
+              "accepted_by",
+              "revoked_at",
+              "created_at"
+            ]
+          },
+          {
+            "name": "workspace_member_permissions",
+            "columns": [
+              "workspace_id",
+              "user_id",
+              "permission"
+            ]
+          },
+          {
+            "name": "workspace_members",
+            "columns": [
+              "joined_at",
+              "role",
+              "user_id",
+              "workspace_id"
+            ]
+          },
+          {
+            "name": "workspace_membership_periods",
+            "columns": [
+              "workspace_id",
+              "user_id",
+              "joined_at",
+              "left_at"
+            ]
+          },
+          {
+            "name": "workspaces",
+            "columns": [
+              "id",
+              "created_at",
+              "name",
+              "updated_at",
+              "deleted_at",
+              "deleted_by",
+              "ingest_lint_provider",
+              "ingest_lint_model",
+              "icon_emoji",
+              "icon_image_content_type",
+              "icon_image_hash",
+              "auto_ingest_on_upload",
+              "describe_pdf_figures",
+              "auto_ingest_markdown_on_upload",
+              "auto_ingest_pdf_on_convert"
+            ]
+          }
+        ],
+        "sha256": "07fa1febaf0dc15898c830776a372da47aa7771dbe900ff2a562e1db08994bfe"
+      },
+      "document": {
+        "tables": [
+          {
+            "name": "agent_apply_projections",
+            "columns": [
+              "run_id",
+              "workspace_id",
+              "user_id",
+              "document_id",
+              "base_version",
+              "apply_operation_id",
+              "status",
+              "result",
+              "error_code",
+              "created_at",
+              "updated_at",
+              "apply_consumed_at",
+              "apply_revision_write_id",
+              "ready_markdown",
+              "autonomous_tool",
+              "folder_id"
+            ]
+          },
+          {
+            "name": "agent_auto_approval_settings",
+            "columns": [
+              "user_id",
+              "content_edit",
+              "organize",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "ai_command_outbox",
+            "columns": [
+              "id",
+              "run_id",
+              "topic",
+              "message_key",
+              "payload",
+              "created_at"
+            ]
+          },
+          {
+            "name": "ai_model_prices",
+            "columns": [
+              "provider",
+              "model",
+              "effective_from",
+              "input_usd_per_mtok",
+              "output_usd_per_mtok",
+              "cache_read_usd_per_mtok",
+              "cache_write_usd_per_mtok",
+              "audio_usd_per_minute",
+              "tts_usd_per_mchar"
+            ]
+          },
+          {
+            "name": "ai_operation_changes",
+            "columns": [
+              "id",
+              "operation_id",
+              "resource_type",
+              "resource_id",
+              "before_revision",
+              "after_revision",
+              "change_type",
+              "change_summary",
+              "additions",
+              "deletions",
+              "resource_display_name"
+            ]
+          },
+          {
+            "name": "ai_operation_logs",
+            "columns": [
+              "operation_id",
+              "workspace_id",
+              "user_id",
+              "operation_type",
+              "target_document_id",
+              "status",
+              "summary",
+              "changed_resource_count",
+              "restored_from",
+              "restore_manifest",
+              "payload_hash",
+              "created_at",
+              "completed_at",
+              "restore_token_hash",
+              "document_restore_blocked",
+              "target_display_name"
+            ]
+          },
+          {
+            "name": "ai_task_changes",
+            "columns": [
+              "id",
+              "run_id",
+              "table_name",
+              "row_key",
+              "before_value",
+              "after_value",
+              "undone"
+            ]
+          },
+          {
+            "name": "ai_task_result_receipts",
+            "columns": [
+              "event_id",
+              "run_id",
+              "task_kind",
+              "event_payload",
+              "received_at"
+            ]
+          },
+          {
+            "name": "ai_task_runs",
+            "columns": [
+              "id",
+              "workspace_id",
+              "user_id",
+              "kind",
+              "command",
+              "status",
+              "error_code",
+              "created_at",
+              "updated_at",
+              "resume_claimed_by",
+              "resume_claimed_until"
+            ]
+          },
+          {
+            "name": "ai_usage_settlements",
+            "columns": [
+              "id",
+              "workspace_id",
+              "from_at",
+              "to_at",
+              "result",
+              "closed_by",
+              "closed_at"
+            ]
+          },
+          {
+            "name": "analytics_outbox",
+            "columns": [
+              "event_id",
+              "event_name",
+              "payload",
+              "occurred_at",
+              "attempts",
+              "next_attempt_at",
+              "sent_at",
+              "dead_at"
+            ]
+          },
+          {
+            "name": "analytics_query_terminals",
+            "columns": [
+              "query_id",
+              "event_name",
+              "occurred_at"
+            ]
+          },
+          {
+            "name": "analytics_run_context",
+            "columns": [
+              "run_id",
+              "actor_id",
+              "workspace_id",
+              "requested_at",
+              "context"
+            ]
+          },
+          {
+            "name": "chat_export_links",
+            "columns": [
+              "export_id",
+              "document_id",
+              "user_id",
+              "conversation_id",
+              "mode",
+              "created_at"
+            ]
+          },
+          {
+            "name": "chat_message_references",
+            "columns": [
+              "id",
+              "document_id",
+              "quote",
+              "rank",
+              "reference_type",
+              "source_block_ids",
+              "chat_message_id",
+              "source_refs"
+            ]
+          },
+          {
+            "name": "chat_message_related_pages",
+            "columns": [
+              "id",
+              "depth",
+              "page_type",
+              "rank",
+              "relevance_score",
+              "role",
+              "slug",
+              "title",
+              "wiki_page_id",
+              "chat_message_id"
+            ]
+          },
+          {
+            "name": "chat_message_speech",
+            "columns": [
+              "message_id",
+              "workspace_id",
+              "user_id",
+              "object_key",
+              "byte_size",
+              "created_at"
+            ]
+          },
+          {
+            "name": "chat_messages",
+            "columns": [
+              "id",
+              "content",
+              "created_at",
+              "error_message",
+              "pair_id",
+              "role",
+              "status",
+              "wiki_page_id",
+              "session_id",
+              "ai_provider",
+              "ai_model",
+              "web_search_enabled",
+              "run_id",
+              "action",
+              "progress",
+              "clarify_reason",
+              "read_only_document_id",
+              "error_code"
+            ]
+          },
+          {
+            "name": "chat_partial_wiki",
+            "columns": [
+              "id",
+              "created_at",
+              "document_id",
+              "pair_id",
+              "session_id",
+              "wiki_page_id",
+              "workspace_id"
+            ]
+          },
+          {
+            "name": "chat_sessions",
+            "columns": [
+              "id",
+              "context_summary",
+              "context_summary_updated_at",
+              "created_at",
+              "last_message_at",
+              "title",
+              "user_id",
+              "wiki_export_document_id",
+              "wiki_page_id",
+              "workspace_id"
+            ]
+          },
+          {
+            "name": "credit_accounts",
+            "columns": [
+              "user_id",
+              "balance",
+              "reserved",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "credit_entries",
+            "columns": [
+              "id",
+              "user_id",
+              "type",
+              "amount",
+              "run_id",
+              "idempotency_key",
+              "reason",
+              "created_at"
+            ]
+          },
+          {
+            "name": "credit_orders",
+            "columns": [
+              "order_id",
+              "user_id",
+              "product_code",
+              "amount_krw",
+              "credit_milli",
+              "status",
+              "pg_payment_key",
+              "failure_code",
+              "refunded_krw",
+              "refunded_credit_milli",
+              "created_at",
+              "paid_at",
+              "refunded_at"
+            ]
+          },
+          {
+            "name": "document_asset_orphans",
+            "columns": [
+              "id",
+              "asset_id",
+              "storage_key",
+              "failed_at",
+              "retry_count",
+              "last_error"
+            ]
+          },
+          {
+            "name": "document_asset_references",
+            "columns": [
+              "document_id",
+              "asset_id",
+              "created_at"
+            ]
+          },
+          {
+            "name": "document_assets",
+            "columns": [
+              "id",
+              "workspace_id",
+              "uploaded_by",
+              "original_filename",
+              "content_type",
+              "byte_size",
+              "width",
+              "height",
+              "content_hash",
+              "storage_key",
+              "unreferenced_since",
+              "created_at"
+            ]
+          },
+          {
+            "name": "document_content_versions",
+            "columns": [
+              "document_id",
+              "version",
+              "markdown",
+              "content_hash",
+              "created_by",
+              "created_at",
+              "operation_id",
+              "restored_from_version",
+              "source",
+              "merge_status"
+            ]
+          },
+          {
+            "name": "document_convert_batches",
+            "columns": [
+              "queue_id",
+              "start_page",
+              "page_count",
+              "command",
+              "status",
+              "page_end",
+              "result_key",
+              "created_at"
+            ]
+          },
+          {
+            "name": "document_convert_queue",
+            "columns": [
+              "id",
+              "document_id",
+              "source_document_id",
+              "status",
+              "created_at",
+              "completed_pages",
+              "total_pages",
+              "updated_at",
+              "next_start_page"
+            ]
+          },
+          {
+            "name": "document_edit_conflicts",
+            "columns": [
+              "id",
+              "workspace_id",
+              "document_id",
+              "base_revision",
+              "markdown",
+              "content_hash",
+              "author_user_id",
+              "client_conflict_id",
+              "status",
+              "resolution",
+              "resolved_by",
+              "resolved_revision",
+              "created_at",
+              "resolved_at"
+            ]
+          },
+          {
+            "name": "document_edit_locks",
+            "columns": [
+              "document_id",
+              "holder_user_id",
+              "acquired_at",
+              "last_heartbeat_at",
+              "expires_at"
+            ]
+          },
+          {
+            "name": "document_edit_outbox",
+            "columns": [
+              "event_id",
+              "document_id",
+              "workspace_id",
+              "revision",
+              "content_hash",
+              "event_type",
+              "schema_version",
+              "created_at",
+              "published",
+              "published_at"
+            ]
+          },
+          {
+            "name": "document_edit_states",
+            "columns": [
+              "document_id",
+              "markdown",
+              "content_hash",
+              "created_at",
+              "updated_at",
+              "revision"
+            ]
+          },
+          {
+            "name": "document_edit_writes",
+            "columns": [
+              "document_id",
+              "revision_write_id",
+              "request_hash",
+              "result_revision",
+              "result_content_hash",
+              "result_updated_at",
+              "actor_user_id",
+              "changed",
+              "created_at"
+            ]
+          },
+          {
+            "name": "document_imports",
+            "columns": [
+              "id",
+              "workspace_id",
+              "user_id",
+              "source",
+              "status",
+              "declared_items",
+              "declared_bytes",
+              "items_used",
+              "reported_created",
+              "reported_failed",
+              "reported_skipped",
+              "created_at",
+              "expires_at",
+              "completed_at"
+            ]
+          },
+          {
+            "name": "document_permissions",
+            "columns": [
+              "id",
+              "workspace_id",
+              "document_id",
+              "folder_id",
+              "access",
+              "updated_by",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "document_tree_names",
+            "columns": [
+              "item_type",
+              "item_id",
+              "workspace_id",
+              "parent_folder_id",
+              "normalized_name"
+            ]
+          },
+          {
+            "name": "documents",
+            "columns": [
+              "id",
+              "byte_size",
+              "content_hash",
+              "error_message",
+              "extracted_text_uri",
+              "filename",
+              "mime_type",
+              "origin",
+              "pipeline_input_markdown",
+              "pipeline_run_id",
+              "processed_at",
+              "processing_stage",
+              "processing_started_at",
+              "processing_updated_at",
+              "reconciled_at",
+              "selection_mode",
+              "source_uri",
+              "status",
+              "uploaded_at",
+              "user_id",
+              "workspace_id",
+              "display_name",
+              "normalized_filename",
+              "source_document_id",
+              "current_content_hash",
+              "current_version",
+              "document_role",
+              "folder_id",
+              "sort_order",
+              "updated_at",
+              "deleted_at",
+              "deleted_by",
+              "delete_operation_id",
+              "pipeline_input_blocks",
+              "original_sha256",
+              "updated_by",
+              "ai_origin",
+              "error_code",
+              "import_id",
+              "conversion_report",
+              "auto_ingest_scheduled"
+            ]
+          },
+          {
+            "name": "flyway_schema_history",
+            "columns": [
+              "installed_rank",
+              "version",
+              "description",
+              "type",
+              "script",
+              "checksum",
+              "installed_by",
+              "installed_on",
+              "execution_time",
+              "success"
+            ],
+            "max_installed_rank": 110
+          },
+          {
+            "name": "folders",
+            "columns": [
+              "id",
+              "workspace_id",
+              "parent_folder_id",
+              "name",
+              "sort_order",
+              "current_version",
+              "deleted_at",
+              "deleted_by",
+              "delete_operation_id",
+              "created_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "fx_rates",
+            "columns": [
+              "effective_from",
+              "krw_per_usd"
+            ]
+          },
+          {
+            "name": "idempotency_records",
+            "columns": [
+              "id",
+              "user_id",
+              "endpoint_scope",
+              "idempotency_key",
+              "request_hash",
+              "response_status",
+              "resource_id",
+              "response_body",
+              "created_at",
+              "expires_at",
+              "status",
+              "claim_token"
+            ]
+          },
+          {
+            "name": "meeting_notes",
+            "columns": [
+              "meeting_id",
+              "version",
+              "generation_request_id",
+              "status",
+              "partial",
+              "segment_snapshot",
+              "result",
+              "error_code",
+              "apply_request_id",
+              "apply_mode",
+              "apply_document_id",
+              "apply_base_revision",
+              "apply_display_name",
+              "apply_folder_id",
+              "apply_markdown",
+              "applied_at",
+              "created_at",
+              "updated_at",
+              "ai_run_id"
+            ]
+          },
+          {
+            "name": "meeting_segments",
+            "columns": [
+              "meeting_id",
+              "id",
+              "stream_id",
+              "position",
+              "text",
+              "created_at"
+            ]
+          },
+          {
+            "name": "meeting_streams",
+            "columns": [
+              "id",
+              "meeting_id",
+              "stream_order",
+              "end_reason",
+              "started_at",
+              "ended_at"
+            ]
+          },
+          {
+            "name": "meetings",
+            "columns": [
+              "id",
+              "workspace_id",
+              "created_by",
+              "display_name",
+              "document_id",
+              "source",
+              "status",
+              "created_at",
+              "updated_at",
+              "recording_key",
+              "recording_content_type",
+              "recording_bytes",
+              "error",
+              "transcription_run_id",
+              "error_code"
+            ]
+          },
+          {
+            "name": "notification_reads",
+            "columns": [
+              "notification_id",
+              "user_id",
+              "read_at"
+            ]
+          },
+          {
+            "name": "notifications",
+            "columns": [
+              "id",
+              "workspace_id",
+              "recipient_user_id",
+              "audience",
+              "type",
+              "payload",
+              "created_at"
+            ]
+          },
+          {
+            "name": "payment_events",
+            "columns": [
+              "event_id",
+              "body_sha256",
+              "event_type",
+              "order_id",
+              "received_at"
+            ]
+          },
+          {
+            "name": "pricing_policies",
+            "columns": [
+              "effective_from",
+              "margin_bp",
+              "vat_bp",
+              "fx_buffer_bp"
+            ]
+          },
+          {
+            "name": "scheduler_leases",
+            "columns": [
+              "name",
+              "locked_until"
+            ]
+          },
+          {
+            "name": "usage_charges",
+            "columns": [
+              "id",
+              "call_id",
+              "user_id",
+              "workspace_id",
+              "run_id",
+              "kind",
+              "provider",
+              "model",
+              "call_status",
+              "input_tokens",
+              "cached_input_tokens",
+              "cache_creation_tokens",
+              "output_tokens",
+              "reasoning_tokens",
+              "audio_seconds",
+              "tts_characters",
+              "price_effective_from",
+              "fx_effective_from",
+              "policy_effective_from",
+              "cost_usd_micro",
+              "charge_krw_milli",
+              "status",
+              "started_at",
+              "created_at",
+              "requested_model",
+              "price_model",
+              "model_routing"
+            ]
+          },
+          {
+            "name": "usage_collect_queue",
+            "columns": [
+              "run_id",
+              "attempts",
+              "available_at"
+            ]
+          },
+          {
+            "name": "usage_reconcile_cursor",
+            "columns": [
+              "id",
+              "reconciled_to"
+            ]
+          },
+          {
+            "name": "user_upload_events",
+            "columns": [
+              "id",
+              "user_id",
+              "workspace_id",
+              "kind",
+              "byte_size",
+              "created_at"
+            ]
+          },
+          {
+            "name": "wiki_lint_state",
+            "columns": [
+              "workspace_id",
+              "last_lint_at"
+            ]
+          },
+          {
+            "name": "wiki_page_contributions",
+            "columns": [
+              "page_id",
+              "ingest_operation_id",
+              "source_document_id",
+              "sequence_revision",
+              "object_key",
+              "active",
+              "deactivated_by",
+              "created_at",
+              "lint_operation_id"
+            ]
+          },
+          {
+            "name": "wiki_page_versions",
+            "columns": [
+              "page_id",
+              "revision",
+              "contribution_count",
+              "markdown",
+              "markdown_key",
+              "content_hash",
+              "operation_id",
+              "created_by",
+              "created_at"
+            ]
+          },
+          {
+            "name": "wiki_workspace_versions",
+            "columns": [
+              "workspace_id",
+              "version",
+              "updated_at"
+            ]
+          }
+        ],
+        "sha256": "3a3ca621768522d67a6d2c1cb533237d10e32c7225a25c6793b7dd7684ae0c8b"
+      },
+      "ai": {
+        "tables": [
+          {
+            "name": "agent_approvals",
+            "columns": [
+              "id",
+              "run_id",
+              "plan_id",
+              "plan_version",
+              "operation_hash",
+              "user_id",
+              "decision",
+              "created_at",
+              "operation_ids",
+              "approved_by"
+            ]
+          },
+          {
+            "name": "agent_jobs",
+            "columns": [
+              "id",
+              "run_id",
+              "job_type",
+              "status",
+              "attempt_count",
+              "available_at",
+              "lease_owner",
+              "lease_token",
+              "leased_until",
+              "heartbeat_at",
+              "created_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "agent_plan_operations",
+            "columns": [
+              "id",
+              "plan_id",
+              "sequence",
+              "tool_name",
+              "target_type",
+              "target_id",
+              "base_version",
+              "source_parent_id",
+              "destination_parent_id",
+              "arguments",
+              "reason",
+              "depends_on",
+              "status",
+              "error_code",
+              "created_at",
+              "updated_at",
+              "warning",
+              "suggested_selected"
+            ]
+          },
+          {
+            "name": "agent_plans",
+            "columns": [
+              "id",
+              "run_id",
+              "version",
+              "summary",
+              "operation_hash",
+              "status",
+              "created_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "agent_run_artifacts",
+            "columns": [
+              "id",
+              "run_id",
+              "workspace_id",
+              "user_id",
+              "content_hash",
+              "purpose",
+              "object_key",
+              "document_id",
+              "base_version",
+              "target",
+              "created_at",
+              "expires_at",
+              "display_name",
+              "summary",
+              "preview_object_key"
+            ]
+          },
+          {
+            "name": "agent_runs",
+            "columns": [
+              "id",
+              "workspace_id",
+              "user_id",
+              "action",
+              "skill_version_id",
+              "status",
+              "request_summary",
+              "provider",
+              "model",
+              "current_plan_id",
+              "error_code",
+              "tool_call_count",
+              "document_id",
+              "base_version",
+              "apply_operation_id",
+              "apply_consumed_at",
+              "result",
+              "command_envelope_hash",
+              "created_at",
+              "updated_at",
+              "finished_at",
+              "clarification_question",
+              "target_folder_id",
+              "rule_summary",
+              "response_language"
+            ]
+          },
+          {
+            "name": "agent_tool_executions",
+            "columns": [
+              "id",
+              "run_id",
+              "plan_id",
+              "operation_id",
+              "tool_name",
+              "idempotency_key",
+              "attempt",
+              "status",
+              "response_metadata",
+              "error_code",
+              "finished_at"
+            ]
+          },
+          {
+            "name": "ai_document_purges",
+            "columns": [
+              "workspace_id",
+              "document_id",
+              "requested_at",
+              "last_attempt_at",
+              "finished_at",
+              "last_scan_at"
+            ]
+          },
+          {
+            "name": "ai_model_usage",
+            "columns": [
+              "id",
+              "run_id",
+              "workspace_id",
+              "user_id",
+              "kind",
+              "provider",
+              "requested_model",
+              "model",
+              "status",
+              "input_tokens",
+              "output_tokens",
+              "cached_input_tokens",
+              "cache_creation_tokens",
+              "reasoning_tokens",
+              "duration_ms",
+              "started_at",
+              "finished_at",
+              "audio_seconds",
+              "input_characters"
+            ]
+          },
+          {
+            "name": "ai_purged_scopes",
+            "columns": [
+              "scope_type",
+              "scope_id",
+              "purged_at"
+            ]
+          },
+          {
+            "name": "ai_task_changes",
+            "columns": [
+              "id",
+              "run_id",
+              "table_name",
+              "row_key",
+              "before_value",
+              "after_value",
+              "applied",
+              "undone"
+            ]
+          },
+          {
+            "name": "ai_task_runs",
+            "columns": [
+              "id",
+              "workspace_id",
+              "user_id",
+              "kind",
+              "parent_run_id",
+              "command_hash",
+              "command",
+              "status",
+              "result",
+              "error_code",
+              "created_at",
+              "updated_at",
+              "attempt"
+            ]
+          },
+          {
+            "name": "analytics_outbox",
+            "columns": [
+              "event_id",
+              "payload",
+              "state",
+              "attempts",
+              "next_attempt_at",
+              "created_at",
+              "sent_at"
+            ]
+          },
+          {
+            "name": "checkpoint_blobs",
+            "columns": [
+              "thread_id",
+              "checkpoint_ns",
+              "channel",
+              "version",
+              "type",
+              "blob"
+            ]
+          },
+          {
+            "name": "checkpoint_migrations",
+            "columns": [
+              "v"
+            ]
+          },
+          {
+            "name": "checkpoint_writes",
+            "columns": [
+              "thread_id",
+              "checkpoint_ns",
+              "checkpoint_id",
+              "task_id",
+              "idx",
+              "channel",
+              "type",
+              "blob",
+              "task_path"
+            ]
+          },
+          {
+            "name": "checkpoints",
+            "columns": [
+              "thread_id",
+              "checkpoint_ns",
+              "checkpoint_id",
+              "parent_checkpoint_id",
+              "type",
+              "checkpoint",
+              "metadata"
+            ]
+          },
+          {
+            "name": "concept_embedding_cache",
+            "columns": [
+              "workspace_id",
+              "embedding_model",
+              "representation_hash",
+              "embedding_vector",
+              "owner_run_id",
+              "created_at"
+            ]
+          },
+          {
+            "name": "document_derived_state",
+            "columns": [
+              "document_id",
+              "workspace_id",
+              "last_edit_revision",
+              "last_edit_hash",
+              "last_edited_at",
+              "ingested_hash",
+              "last_ingested_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "document_quality_reviews",
+            "columns": [
+              "document_id",
+              "workspace_id",
+              "ingest_run_id",
+              "post_ingest_run_id",
+              "status",
+              "evaluations",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "document_wiki_links",
+            "columns": [
+              "document_id",
+              "wiki_page_id",
+              "relation_type",
+              "confidence",
+              "workspace_id",
+              "created_at"
+            ]
+          },
+          {
+            "name": "pipeline_runs",
+            "columns": [
+              "id",
+              "document_id",
+              "user_id",
+              "workspace_id",
+              "input_source",
+              "output_dir",
+              "mode",
+              "status",
+              "manifest",
+              "error",
+              "created_at",
+              "updated_at",
+              "finished_at"
+            ]
+          },
+          {
+            "name": "skill_version_sources",
+            "columns": [
+              "id",
+              "skill_version_id",
+              "source_agent_run_id",
+              "source_turn_id",
+              "source_type",
+              "created_at"
+            ]
+          },
+          {
+            "name": "skill_versions",
+            "columns": [
+              "id",
+              "skill_id",
+              "version",
+              "name",
+              "description",
+              "instructions_markdown",
+              "capabilities",
+              "allowed_tools",
+              "safety_result",
+              "status",
+              "created_by",
+              "created_at",
+              "published_at",
+              "targets",
+              "result_mode",
+              "requires_source"
+            ]
+          },
+          {
+            "name": "skills",
+            "columns": [
+              "id",
+              "workspace_id",
+              "scope_type",
+              "owner_user_id",
+              "command",
+              "status",
+              "enabled_version_id",
+              "created_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "source_block_snapshots",
+            "columns": [
+              "document_id",
+              "source_content_hash",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "source_blocks",
+            "columns": [
+              "document_id",
+              "block_id",
+              "text",
+              "position",
+              "line_start",
+              "line_end",
+              "block_type"
+            ]
+          },
+          {
+            "name": "wiki_embedding_units",
+            "columns": [
+              "id",
+              "embedding_vector_id",
+              "page_id",
+              "source_document_id",
+              "unit_type",
+              "block_refs",
+              "text",
+              "weight",
+              "created_at",
+              "updated_at",
+              "entry_id"
+            ]
+          },
+          {
+            "name": "wiki_embedding_vectors",
+            "columns": [
+              "id",
+              "embedding_model",
+              "representation_hash",
+              "representation_text",
+              "embedding_vector",
+              "embedding_dimension",
+              "status",
+              "error",
+              "created_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "wiki_page_embeddings",
+            "columns": [
+              "page_id",
+              "embedding_model",
+              "representation_hash",
+              "embedding_vector",
+              "embedding_dimension",
+              "status",
+              "error",
+              "created_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "wiki_page_entries",
+            "columns": [
+              "workspace_id",
+              "entry_id",
+              "page_id",
+              "name",
+              "parent_entry_id",
+              "definition",
+              "block_refs",
+              "position",
+              "slugs",
+              "aliases",
+              "tags"
+            ]
+          },
+          {
+            "name": "wiki_page_entry_references",
+            "columns": [
+              "page_id",
+              "entry_id",
+              "workspace_id",
+              "target_slug",
+              "name",
+              "parent_entry_id",
+              "position"
+            ]
+          },
+          {
+            "name": "wiki_page_links",
+            "columns": [
+              "from_page_id",
+              "to_page_id",
+              "link_type",
+              "label",
+              "confidence",
+              "workspace_id",
+              "created_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "wiki_pages",
+            "columns": [
+              "id",
+              "page_type",
+              "title",
+              "slug",
+              "summary",
+              "markdown_uri",
+              "user_id",
+              "workspace_id",
+              "status",
+              "created_at",
+              "updated_at"
+            ]
+          },
+          {
+            "name": "wiki_pending_contributions",
+            "columns": [
+              "page_id",
+              "operation_id",
+              "workspace_id",
+              "document_id",
+              "object_key",
+              "created_at"
+            ]
+          },
+          {
+            "name": "wiki_schemas",
+            "columns": [
+              "id",
+              "workspace_id",
+              "user_id",
+              "name",
+              "raw_markdown",
+              "sanitized_global_markdown",
+              "sanitized_query_markdown",
+              "sanitized_ingest_markdown",
+              "sanitized_edit_markdown",
+              "sanitized_concept_markdown",
+              "sanitized_template_markdown",
+              "preview_markdown",
+              "lint_result",
+              "status",
+              "schema_version",
+              "created_at",
+              "updated_at",
+              "activated_at"
+            ]
+          },
+          {
+            "name": "wiki_source_manual_links",
+            "columns": [
+              "from_page_id",
+              "to_page_id",
+              "present",
+              "workspace_id"
+            ]
+          },
+          {
+            "name": "wiki_source_tombstones",
+            "columns": [
+              "workspace_id",
+              "document_id",
+              "deleted_at"
+            ]
+          }
+        ],
+        "sha256": "34437d2a2898ace5a5586c7841eccf8629005e838fc452e9eba48f924a74dca7"
+      }
+    },
+    "snapshots": {
+      "access": {
+        "id": "fruition-lossless-fb06bf23-access-20261109075418",
+        "created_after": "2026-11-09T07:54:18Z"
+      },
+      "core": {
+        "id": "fruition-lossless-fb06bf23-core-20261109075418",
+        "created_after": "2026-11-09T07:54:18Z"
+      }
+    },
+    "restored_sha256": {
+      "access": "07fa1febaf0dc15898c830776a372da47aa7771dbe900ff2a562e1db08994bfe",
+      "document": "3a3ca621768522d67a6d2c1cb533237d10e32c7225a25c6793b7dd7684ae0c8b",
+      "ai": "34437d2a2898ace5a5586c7841eccf8629005e838fc452e9eba48f924a74dca7"
+    },
+    "credit_exemption_cutoff": "2026-11-09T07:54:18Z"
+  }
+}
