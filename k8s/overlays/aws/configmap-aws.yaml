@@ -7,6 +7,8 @@ metadata:
   namespace: fruition
 data:
   SPRING_PROFILES_ACTIVE: "production"
+  # 먼저 document V117 배포 및 기존 가입자 면제 명단 반영을 완료한다.
+  BILLING_ENFORCE: "true"
   AUTH_REFRESH_COOKIE_SECURE: "true"
   # POSTGRES_HOST는 서비스별 RDS가 달라 configmap이 아니라 각 deployment env로 주입
   # (kustomization.yaml의 access-svc/document-svc patch 참조)
