@@ -161,7 +161,7 @@ def verify_after(api, config, evidence):
     verify_data(api, config, evidence, before=False)
 
 
-def prepare_credit_exemptions(api, config, evidence):
+def prepare_credit_exemptions(api, config, evidence, *, job_name="existing-credit-exemptions"):
     """One offline Job; both credentials and the member CSV stay inside the Pod.
 
     Access is read only. Core changes only the exemption flag/updated_at or adds
@@ -180,6 +180,10 @@ def prepare_credit_exemptions(api, config, evidence):
             if env["name"] == name:
                 env["name"] = "ACCESS_" + name
                 dc["env"].append(env)
+    # The Access preflight checks this Secret before opening any DB connection.
+    for env in ac["env"]:
+        if env["name"] == "POSTHOG_PROJECT_TOKEN":
+            dc["env"].append(env)
     export = f"""
 cutoff_valid=$(psql --dbname="$PGDATABASE" -XAt -v ON_ERROR_STOP=1 2>/dev/null <<'SQL'
 SELECT count(*) > 0 AND count(*) FILTER (WHERE created_at >= '{cutoff}'::timestamptz) = 0 FROM users;
@@ -201,7 +205,7 @@ CREATE TEMP TABLE original_credit_balances ON COMMIT DROP AS SELECT user_id,bala
 CREATE TEMP TABLE original_credit_entries ON COMMIT DROP AS SELECT count(*) AS n FROM credit_entries;
 INSERT INTO credit_accounts(user_id,limit_exempt) SELECT user_id,true FROM existing_credit_users
 ON CONFLICT(user_id) DO UPDATE SET limit_exempt=true,updated_at=now();
-DO $$ BEGIN
+DO $credit$ BEGIN
  IF NOT EXISTS (SELECT 1 FROM existing_credit_users) OR EXISTS (
   SELECT 1 FROM existing_credit_users u LEFT JOIN credit_accounts a USING(user_id)
   WHERE a.user_id IS NULL OR a.limit_exempt IS DISTINCT FROM true
@@ -210,7 +214,7 @@ DO $$ BEGIN
   WHERE a.user_id IS NULL OR a.balance IS DISTINCT FROM b.balance OR a.reserved IS DISTINCT FROM b.reserved
  ) OR (SELECT n FROM original_credit_entries) <> (SELECT count(*) FROM credit_entries)
  THEN RAISE EXCEPTION 'credit preservation verification failed'; END IF;
-END $$;
+END $credit$;
 COMMIT;
 SQL
 rm -f /tmp/existing-credit-users.csv
@@ -219,8 +223,8 @@ echo 'credit exemptions verified'
     document_script = dc["command"][2].split("# 같은 PostgreSQL client", 1)[0]
     dc["command"][2] = ("set -eu\numask 077\ntrap 'rm -f /tmp/existing-credit-users.csv' EXIT\n"
                          + access_script + export + document_script + import_sql)
-    document["metadata"]["name"] = "existing-credit-exemptions"
+    document["metadata"]["name"] = job_name
     api.job(document)
-    result = api.kubectl("logs", "job/existing-credit-exemptions").strip()
+    result = api.kubectl("logs", "job/" + job_name).strip()
     if result != "credit exemptions verified":
         raise ValueError("credit exemptions were not verified; keep maintenance")

@@ -241,3 +241,10 @@ DB 원문·자격 증명은 Job 로그에 남기지 않는다. 실패하면 기�
 `complete-before-rollout`는 무손실 배포가 모든 migration 성공 후, 앱 기동·크레딧 면제 Job 전에 중단된 경우만 사용한다. 원래 review/manifest와 시작·실패 기록은 변경하지 않는다. 별도 recovery plan에 `after_fingerprints`(세 운영 DB의 실제 지문)와 `schema_equivalence_url`(리허설 원문 해시 재현 및 같은 PostgreSQL parser를 거친 전체 스키마 동일성 검증 PR)을 추가한다. 이는 운영 스키마를 임의로 수리하거나 fingerprint 검사를 생략하는 옵션이 아니다.
 
 기존 구 이미지 전체가 0 replicas인지, 원래 대상 migration Job 세 개가 성공했는지, 면제 Job이 아직 없는지, 503/무세션 상태 및 기존 데이터 해시가 모두 같은지 검사한다. 검토된 새 지문이 일치해야 immutable recovery 시작 기록을 만들고 면제 Job→target rollout→업무 smoke를 실행한다. 실패/중단 후 이 복구를 자동 재실행하지 않는다.
+
+
+### 크레딧 사전 검사에서 DB 접속 전에 실패한 경우
+
+`complete-before-rollout` plan에 `credit_preflight_continuation`을 추가하는 단일 명시적 후속 복구만 허용한다. 이전 recovery 시작/실패 data 해시, 기존 `existing-credit-exemptions` Job UID/spec 해시를 고정해야 한다. 해당 Job이 실패 1회·성공 없음이며 로그가 정확히 `analytics token missing or invalid`인 검토된 DB 접속 전 실패만 대상으로 한다. 원본 데이터 일치와 모든 기존 복구 gate를 다시 검사한다.
+
+기존 Job·감사 기록은 보존하고 `existing-credit-exemptions-continuation` Job 및 `-credit-preflight-recovery-started/failed` immutable 기록을 따로 만든다. 이 후속 Job이나 기록이 이미 있으면 반복하지 않는다. 다른 SQL/기동 실패는 이 경로로 처리할 수 없다. 이전 plan은 이전 immutable recovery 시작 기록과 Git 이력에 보존한다.

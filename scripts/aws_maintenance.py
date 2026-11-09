@@ -190,6 +190,16 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
         raise ValueError("recovery requires the original maintenance review")
     before_rollout = isinstance(plan, dict) and plan.get("mode") == "complete-before-rollout"
     required = {"release_sha", "mode", "started_data_sha256", "failed_data_sha256", "incident_url"}
+    continuation = plan.get("credit_preflight_continuation") if isinstance(plan, dict) else None
+    if isinstance(plan, dict) and "credit_preflight_continuation" in plan:
+        required.add("credit_preflight_continuation")
+        if (not before_rollout or not isinstance(continuation, dict)
+                or set(continuation) != {"started_data_sha256", "failed_data_sha256", "job_uid", "job_spec_sha256"}
+                or any(not isinstance(continuation[k], str) or not re.fullmatch(r"[0-9a-f]{64}", continuation[k])
+                       for k in ("started_data_sha256", "failed_data_sha256", "job_spec_sha256"))
+                or not isinstance(continuation["job_uid"], str)
+                or not re.fullmatch(r"[0-9a-f-]{36}", continuation["job_uid"])):
+            raise ValueError("invalid explicit credit preflight continuation")
     if before_rollout:
         required |= {"after_fingerprints", "schema_equivalence_url"}
         fingerprints = plan.get("after_fingerprints")
@@ -210,13 +220,23 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
     api.verify_alb_log_destination(config)
     records = {r["metadata"]["name"]: r for r in items(api, "configmaps")}
     prefix = PREFIX + sha
-    if api.release_name(sha) in records or prefix + "-recovery-started" in records:
+    attempt_prefix = prefix + "-credit-preflight" if continuation else prefix
+    if api.release_name(sha) in records or attempt_prefix + "-recovery-started" in records:
         raise ValueError("recovery cannot repeat or overwrite a completed release")
+    if continuation:
+        for suffix, key in (("-recovery-started", "started_data_sha256"), ("-recovery-failed", "failed_data_sha256")):
+            prior = records.get(prefix + suffix, {})
+            if prior.get("immutable") is not True or digest(prior.get("data", {})) != continuation[key]:
+                raise ValueError("credit continuation requires exact prior recovery audit")
     for name in records:
         if name.startswith(PREFIX) and name.endswith("-started") and name != prefix + "-started":
             other = name[len(PREFIX):-len("-started")]
             if other.endswith("-recovery"):
                 other = other[:-len("-recovery")]
+            if other.endswith("-credit-preflight"):
+                other = other[:-len("-credit-preflight")]
+            if continuation and name == prefix + "-recovery-started":
+                continue
             if api.release_name(other) not in records:
                 raise ValueError("another unresolved maintenance attempt exists")
     for suffix, key in (("-started", "started_data_sha256"), ("-failed", "failed_data_sha256")):
@@ -250,7 +270,16 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
         if (job.get("status", {}).get("succeeded") != 1 or job.get("status", {}).get("failed", 0)
                 or [(c["name"], c["image"]) for c in actual] != [(c["name"], c["image"]) for c in expected]):
             raise ValueError("recovery requires successful original target migration jobs")
-    if before_rollout and "existing-credit-exemptions" in jobs:
+    if continuation:
+        failed_job = jobs.get("existing-credit-exemptions", {})
+        if (failed_job.get("metadata", {}).get("uid") != continuation["job_uid"]
+                or digest(failed_job.get("spec", {})) != continuation["job_spec_sha256"]
+                or failed_job.get("status", {}).get("failed") != 1
+                or failed_job.get("status", {}).get("active", 0) or failed_job.get("status", {}).get("succeeded", 0)
+                or api.kubectl("logs", "job/existing-credit-exemptions").strip() != "analytics token missing or invalid"
+                or "existing-credit-exemptions-continuation" in jobs):
+            raise ValueError("credit continuation requires the reviewed pre-DB failure and no subsequent attempt")
+    elif before_rollout and "existing-credit-exemptions" in jobs:
         raise ValueError("pre-rollout recovery requires credit exemptions not yet attempted")
     routes = maintenance_routes(api)
     if items(api, "targetgroupbindings"):
@@ -266,11 +295,15 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
     if review["data_loss_accepted"] is False:
         from aws_data_preservation import verify_after
         verify_after(api, config, review["preservation"])
-    create_record(api, prefix + "-recovery-started", {"plan": canonical(plan), "fingerprints": canonical(current)})
+    create_record(api, attempt_prefix + "-recovery-started", {"plan": canonical(plan), "fingerprints": canonical(current)})
     try:
         if before_rollout:
             from aws_data_preservation import prepare_credit_exemptions
-            prepare_credit_exemptions(api, config, review["preservation"])
+            if continuation:
+                prepare_credit_exemptions(api, config, review["preservation"],
+                                          job_name="existing-credit-exemptions-continuation")
+            else:
+                prepare_credit_exemptions(api, config, review["preservation"])
         api.complete_rollout(config, sha, documents, current=current, review=review, settings=settings)
     except BaseException:
         cleanup_failed = False
@@ -284,7 +317,7 @@ def complete_migrated_release(api, config, sha, documents, *, review, plan, imag
                             "-p", '{"spec":{"replicas":0}}')
             except Exception:
                 cleanup_failed = True
-        create_record(api, prefix + "-recovery-failed", {
+        create_record(api, attempt_prefix + "-recovery-failed", {
             "state": "operator-recovery-required", "containment": "unverified" if cleanup_failed else "requested"})
         raise
 
@@ -303,6 +336,8 @@ def guarded_deploy(api, config, sha, documents, **kwargs):
             release = name[len(PREFIX):-len("-started")]
             if release.endswith("-recovery"):
                 release = release[:-len("-recovery")]
+            if release.endswith("-credit-preflight"):
+                release = release[:-len("-credit-preflight")]
             if api.release_name(release) not in by_name:
                 raise ValueError("unfinished maintenance attempt: keep downtime; explicit reviewed recovery required")
     if not maintenance:
