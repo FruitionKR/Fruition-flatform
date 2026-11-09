@@ -234,3 +234,10 @@ DB 원문·자격 증명은 Job 로그에 남기지 않는다. 실패하면 기�
 주의: 면제 반영은 `updated_at` 등 검토된 업무 데이터 변경을 포함한다. 그 이후 실패했다면
 원래 데이터 digest를 임의로 바꾸거나 실패 기록을 삭제해 재시도하지 않는다. 실제 부분 실행 결과와
 면제 이후 데이터에 맞는 별도 복구 계획이 필요하며 기존 recover 역시 데이터 불일치 시 거부한다.
+
+
+### 기동 전 스키마 표현 차이 복구
+
+`complete-before-rollout`는 무손실 배포가 모든 migration 성공 후, 앱 기동·크레딧 면제 Job 전에 중단된 경우만 사용한다. 원래 review/manifest와 시작·실패 기록은 변경하지 않는다. 별도 recovery plan에 `after_fingerprints`(세 운영 DB의 실제 지문)와 `schema_equivalence_url`(리허설 원문 해시 재현 및 같은 PostgreSQL parser를 거친 전체 스키마 동일성 검증 PR)을 추가한다. 이는 운영 스키마를 임의로 수리하거나 fingerprint 검사를 생략하는 옵션이 아니다.
+
+기존 구 이미지 전체가 0 replicas인지, 원래 대상 migration Job 세 개가 성공했는지, 면제 Job이 아직 없는지, 503/무세션 상태 및 기존 데이터 해시가 모두 같은지 검사한다. 검토된 새 지문이 일치해야 immutable recovery 시작 기록을 만들고 면제 Job→target rollout→업무 smoke를 실행한다. 실패/중단 후 이 복구를 자동 재실행하지 않는다.
