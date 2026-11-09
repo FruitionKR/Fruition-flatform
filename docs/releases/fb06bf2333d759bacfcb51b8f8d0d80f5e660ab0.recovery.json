@@ -3,11 +3,17 @@
   "mode": "complete-before-rollout",
   "started_data_sha256": "b5a60902d3eab65fc7344d75e2d5b2a0664c89db7a12f5a0ed525069283d7f13",
   "failed_data_sha256": "b0de1b3ba6dbf7801f898458720cbe89c11c81fa8c36d9ae7ea678640364d7fa",
-  "incident_url": "https://github.com/FruitionKR/Fruition-flatform/actions/runs/42583503648",
+  "incident_url": "https://github.com/FruitionKR/Fruition-flatform/actions/runs/42587200248",
   "after_fingerprints": {
     "access": "feb348cef42d270b15de2d8a6a146cd60c74525b2028995c05616c29796878d5",
     "document": "44e9582eb2b13d17e369f6b854f02163b7ec6a32fcbd863ae329a5ef87710bf3",
     "ai": "722413a9efedfa0cf990053538ed5f6977f604a09f7520361bd37c251e97b379"
   },
-  "schema_equivalence_url": "https://github.com/FruitionKR/Fruition-flatform/pull/182"
+  "schema_equivalence_url": "https://github.com/FruitionKR/Fruition-flatform/pull/182",
+  "credit_preflight_continuation": {
+    "started_data_sha256": "7d6835d724923e566152e50b1fcece01b8340c5dbc3c81d525a39ec351eb245b",
+    "failed_data_sha256": "b0de1b3ba6dbf7801f898458720cbe89c11c81fa8c36d9ae7ea678640364d7fa",
+    "job_uid": "560fdeb6-81c4-4ce5-b8f8-51d609d823e3",
+    "job_spec_sha256": "4df13297083af1f85c983ae85c9c37a4e05dbaa5451948ce976fc03b7fe5353d"
+  }
 }
