@@ -171,7 +171,7 @@ locals {
     }
     pipeline = {
       # meetings/*는 회의 녹음 전사용 읽기 전용, 전사 chunk checkpoint는 pipeline-runs/meeting-transcription/*에 쓰고 지운다.
-      read   = ["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*", "meetings/*"]
+      read   = ["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*", "meetings/*", "tmp/convert/mcp/*"]
       write  = ["wiki/*", "agent-runs/*", "pipeline-runs/*"]
       delete = ["wiki/*", "agent-runs/*", "pipeline-runs/meeting-transcription/*"]
     }
@@ -208,6 +208,10 @@ resource "aws_iam_policy" "storage" {
         { Effect = "Allow", Action = each.key == "document" ? ["s3:GetObject", "s3:GetObjectVersion"] : ["s3:GetObject"], Resource = [for p in each.value.read : "${aws_s3_bucket.storage.arn}/${p}"] },
         { Effect = "Allow", Action = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"], Resource = [for p in each.value.write : "${aws_s3_bucket.storage.arn}/${p}"] },
       ],
+      # MCP 조립 결과는 최대 4MiB 단일 PUT이다. 준비 묶음 쓰기·multipart·삭제 권한은 필요 없다.
+      each.key == "pipeline" ? [
+        { Effect = "Allow", Action = ["s3:PutObject"], Resource = ["${aws_s3_bucket.storage.arn}/tmp/convert/mcp/*/*/final.md"] },
+      ] : [],
       # 삭제 권한이 없는 서비스(converter)는 빈 Resource statement를 만들지 않는다.
       length(each.value.delete) > 0 ? [
         { Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in each.value.delete : "${aws_s3_bucket.storage.arn}/${p}"] },
