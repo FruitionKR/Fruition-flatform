@@ -23,7 +23,7 @@ MCP 서버 요청도 같은 방식으로 예외에 넣는다. 워크스페이스
 |---|---|---|
 | POST | `/mcp` | application/json |
 
-MCP 도구 호출(위키 원문 window 제출, 문서 수정 제안 등)은 문서 원문을 JSON-RPC 본문에 담아 8KB를 넘는다. 기존 계약에 호스트 조건이 없으므로 이 계약도 호스트를 묻지 않는다. `/mcp`는 화면 호스트와 `api.` 호스트 모두 document로 가고, document는 화면 호스트가 아닌 요청을 400(`CANONICAL_ENDPOINT_REQUIRED`)으로 거절한다. `/mcp/*` 승인 화면, `/api/mcp-endpoint`, MCP OAuth(access의 `/oauth2/token`·`/oauth2/authorize`·`/.well-known/oauth-authorization-server`)는 예외가 아니다. 토큰·인가 요청은 작은 form/JSON이라 기본 8KB 검사 안에 든다. access에는 동적 클라이언트 등록(registration) 경로가 없다. 클라이언트 metadata(CIMD)는 access가 밖으로 받아오므로 들어오는 본문이 아니다.
+MCP 도구 호출(위키 원문 window 제출, 문서 수정 제안 등)은 문서 원문을 JSON-RPC 본문에 담아 8KB를 넘는다. 기존 계약에 호스트 조건이 없으므로 이 계약도 호스트를 묻지 않는다. `/mcp`는 화면 호스트와 `api.` 호스트 모두 document로 가고, document는 화면 호스트가 아닌 요청을 400(`CANONICAL_ENDPOINT_REQUIRED`)으로 거절한다. `/mcp/*` 승인 화면, `/api/mcp-endpoint`, MCP OAuth(access의 `/oauth2/token`·`/oauth2/authorize`·`/.well-known/oauth-authorization-server`)는 본문 예외가 아니다. 토큰·인가 요청은 작은 form/JSON이라 기본 8KB 검사 안에 든다. loopback `redirect_uri`만 [별도 예외](#mcp-oauth-loopback-redirect_uri-예외)로 다룬다. access에는 동적 클라이언트 등록(registration) 경로가 없다. 클라이언트 metadata(CIMD)는 access가 밖으로 받아오므로 들어오는 본문이 아니다.
 
 JSON은 선택적인 charset 파라미터를 허용한다. 잘못된 ID·다른 메서드·다른 Content-Type·추가 경로는 예외가 아니다. 이름 변경·삭제·복원·ingest·AI 승인 API는 문서 본문을 받지 않으므로 예외에 포함하지 않는다.
 
@@ -33,10 +33,32 @@ JSON은 선택적인 charset 파라미터를 허용한다. 잘못된 ID·다른 
 2. 정확한 요청 조건에 일치하면 Count로 `fruition:document-content` 라벨만 붙인다. 이어서 `not-public-paths`가 디코딩한 `/internal`·`/swagger-ui`·`/v3/api-docs` 경로를, `sensitive-file-paths`가 `.git`·`.env` 등 민감 파일 경로를 404로 차단한다. 본문 예외는 URI 차단을 면제하지 않는다.
 3. 기존 관리형 규칙 4개를 평가한다. CommonRuleSet의 `SizeRestrictions_BODY`, `GenericLFI_BODY`, `CrossSiteScripting_BODY`와 SQLiRuleSet의 `SQLi_BODY`, `SQLiExtendedPatterns_BODY`만 Count로 전환한다.
 4. 위 다섯 규칙의 라벨이 있지만 문서 요청 라벨이 없으면 `document-content-body-guard`가 차단한다. 같은 WebACL의 라벨은 `fruition:document-content`라는 로컬 이름으로 참조한다.
+   `GenericRFI_QUERYARGUMENTS`·`GenericRFI_BODY`·`EC2MetaDataSSRF_QUERYARGUMENTS`·`EC2MetaDataSSRF_BODY` 라벨이 있지만 `fruition:oauth-loopback-redirect` 라벨(우선순위 4에서 부착)이 없으면 `oauth-loopback-redirect-guard`(우선순위 21)가 차단한다. 아래 MCP OAuth 절을 참고한다.
 5. `app_domain`이 설정되고 접근 코드가 있으면 `frontend-access-code`가 해당 호스트의 `/api/` 요청 중 코드 없이 열리는 경로가 아니고 `fruition_access` 쿠키 해시가 맞지 않는 요청을 403으로 차단한다.
 6. IP별 제한 `per-source-ip`(5분 3,000건, `/_next/static/` 제외)와 전체 제한 `all-api-requests`(5분 6,000건, `/api/`만 계산)를 평가한다. 초과 시 429다. 값은 `cost-guards.tf`의 `waf_requests_per_ip_5m`·`waf_requests_total_5m` 기본값이다.
 
 종료 동작인 Allow를 추가하지 않는다. URI·쿼리·쿠키·헤더 검사, IP 평판, KnownBadInputs와 기타 본문 규칙, 서버 인증·인가 및 파일 검증은 계속 적용된다. 예외는 요청 전체의 모든 공격 검사를 끄는 기능이 아니다. 검색 API의 쿼리 검사도 유지한다.
+
+## MCP OAuth loopback redirect_uri 예외
+
+Claude Code·Codex·VS Code·Copilot CLI·Zed 같은 MCP OAuth 클라이언트는 `http://127.0.0.1:<port>/callback`, `http://localhost:<port>/callback` 형태의 loopback `redirect_uri`를 쓴다. 2026-11-11 운영(`https://fruition.wiki`) 탐침에서 쿼리 인자나 form 본문 값에 호스트가 IP 리터럴이거나 localhost인 URL(`http://127.0.0.1/cb`, `http://[::1]/cb`, `http://10.1.2.3/cb`, `http://localhost.example.com/cb` 등)이 있으면 403이었다. `http://example.com/cb`, `https://claude.ai/...`는 통과했다. 이 때문에 인가·동의 화면·토큰 교환이 모두 막혔다.
+
+2026-11-11 WAF 로그로 확인한 차단 규칙은 CommonRuleSet의 두 계열이다. 루프백 호스트(`localhost`, `127.0.0.1`, `[::1]`)는 `EC2MetaDataSSRF_QUERYARGUMENTS`·`EC2MetaDataSSRF_BODY`(라벨 `awswaf:managed:aws:core-rule-set:EC2MetaDataSSRF_QueryArguments`·`...:EC2MetaDataSSRF_Body`)가, 그 밖의 IPv4 URL은 `GenericRFI_QUERYARGUMENTS`·`GenericRFI_BODY`(라벨 `...:GenericRFI_QueryArguments`·`...:GenericRFI_Body`)가 막았다. CRS는 첫 매치에서 끝나므로 SSRF만 풀면 다음 순서의 GenericRFI가 `127.0.0.1`을 잡는다. 그래서 네 규칙을 함께 예외로 둔다.
+
+[요청 조건 목록](../infra/waf/oauth-loopback-redirect.json)이 Terraform과 테스트의 입력이다.
+
+| 메서드 | 경로(정확히 일치) | 위치 | 서비스 |
+|---|---|---|---|
+| GET | `/oauth2/authorize` | 쿼리 `redirect_uri` | access |
+| GET | `/mcp/authorize` | 같은 쿼리를 전달받는 동의 화면 | frontend |
+| POST | `/oauth2/token` | form 본문 `redirect_uri` | access |
+
+- 두 규칙만 Count로 바꾸고, `oauth-loopback-redirect-contract`(우선순위 4, Count)가 위 세 메서드+경로에 `fruition:oauth-loopback-redirect` 라벨을 붙인다. `app_domain`이 설정되면 Host 헤더가 그 값과 정확히 같아야 한다(소문자 변환). 경로는 변환 없이 정확히 비교하므로 끝 `/`·하위 경로·대소문자 변형은 예외가 아니다.
+- `oauth-loopback-redirect-guard`(우선순위 21)가 위 네 라벨 중 하나가 있고 예외 라벨이 없는 요청을 차단한다. 그 밖의 경로(`POST /mcp`, 문서 본문 경로 포함)의 차단은 이전과 같다.
+- 보안 영향: 세 경로에서는 `http://169.254.169.254/...` 같은 메타데이터 URL도 쿼리·본문으로 통과한다. access는 `redirect_uri`를 서버에서 가져오지 않고, 서버가 가져오는 `client_id`(CIMD)는 허용 목록 검사 뒤 공인 IP만 허용하는 resolver로 받으므로 SSRF로 이어지지 않는다.
+- `GenericRFI_URIPATH`, `EC2MetaDataSSRF_COOKIE`·`EC2MetaDataSSRF_URIPATH`, LFI·XSS·SQLi 쿼리 검사, KnownBadInputs(`Host_localhost_HEADER` 포함)는 그대로다. Allow를 추가하지 않으며 redirect_uri 일치·PKCE 검증은 access가 책임진다.
+
+운영 확인: 적용 후 위 세 경로에 loopback URL을 담은 인증 없는 요청이 403이 아닌 앱 응답(400/302/401 등)을 받는지, 다른 경로(예: `GET /mcp/authorize/x?x=http://127.0.0.1/cb`)는 403인지 본다. WAF 로그에서 해당 요청의 `labels`에 GenericRFI 라벨이 있는지 확인한다. 예외 경로가 여전히 403이면 `terminatingRuleId`와 `ruleGroupList`로 다른 관리형 규칙이 차단하는지 확인한다.
 
 ## 검사 한계와 서버 역할
 

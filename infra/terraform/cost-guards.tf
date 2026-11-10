@@ -64,6 +64,8 @@ locals {
   waf_access_code_open_path_regex = "^/api/(auth/|invitations/|workspaces$|workspaces/[^/]+$)"
   waf_document_content_contracts  = jsondecode(file("${path.module}/../waf/document-content-contracts.json"))
   waf_sensitive_paths             = jsondecode(file("${path.module}/../waf/sensitive-paths.json"))
+  # MCP OAuth clients send loopback redirect_uri values (http://127.0.0.1:port/...), which GenericRFI blocks.
+  waf_oauth_loopback_redirect = jsondecode(file("${path.module}/../waf/oauth-loopback-redirect.json"))
   waf_content_body_overrides = {
     AWSManagedRulesCommonRuleSet = {
       SizeRestrictions_BODY   = "awswaf:managed:aws:core-rule-set:SizeRestrictions_Body"
@@ -272,6 +274,76 @@ resource "aws_wafv2_web_acl" "cost_guard" {
     }
   }
 
+  # Mark only the MCP OAuth requests that carry a loopback redirect_uri. Count
+  # continues evaluation; this is never a terminating Allow or an auth bypass.
+  rule {
+    name     = "oauth-loopback-redirect-contract"
+    priority = 4
+    action {
+      count {}
+    }
+    rule_label { name = "fruition:oauth-loopback-redirect" }
+    statement {
+      or_statement {
+        dynamic "statement" {
+          for_each = local.waf_oauth_loopback_redirect.routes
+          content {
+            and_statement {
+              dynamic "statement" {
+                for_each = var.app_domain != "" ? [var.app_domain] : []
+                iterator = host
+                content {
+                  byte_match_statement {
+                    search_string         = host.value
+                    positional_constraint = "EXACTLY"
+                    field_to_match {
+                      single_header { name = "host" }
+                    }
+                    text_transformation {
+                      priority = 0
+                      type     = "LOWERCASE"
+                    }
+                  }
+                }
+              }
+              statement {
+                byte_match_statement {
+                  search_string         = statement.value.method
+                  positional_constraint = "EXACTLY"
+                  field_to_match {
+                    method {}
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "NONE"
+                  }
+                }
+              }
+              statement {
+                byte_match_statement {
+                  search_string         = statement.value.path
+                  positional_constraint = "EXACTLY"
+                  field_to_match {
+                    uri_path {}
+                  }
+                  text_transformation {
+                    priority = 0
+                    type     = "NONE"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "fruition-oauth-loopback-redirect-contract"
+      sampled_requests_enabled   = false
+    }
+  }
+
   dynamic "rule" {
     for_each = {
       10 = "AWSManagedRulesAmazonIpReputationList"
@@ -289,10 +361,13 @@ resource "aws_wafv2_web_acl" "cost_guard" {
         managed_rule_group_statement {
           vendor_name = "AWS"
           name        = rule.value
-          # Preserve labels; the guard below re-blocks these outside the contract.
+          # Preserve labels; the guards below re-block these outside their contracts.
           # Header, cookie, URI, query, reputation and known-bad-input rules remain.
           dynamic "rule_action_override" {
-            for_each = lookup(local.waf_content_body_overrides, rule.value, {})
+            for_each = merge(
+              lookup(local.waf_content_body_overrides, rule.value, {}),
+              lookup(local.waf_oauth_loopback_redirect.managed_rule_overrides, rule.value, {}),
+            )
             content {
               name = rule_action_override.key
               action_to_use {
@@ -347,6 +422,46 @@ resource "aws_wafv2_web_acl" "cost_guard" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "fruition-document-content-body-guard"
+      sampled_requests_enabled   = false
+    }
+  }
+
+  rule {
+    name     = "oauth-loopback-redirect-guard"
+    priority = 21
+    action {
+      block {}
+    }
+    statement {
+      and_statement {
+        statement {
+          or_statement {
+            dynamic "statement" {
+              for_each = toset(flatten([for rules in local.waf_oauth_loopback_redirect.managed_rule_overrides : values(rules)]))
+              content {
+                label_match_statement {
+                  scope = "LABEL"
+                  key   = statement.value
+                }
+              }
+            }
+          }
+        }
+        statement {
+          not_statement {
+            statement {
+              label_match_statement {
+                scope = "LABEL"
+                key   = "fruition:oauth-loopback-redirect"
+              }
+            }
+          }
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "fruition-oauth-loopback-redirect-guard"
       sampled_requests_enabled   = false
     }
   }

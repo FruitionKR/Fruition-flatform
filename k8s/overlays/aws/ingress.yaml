@@ -145,6 +145,42 @@ spec:
                 name: access-svc
                 port:
                   number: 8081
+          # MCP 연결 관리(OWNER의 workspace 정책·연결 회수, 사용자 본인 연결)는 access가 처리한다.
+          - path: /api/workspaces/*/mcp-policy
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*/mcp-connections
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/workspaces/*/mcp-connections/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/mcp/connections
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          - path: /api/mcp/connections/*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
           # 5. 그 밖의 워크스페이스 하위 기능은 document. 새 document 경로는 규칙 추가 없이 여기로 온다
           - path: /api/workspaces/*/*
             pathType: ImplementationSpecific

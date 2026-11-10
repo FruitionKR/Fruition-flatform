@@ -65,6 +65,13 @@ class FrontendRoutingTest(unittest.TestCase):
             "/api/users/me/credit-orders": "document-svc",
             "/api/document-transport": "frontend",
             "/api/mcp-endpoint": "frontend",
+            # MCP 연결 관리 API는 access. 같은 접두사의 다른 workspace 하위 경로는 계속 document다.
+            "/api/workspaces/ws_1/mcp-policy": "access-svc",
+            "/api/workspaces/ws_1/mcp-connections": "access-svc",
+            "/api/workspaces/ws_1/mcp-connections/9f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f": "access-svc",
+            "/api/mcp/connections": "access-svc",
+            "/api/mcp/connections/9f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f": "access-svc",
+            "/api/workspaces/ws_1/mcp-other": "document-svc",
             # MCP: /mcp 한 경로만 document, 승인 화면(/mcp/*)은 frontend, OAuth와 인가 서버 metadata는 access.
             "/mcp": "document-svc",
             "/.well-known/oauth-protected-resource/mcp": "document-svc",
