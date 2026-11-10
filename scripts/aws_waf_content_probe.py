@@ -16,6 +16,7 @@ WORKSPACE = "/api/workspaces/ws_" + "0" * 32
 DOCUMENT = WORKSPACE + "/documents/doc_" + "0" * 32
 SESSION = WORKSPACE + "/chat/sessions/session_" + "0" * 32
 SKILL = WORKSPACE + "/skills/00000000-0000-0000-0000-000000000000"
+MEETING = WORKSPACE + "/meetings/mtg_" + "0" * 32
 
 
 def cases():
@@ -31,12 +32,19 @@ def cases():
         ("skill-author", "POST", WORKSPACE + "/skills/author", "json"),
         ("skill-publish", "POST", WORKSPACE + "/skills/author/publish", "json"),
         ("skill-update", "PATCH", SKILL, "json"),
+        ("skill-test-run", "POST", WORKSPACE + "/skills/test-run", "json"),
+        ("meeting-notes-apply", "POST", MEETING + "/notes/1/apply", "json"),
+        ("speech-transcription", "POST", WORKSPACE + "/speech/transcriptions", "audio"),
+        ("workspace-icon", "PUT", WORKSPACE + "/icon/image", "multipart"),
+        ("profile-avatar", "PUT", "/api/auth/me/avatar", "multipart"),
     ]
     payloads = {
         "size": "정상 문서 내용입니다.\n" * 600,
         "lfi": "경로 예시: ../../../../etc/passwd",
         "xss": 'HTML 학습 예시: <script>alert("example")</script>',
         "sqli": "' OR '1'='1' --",
+        # 개발 메모의 로컬 주소. GenericRFI_BODY·EC2MetaDataSSRF_BODY가 잡는다.
+        "loopback": "로컬 확인: http://127.0.0.1:8080/health, http://localhost:3000/",
     }
     for name, method, path, kind in routes:
         for payload, text in payloads.items():
@@ -54,10 +62,13 @@ def cases():
     ]
     for name, method, path, kind in controls:
         yield (f"control-{name}", method, path, kind, payloads["size"], "block")
-    for payload in ("lfi", "xss", "sqli"):
+    for payload in ("lfi", "xss", "sqli", "loopback"):
         yield (f"control-signin-{payload}", "POST", "/api/auth/signin", "json", payloads[payload], "block")
     # A document-content contract must not exempt query-string inspection.
     yield ("control-query-xss", "POST", WORKSPACE + "/documents/markdown?example=%3Cscript%3Ealert(1)%3C/script%3E", "json", "normal text", "block")
+    # Document contracts tolerate loopback URLs only in the body, never in query arguments.
+    yield ("control-query-loopback", "POST", WORKSPACE + "/documents/markdown?example=http://127.0.0.1:8080/", "json", "normal text", "block")
+    yield ("control-speech-wrong-media", "POST", WORKSPACE + "/speech/transcriptions", "json", payloads["size"], "block")
 
 
 def body(kind, text):
@@ -66,6 +77,9 @@ def body(kind, text):
         data = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"markdown\"\r\n\r\n"
                 f"{text}\r\n--{boundary}--\r\n").encode()
         return "multipart/form-data; boundary=" + boundary, data
+    if kind == "audio":
+        # Synthetic bytes only; WAF matches the Content-Type, the server rejects without auth.
+        return "audio/webm;codecs=opus", text.encode()
     return "application/json; charset=utf-8", json.dumps({"markdown": text}, ensure_ascii=False).encode()
 
 
