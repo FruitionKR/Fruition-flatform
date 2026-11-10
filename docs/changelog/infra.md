@@ -2,6 +2,8 @@
 
 ## 2026-11-10
 
+- 화면 호스트에서 access가 처리하는 MCP 연결 관리 API(`/api/workspaces/*/mcp-policy`, `/api/workspaces/*/mcp-connections(/*)`, `/api/mcp/connections(/*)`)가 document 와일드카드로 가던 라우팅을 access로 고쳤다. workspace OWNER가 MCP를 켜지 못해 연결을 만들 수 없던 문제다.
+
 - 운영 출시용 MCP를 AWS 설정에서 켰다. access MCP OAuth(발급자 `https://<app_domain>`, 리소스 `/mcp`, TTL 코드 2분·access 15분·refresh 8시간·대기 5분), document MCP 서버(한도·위키 원문 한도, 위키 검색은 클러스터 내부 `http://pipeline-api:8000/internal/mcp/wiki/search`), pipeline 위키 검색·페이지·초안 한도와 승인 조회·반영 결과 timeout을 공통 ConfigMap에 넣었다. CIMD 64KiB/2초 제한은 유지한다.
 - 가격은 원화 최소 단위 1원 기준으로 문서 수정 승인 0원, 위키 편입 원문 1MiB당 1원, 위키 정리 반영 1회 1원이며 가격 버전은 `mcp-launch-2026-11`이다.
 - 화면 호스트에 `/mcp`(정확히)·`/.well-known/oauth-protected-resource/mcp` → document, `/.well-known/oauth-authorization-server` → access, `/api/mcp-endpoint` → frontend 규칙을 추가했다. `/mcp/*` 승인 화면은 frontend, `/oauth2/*`는 기존대로 access다. frontend에 `MCP_RESOURCE_URI`를 넣었다.
