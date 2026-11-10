@@ -51,7 +51,7 @@ flowchart LR
 | 일꾼 관리자 EKS | Kubernetes 1.35 | 컴퓨터를 관리하는 부분도 돈이 들어요 |
 | 보통 일을 하는 컴퓨터 | t3.large, 처음 2대·최소 2대·최대 5대 | (11-02 변경, 적용 전) 평소 2대를 목표로 해요. 프로그램 교체(rollout) 중에는 잠깐 3대째가 켜질 수 있고, 자리가 모자라면 Cluster Autoscaler가 최대 5대까지 켜고 끝나면 약 10분 쉬었다가 줄여요. 코드는 추가 CPU 요금 대신 속도를 제한하는 Standard 설정이지만, 실제 운영 컴퓨터는 `unlimited`로 돌고 있는 것을 11-02에 발견했어요(아래 미해결 항목) |
 | 화면 Fargate | 화면 Pod 2개, 각각 0.25 vCPU·768Mi 요청 | 컴퓨터를 빌리지 않고 Pod 크기만큼 시간당 내요. 추가 몫까지 합쳐 Pod 하나를 0.25 vCPU·1GB로 계산해요 |
-| AI 일을 하는 컴퓨터 | m5·m5d·m6i·m7i.xlarge 중 Spot, 일이 없으면 0대·최대 4대 | (11-02 변경, 적용 전) 일이 없으면 0대로 내려가요. 그래서 쉬고 난 뒤 첫 AI 작업은 컴퓨터를 켜느라 약 3~5분 늦게 시작해요. GPU는 없어요. Spot은 AWS 사정에 따라 중단될 수 있어요 |
+| AI 일을 하는 컴퓨터 | m5·m5d·m6i·m7i.xlarge 중 Spot, 상시 1대·최대 4대 | (11-10 변경, 적용 전) MCP 위키 검색 때문에 embedding-server가 상시 1개라 이 컴퓨터도 1대는 늘 켜져 있어요(아래 절). 그 전(11-02)에는 일이 없으면 0대로 내려갔어요. 그래서 쉬고 난 뒤 첫 AI 작업은 컴퓨터를 켜느라 약 3~5분 늦게 시작해요. GPU는 없어요. Spot은 AWS 사정에 따라 중단될 수 있어요 |
 | 설치 담당 runner | t3.small 1대, 잠긴 gp3 저장 공간 30GB | 외부 공개 IP가 없고 Standard 설정을 써요 |
 | 중요한 기록장 RDS | PostgreSQL 16, db.t4g.small 2대, 각각 gp3 30GB | 외부에 열지 않고 암호화해요. (11-02 변경, 적용 전) 로그인 DB(access)도 문서·AI DB(core)처럼 한 구역(Single-AZ)으로 바꿔 예비 DB가 없어요. 이 변경은 다음 정기 점검 시간에 적용되고, AWS 안내상 서비스 중단은 없어요. 백업 7일 보관은 그대로예요 |
 | 빠른 메모장 Redis | cache.t4g.micro 1대 | (11-02 변경, 적용 전) 예비 복사본을 없앴어요. 보낼 때와 저장할 때 잠가요. 고장 나거나 교체되면 자동으로 이어받을 예비가 없어 로그인 정보 등이 사라지고 다시 로그인해야 할 수 있어요. 자동 크기 확대는 없어요 |
@@ -75,7 +75,7 @@ flowchart LR
 | ingest-worker / query-task-worker / agent-task-worker | 각각 0~4개 (11-02 변경, 적용 전. 이전 1~4개) | AI 컴퓨터 |
 | maintenance-task-worker | 0~2개 (11-02 변경, 적용 전. 이전 1~2개) | AI 컴퓨터 |
 | converter | 0~3개(KEDA, 대기 command 1건당 1개. 이전 1~3개) | AI 컴퓨터 |
-| embedding-server | 0~1개. query·agent 일꾼이 있을 때만 1개 (11-02 변경, 적용 전) | AI 컴퓨터 |
+| embedding-server | 상시 1개 (11-10 변경, 적용 전. MCP 위키 검색용. 이전에는 AI 일꾼이 있을 때만 1개) | AI 컴퓨터 |
 | edit-event-consumer / pipeline-agent-worker | 각각 1개 고정 | (11-02 변경, 적용 전) 일반 컴퓨터. 이전에는 AI 컴퓨터 |
 | frontend | 2개 고정 | Fargate(컴퓨터 대신 Pod 단위로 빌림) |
 
@@ -300,3 +300,13 @@ lease update 건수가 대상별 약 1,790건/h(EBS sidecar 약 720건/h)에서 
 ### Cluster Autoscaler 축소 시 Pod 종료 대기 900초 (2026-11-03)
 
 Cluster Autoscaler가 노드를 줄일 때 Pod 종료를 기다리는 상한(`--max-graceful-termination-sec`)을 기본 600초에서 **900초**로 올립니다. AI worker는 `terminationGracePeriodSeconds` 900초 안에 진행 중 작업을 최대 840초까지 마무리하는데, 600초에서 끊기면 작업이 중간에 강제 종료됩니다. 위 lease 설정과 같은 `aws-platform-up.sh` helm 적용으로 반영됩니다. 영향은 worker가 있는 노드의 축소가 최대 15분 늦어지는 정도입니다. 적용 후 `kubectl -n kube-system get deploy -l app.kubernetes.io/name=aws-cluster-autoscaler -o jsonpath='{.items[0].spec.template.spec.containers[0].command}'`에 `--max-graceful-termination-sec=900`이 있는지 확인합니다.
+
+### MCP 검색 상시 가용을 위한 embedding-server 상시 1대 (2026-11-10, 적용 전)
+
+MCP `search_wiki`는 pipeline-api가 질의 임베딩을 embedding-server에 요청합니다. embedding-server가 AI 일꾼이 있을 때만 떠 있으면 평소 검색이 503이 되므로, 운영(AWS overlay)에서 embedding-server ScaledObject의 `minReplicaCount`를 1로 올립니다. 로컬(base)은 0/1 그대로입니다.
+
+- embedding-server는 AI Spot 노드 그룹(nodeSelector `fruition.io/node-role=ai-worker`)에만 뜹니다. 노드 그룹 최소값은 0 그대로이며 Terraform은 바꾸지 않습니다. Pod가 Pending이 되면 Cluster Autoscaler가 AI 노드 1대를 띄우고, 그 노드에 embedding-server가 있어 0대로 줄이지 않습니다.
+- 운영자가 하는 전체 절전(request-wake Lambda `sleep`)은 그대로 모든 노드를 내립니다. 깨울 때 Lambda가 AI 노드 희망 수를 1로 올리므로 embedding-server가 다시 뜹니다. 절전 중과 Spot 회수 직후(새 노드·이미지·모델 적재 수 분) 검색은 503(재시도 가능)입니다.
+- query·agent의 `wait-embedding-server` init container는 서버가 이미 Ready라 곧바로 통과합니다. AI 일꾼은 여전히 0개까지 줄고, embedding-server 하나(요청 500m/3Gi)가 있는 노드에 일꾼이 먼저 배치됩니다.
+
+**예상 비용(추정):** AI 노드 1대가 월 730시간 켜집니다. 서울 m5.xlarge On-Demand 공시가 약 $0.236/시간을 기억에 의존한 값으로 두고, Spot이 보통 그 30~40% 수준이라고 보면 시간당 약 $0.07~0.10, **월 약 $50~75**입니다. 루트 gp3 30GB(월 약 $2.7)가 더해집니다. 이 값은 이번 작업에서 시세를 확인하지 않은 추정이며 Spot 가격·실제 배정 타입(m5/m5d/m6i/m7i)·환율에 따라 달라집니다. 적용 후 Cost Explorer의 EC2 Spot 사용량으로 확인합니다. 11-02 조정의 예상 절감(약 $185/월) 중 이 금액만큼이 줄어듭니다.

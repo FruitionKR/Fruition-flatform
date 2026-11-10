@@ -38,5 +38,10 @@
     "method": "PATCH",
     "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/skills/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  },
+  "mcp": {
+    "method": "POST",
+    "path_regex": "^/mcp$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
   }
 }

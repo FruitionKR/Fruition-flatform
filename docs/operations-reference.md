@@ -191,13 +191,15 @@ KafkaUser와 권한 (`kafka-users.yaml`):
 | 경로 | 대상 |
 |---|---|
 | `/internal*`, `/swagger-ui*`, `/v3/api-docs*` | 고정 404 (`not-public`) |
-| `/api/document-transport` | frontend:3000 |
+| `/api/document-transport`, `/api/mcp-endpoint` | frontend:3000 |
 | `/api/workspaces/*/documents/*`, `/folders/*`, `/ai-operation-logs/*` | document-svc:8080 |
 | `/api/workspaces/*/restore`, `/icon`, `/icon/*`, `/members`, `/members/*`, `/invitations`, `/invitations/*` | access-svc:8081 |
 | `/api/workspaces/*/*` | document-svc:8080 |
 | `/api/workspaces`, `/api/workspaces/*`, `/api/auth/*`, `/api/invitations/*`, `/oauth2/*`, `/login/oauth2/*`, `/api/users/*/avatar` | access-svc:8081 |
 | `/api/*` | document-svc:8080 |
-| `/*` | frontend:3000 |
+| `/mcp`(정확히), `/.well-known/oauth-protected-resource/mcp` | document-svc:8080 (MCP 서버·리소스 metadata) |
+| `/.well-known/oauth-authorization-server` | access-svc:8081 (MCP OAuth 인가 서버 metadata. 토큰·인가·JWKS는 위 `/oauth2/*`) |
+| `/*` | frontend:3000 (`/mcp/authorize`, `/mcp/workspaces/...` 승인 화면 포함) |
 
 예전 호스트 `api.<domain>`(document-svc 전체)과 `access.<domain>`(access-svc 전체)도 같은 비공개 경로 404를 두고 남아 있습니다.
 
@@ -251,7 +253,7 @@ KafkaUser와 권한 (`kafka-users.yaml`):
 | agent-task-worker | `fruition-pipeline` | KEDA 0~4 | 500m / 2560Mi | 3584Mi | ai-worker | 900s | `fruition-pipeline` |
 | maintenance-task-worker | `fruition-pipeline` | KEDA 0~2 | 500m / 2560Mi (+ephemeral 2Gi) | 3584Mi | ai-worker | 1800s | `fruition-pipeline` |
 | converter | `fruition-converter` / Fruition-ai (`converter/`) | KEDA 0~3 | 100m / 256Mi | 1Gi | ai-worker | 7800s | `fruition-converter` |
-| embedding-server | `fruition-pipeline` | KEDA 0~1 | 500m / 3Gi | 4Gi | ai-worker | 기본 30s | `fruition-pipeline` |
+| embedding-server | `fruition-pipeline` | KEDA 1 (AWS 상시, base 0~1) | 500m / 3Gi | 4Gi | ai-worker | 기본 30s | `fruition-pipeline` |
 
 - 근거: `k8s/overlays/aws/kustomization.yaml:105-400`, `api-autoscaling.yaml:33-109`, `api-availability.yaml`, `frontend.yaml:31-64`, `k8s/base/*.yaml`.
 - base 값은 kind 개발용입니다. 운영에서는 overlay가 덮습니다. 예: access-svc 요청 CPU는 base 250m, 운영 100m입니다. document-svc는 base 250m/768Mi, 운영 150m/1Gi입니다.
@@ -271,7 +273,7 @@ KafkaUser와 권한 (`kafka-users.yaml`):
 | agent-task-worker | `ai.agent.command` / `agent-task-worker` | 6 | 0/4 | 1800s | 같음 |
 | maintenance-task-worker | `ai.maintenance.command` / `maintenance-task-worker` | 2 | 0/2 | 600s | 같음 |
 | converter | `ai.convert.command` / `ai.convert.command-worker` | 1 | 0/3 | 600s | 같음 |
-| embedding-server | `kubernetes-workload`: `app in (query-task-worker,agent-task-worker)` Pod 수, 값 1 | - | 0/1 | 300s | - |
+| embedding-server | `kubernetes-workload`: `app in (query-task-worker,agent-task-worker,ingest-worker,maintenance-task-worker)` Pod 수, 값 1 | - | 1/1 (AWS 패치. MCP 위키 검색용 상시 1개) | 300s | - |
 
 Kafka 트리거는 모두 `limitToPartitionsWithLag=true`, `offsetResetPolicy=earliest`, TLS(`TriggerAuthentication kafka-tls`)를 씁니다.
 
@@ -349,6 +351,7 @@ base(`k8s/base/configmap.yaml`)에 AWS patch(`k8s/overlays/aws/configmap-aws.yam
 | `AGENT_SKILLS_ENABLED` | `true` | 코드 기본 `false` | Agent Skills 켬 | `configmap.yaml:89` |
 | `JEV_ROUTING_ENABLED` / `JEV_EVIDENCE_ENABLED` / `JEV_CONCEPT_MERGE_ENABLED` / `JEV_SKILL_INTENT_ENABLED` / `JEV_FOLDER_LOOKUP_ENABLED` / `JEV_EDIT_DETAIL_ENABLED` | 모두 `true` | | Jev(TypeSafe) 기능 켜짐, 오류가 있는 경로만 `false`로 끈다 | `configmap.yaml:91-96` |
 | `SKILL_API_ENABLED` | `true` | | Skill API 라우터 | `configmap.yaml:97` |
+| MCP 설정 (`MCP_OAUTH_*`, `APP_MCP_OAUTH_*`, `MCP_*`, `MCP_WIKI_*`) | 켜짐. 공개 주소 `https://<app_domain>`(리소스 `/mcp`), 위키 검색 `http://pipeline-api:8000/internal/mcp/wiki/search`, 가격 KRW(문서 승인 0원, 위키 편입 1MiB당 1원, 정리 1회 1원, `mcp-launch-2026-11`) | 코드 기본 꺼짐 | access OAuth, document MCP 서버, pipeline 검색·초안 한도. 전체 값과 근거는 `configmap-aws.yaml` 주석 | `configmap-aws.yaml` MCP 절 |
 | `ANALYTICS_ENABLED` / `ANALYTICS_ENVIRONMENT` / `APP_VERSION` / `POSTHOG_HOST` / `POSTHOG_PROJECT_TOKEN` | ConfigMap에는 `false`/`local`/`local`/로컬 주소/빈 값. **각 Deployment env가 덮습니다** (2.3) | | | `configmap.yaml:10-14` |
 
 ### 2.3 Deployment별 환경 변수
@@ -393,9 +396,11 @@ base(`k8s/base/configmap.yaml`)에 AWS patch(`k8s/overlays/aws/configmap-aws.yam
 | | `SERVER_SHUTDOWN` / `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE` | `graceful` / `40s` | |
 | | `MANAGEMENT_PORT` | `8082` | |
 | | `REDIS_USERNAME` | `document` | |
-| | envFrom 비밀 `fruition-document` | `CORE_DB_RUNTIME_PASSWORD`, `INTERNAL_CALLBACK_TOKEN`, `AGENT_INTERNAL_TOKEN`, `REDIS_PASSWORD`, `KOREAEXIM_AUTH_KEY`, `JWT_PUBLIC_KEY`, `JWT_KEY_ID`, `JWT_PREVIOUS_PUBLIC_KEY`, `JWT_PREVIOUS_KEY_ID` | |
+| | envFrom 비밀 `fruition-document` | `CORE_DB_RUNTIME_PASSWORD`, `INTERNAL_CALLBACK_TOKEN`, `AGENT_INTERNAL_TOKEN`, `REDIS_PASSWORD`, `KOREAEXIM_AUTH_KEY`, `JWT_PUBLIC_KEY`, `JWT_KEY_ID`, `JWT_PREVIOUS_PUBLIC_KEY`, `JWT_PREVIOUS_KEY_ID`, `MCP_CURSOR_SECRET` | |
+| | `SERVER_FORWARD_HEADERS_STRATEGY` | `native` | MCP가 공개 주소(https, 443)를 ALB 헤더로 확인 |
 | pipeline-api | `REDIS_USERNAME` | `pipeline` | |
-| | envFrom 비밀 `fruition-pipeline` | `AI_DATABASE_URL`, `INTERNAL_CALLBACK_TOKEN`, `AGENT_INTERNAL_TOKEN`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `TYPESAFE_API_KEY`, `LANGSMITH_API_KEY`, `TAVILY_API_KEY`, `REDIS_PASSWORD` | |
+| | `EMBEDDING_SERVICE_URL` | `http://embedding-server:8000` | MCP 위키 검색 질의 임베딩. embedding-server는 AWS에서 상시 1개(Spot 회수·절전 중에는 503, 재시도 가능) |
+| | envFrom 비밀 `fruition-pipeline` | `AI_DATABASE_URL`, `INTERNAL_CALLBACK_TOKEN`, `AGENT_INTERNAL_TOKEN`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `TYPESAFE_API_KEY`, `LANGSMITH_API_KEY`, `TAVILY_API_KEY`, `REDIS_PASSWORD`, `MCP_WIKI_SEARCH_CURSOR_HMAC_KEY` | |
 | pipeline-agent-worker | `AGENT_BACKEND_URL` | `http://document-svc:8080` | |
 | | `REDIS_USERNAME` | `pipeline` | |
 | | envFrom 비밀 `fruition-pipeline` | 위와 같음 | |
@@ -418,6 +423,7 @@ base(`k8s/base/configmap.yaml`)에 AWS patch(`k8s/overlays/aws/configmap-aws.yam
 | | `AWS_REGION` | `ap-northeast-2` | |
 | | `REQUEST_WAKE_EVENT_SOURCE` / `REQUEST_WAKE_DETAIL_TYPE` / `REQUEST_WAKE_STATE_TABLE` | `fruition.frontend` / `wake-requested` / `fruition-request-wake` | 절전 기동 요청 |
 | | `CSP_S3_ORIGIN` | `https://fruition-storage-<hex>.s3.ap-northeast-2.amazonaws.com` | CSP connect/media/frame |
+| | `MCP_RESOURCE_URI` | `https://<app_domain>/mcp` | MCP 연결 안내의 서버 주소(`/api/mcp-endpoint`). ConfigMap 값과 같아야 함 |
 | | (이미지) `NODE_ENV=production`, `SAME_ORIGIN_API=true`, `PORT=3000`, `HOSTNAME=0.0.0.0`, `NEXT_TELEMETRY_DISABLED=1` | `frontend:web/Dockerfile:10,17` | |
 
 **마이그레이션 Job** (`k8s/overlays/aws/migration-jobs.yaml`, `backoffLimit 0`, `activeDeadlineSeconds 600`, 요청 100m/256Mi, 한도 1Gi)
@@ -694,6 +700,8 @@ ConfigMap을 바꾸면 이미지는 그대로라도 새 release 기록이 필요
 | `LANGSMITH_API_KEY` | LangSmith | `fruition-pipeline` | |
 | `TAVILY_API_KEY` | 웹 검색 | `fruition-pipeline` | |
 | `KOREAEXIM_AUTH_KEY` | 환율 API | `fruition-document` | |
+| `MCP_CURSOR_SECRET` | MCP 목록 cursor 서명 (32바이트 이상) | `fruition-document` | 바꾸면 진행 중 cursor만 무효. [교체 절차](aws-credential-rotation.md#mcp-cursor-서명-키) |
+| `MCP_WIKI_SEARCH_CURSOR_HMAC_KEY` | MCP 위키 검색 cursor HMAC (32바이트 이상, 위와 다른 값) | `fruition-pipeline` | 같음 |
 | `ACCESS_CODE` | 화면 접근 코드 | `fruition-frontend` + WAF 전용 비밀값 | 바꾼 뒤 `aws_waf_access_code.py`로 복사하고 WAF plan/apply |
 | `POSTHOG_PROJECT_TOKEN` | 분석 (선택) | `fruition-analytics` (`dataFrom` 템플릿) | |
 

@@ -65,6 +65,14 @@ spec:
                 name: frontend
                 port:
                   number: 3000
+          # MCP 연결 안내가 쓰는 MCP 서버 주소 조회(frontend MCP_RESOURCE_URI)
+          - path: /api/mcp-endpoint
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000
           # 3. access의 /{id}/restore 패턴과 겹치는 document 복구 경로를 먼저 보낸다
           - path: /api/workspaces/*/documents/*
             pathType: ImplementationSpecific
@@ -204,7 +212,30 @@ spec:
                 name: document-svc
                 port:
                   number: 8080
-          # 8. 화면
+          # 8. MCP. /mcp 한 경로만 document(MCP 서버)다. /mcp/authorize·/mcp/workspaces/... 승인 화면은 아래 화면 규칙으로 간다.
+          #    OAuth 토큰·인가·JWKS(/oauth2/*)는 위 access 규칙이 받는다.
+          - path: /mcp
+            pathType: Exact
+            backend:
+              service:
+                name: document-svc
+                port:
+                  number: 8080
+          - path: /.well-known/oauth-protected-resource/mcp
+            pathType: Exact
+            backend:
+              service:
+                name: document-svc
+                port:
+                  number: 8080
+          - path: /.well-known/oauth-authorization-server
+            pathType: Exact
+            backend:
+              service:
+                name: access-svc
+                port:
+                  number: 8081
+          # 9. 화면
           - path: /*
             pathType: ImplementationSpecific
             backend:

@@ -98,6 +98,30 @@ rtk proxy python3 scripts/aws_waf_access_code.py
 키 버전별 복호화와 데이터 재암호화·복구 검증이 포함된 별도 마이그레이션 없이 변경하지 않는다.
 KMS 자동 키 회전은 이 앱 비밀값들의 회전을 대신하지 않는다.
 
+## MCP cursor 서명 키
+
+MCP를 켠 배포(`configmap-aws.yaml`의 `MCP_ENABLED=true`) 전에 Secrets Manager `fruition/app`에 아래 두 키를 추가한다.
+Terraform은 이 Secret을 `ignore_changes`로 두므로 CLI로 넣는다. 키가 없으면 해당 ExternalSecret 동기화가 실패하고, 새 document Pod는 기동하지 못하며(cursor 키 32바이트 미만이면 기동 거부) pipeline 위키 검색은 503이다.
+
+| `fruition/app` 키 | Kubernetes Secret → env | 쓰는 곳 | 조건 |
+|---|---|---|---|
+| `MCP_CURSOR_SECRET` | `fruition-document` → `MCP_CURSOR_SECRET` | document MCP 목록 cursor 서명 | UTF-8 32바이트 이상 |
+| `MCP_WIKI_SEARCH_CURSOR_HMAC_KEY` | `fruition-pipeline` → `MCP_WIKI_SEARCH_CURSOR_HMAC_KEY` | pipeline MCP 위키 검색 cursor HMAC | 32바이트 이상, document 키와 다른 값 |
+
+```sh
+# 현재 값에 두 키만 더한 새 버전을 올린다. 값을 화면·파일에 남기지 않는다.
+aws secretsmanager get-secret-value --secret-id fruition/app --query SecretString --output text \
+  | jq --arg a "$(openssl rand -base64 48)" --arg b "$(openssl rand -base64 48)" \
+      '. + {MCP_CURSOR_SECRET: $a, MCP_WIKI_SEARCH_CURSOR_HMAC_KEY: $b}' \
+  | aws secretsmanager put-secret-value --secret-id fruition/app --secret-string file:///dev/stdin --query VersionId
+# 길이만 확인한다(둘 다 64).
+aws secretsmanager get-secret-value --secret-id fruition/app --query SecretString --output text \
+  | jq -r '[.MCP_CURSOR_SECRET, .MCP_WIKI_SEARCH_CURSOR_HMAC_KEY] | map(length) | @tsv'
+```
+
+배포 뒤 `kubectl -n fruition get externalsecret fruition-document fruition-pipeline`이 둘 다 `SecretSynced`인지 확인한다.
+두 키는 이미 발급한 cursor만 무효로 만든다. 교체하면 진행 중인 MCP 목록·검색의 다음 페이지 요청이 실패하고 클라이언트는 처음부터 다시 조회한다. 서비스 간 동시 전환은 필요 없으며 새 값을 넣고 동기화 후 document·pipeline Pod를 재시작한다.
+
 ## 교체 기한과 증적 태그
 
 DB 앱 자격증명과 JWT 서명키는 운영 정책상 최대 90일 이내 교체·검증한다. 이는 이 프로젝트의 관리 기준이며 모든 제공자의 보편적 필수 기한은 아니다.
