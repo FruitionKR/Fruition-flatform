@@ -253,7 +253,7 @@ KafkaUser와 권한 (`kafka-users.yaml`):
 | agent-task-worker | `fruition-pipeline` | KEDA 0~4 | 500m / 2560Mi | 3584Mi | ai-worker | 900s | `fruition-pipeline` |
 | maintenance-task-worker | `fruition-pipeline` | KEDA 0~2 | 500m / 2560Mi (+ephemeral 2Gi) | 3584Mi | ai-worker | 1800s | `fruition-pipeline` |
 | converter | `fruition-converter` / Fruition-ai (`converter/`) | KEDA 0~3 | 100m / 256Mi | 1Gi | ai-worker | 7800s | `fruition-converter` |
-| embedding-server | `fruition-pipeline` | KEDA 0~1 | 500m / 3Gi | 4Gi | ai-worker | 기본 30s | `fruition-pipeline` |
+| embedding-server | `fruition-pipeline` | KEDA 1 (AWS 상시, base 0~1) | 500m / 3Gi | 4Gi | ai-worker | 기본 30s | `fruition-pipeline` |
 
 - 근거: `k8s/overlays/aws/kustomization.yaml:105-400`, `api-autoscaling.yaml:33-109`, `api-availability.yaml`, `frontend.yaml:31-64`, `k8s/base/*.yaml`.
 - base 값은 kind 개발용입니다. 운영에서는 overlay가 덮습니다. 예: access-svc 요청 CPU는 base 250m, 운영 100m입니다. document-svc는 base 250m/768Mi, 운영 150m/1Gi입니다.
@@ -273,7 +273,7 @@ KafkaUser와 권한 (`kafka-users.yaml`):
 | agent-task-worker | `ai.agent.command` / `agent-task-worker` | 6 | 0/4 | 1800s | 같음 |
 | maintenance-task-worker | `ai.maintenance.command` / `maintenance-task-worker` | 2 | 0/2 | 600s | 같음 |
 | converter | `ai.convert.command` / `ai.convert.command-worker` | 1 | 0/3 | 600s | 같음 |
-| embedding-server | `kubernetes-workload`: `app in (query-task-worker,agent-task-worker)` Pod 수, 값 1 | - | 0/1 | 300s | - |
+| embedding-server | `kubernetes-workload`: `app in (query-task-worker,agent-task-worker,ingest-worker,maintenance-task-worker)` Pod 수, 값 1 | - | 1/1 (AWS 패치. MCP 위키 검색용 상시 1개) | 300s | - |
 
 Kafka 트리거는 모두 `limitToPartitionsWithLag=true`, `offsetResetPolicy=earliest`, TLS(`TriggerAuthentication kafka-tls`)를 씁니다.
 
@@ -399,7 +399,7 @@ base(`k8s/base/configmap.yaml`)에 AWS patch(`k8s/overlays/aws/configmap-aws.yam
 | | envFrom 비밀 `fruition-document` | `CORE_DB_RUNTIME_PASSWORD`, `INTERNAL_CALLBACK_TOKEN`, `AGENT_INTERNAL_TOKEN`, `REDIS_PASSWORD`, `KOREAEXIM_AUTH_KEY`, `JWT_PUBLIC_KEY`, `JWT_KEY_ID`, `JWT_PREVIOUS_PUBLIC_KEY`, `JWT_PREVIOUS_KEY_ID`, `MCP_CURSOR_SECRET` | |
 | | `SERVER_FORWARD_HEADERS_STRATEGY` | `native` | MCP가 공개 주소(https, 443)를 ALB 헤더로 확인 |
 | pipeline-api | `REDIS_USERNAME` | `pipeline` | |
-| | `EMBEDDING_SERVICE_URL` | `http://embedding-server:8000` | MCP 위키 검색 질의 임베딩. embedding-server가 0대면 검색은 503(재시도 가능) |
+| | `EMBEDDING_SERVICE_URL` | `http://embedding-server:8000` | MCP 위키 검색 질의 임베딩. embedding-server는 AWS에서 상시 1개(Spot 회수·절전 중에는 503, 재시도 가능) |
 | | envFrom 비밀 `fruition-pipeline` | `AI_DATABASE_URL`, `INTERNAL_CALLBACK_TOKEN`, `AGENT_INTERNAL_TOKEN`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `TYPESAFE_API_KEY`, `LANGSMITH_API_KEY`, `TAVILY_API_KEY`, `REDIS_PASSWORD`, `MCP_WIKI_SEARCH_CURSOR_HMAC_KEY` | |
 | pipeline-agent-worker | `AGENT_BACKEND_URL` | `http://document-svc:8080` | |
 | | `REDIS_USERNAME` | `pipeline` | |

@@ -37,14 +37,16 @@ class SchedulingTest(unittest.TestCase):
         pdb = next(r for r in resources if r["kind"] == "PodDisruptionBudget" and r["metadata"]["name"] == "pipeline-api")
         self.assertEqual(1, pdb["spec"]["minAvailable"])
 
-    def test_embedding_scaler_covers_remote_clients_without_forcing_idle_capacity(self):
+    def test_embedding_scaler_covers_remote_clients_and_stays_up_on_aws_for_mcp_search(self):
         clients = {"query-task-worker", "agent-task-worker", "ingest-worker", "maintenance-task-worker"}
-        for overlay in ("base", "overlays/aws"):
+        # 로컬(base)은 worker가 없으면 0. AWS는 MCP 위키 검색(pipeline-api)의 질의 임베딩 때문에 상시 1개다.
+        for overlay, minimum in (("base", 0), ("overlays/aws", 1)):
             resources = list(yaml.safe_load_all(subprocess.check_output(
                 ["kubectl", "kustomize", str(ROOT / "k8s" / overlay)], text=True)))
             scaler = next(r for r in resources if r["kind"] == "ScaledObject"
                           and r["metadata"]["name"] == "embedding-server")
-            self.assertEqual(scaler["spec"]["minReplicaCount"], 0)
+            self.assertEqual(scaler["spec"]["minReplicaCount"], minimum, overlay)
+            self.assertEqual(scaler["spec"]["maxReplicaCount"], 1, overlay)
             selector = scaler["spec"]["triggers"][0]["metadata"]["podSelector"]
             self.assertEqual(set(selector.removeprefix("app in (").removesuffix(")").split(",")), clients)
         compose = yaml.safe_load((ROOT / "infra/compose.ai.yml").read_text())
@@ -201,14 +203,16 @@ class SchedulingTest(unittest.TestCase):
             scalers = {r["metadata"]["name"]: r["spec"] for r in resources if r["kind"] == "ScaledObject"}
             self.assertEqual(set(scalers), WORKERS)
             for name, spec in scalers.items():
-                self.assertEqual(0, spec["minReplicaCount"], name)
+                # AWS embedding-server만 MCP 위키 검색 때문에 상시 1개다. Kafka worker·converter는 모두 0까지 준다.
+                expected = 1 if (overlay, name) == ("overlays/aws", "embedding-server") else 0
+                self.assertEqual(expected, spec["minReplicaCount"], (overlay, name))
                 trigger, = spec["triggers"]
                 if trigger["type"] == "kafka":
                     # 0에서 깨우는 기준은 lag 1건이다. 대화형 질의·에이전트는 대화 중 다시 cold start하지 않게 오래 둔다.
                     self.assertNotIn("activationLagThreshold", trigger["metadata"])
                     self.assertNotEqual("true", trigger["metadata"].get("scaleToZeroOnInvalidOffset"))
                     self.assertGreaterEqual(spec["cooldownPeriod"], 1800 if name in {"query-task-worker", "agent-task-worker"} else 600)
-            # embedding-server는 질의 임베딩을 부르는 worker Pod가 있을 때만 1개 뜬다.
+            # embedding-server는 질의 임베딩을 부르는 worker Pod 수를 따른다(AWS는 최소 1이라 늘 1개).
             embedding = scalers["embedding-server"]
             self.assertEqual(1, embedding["maxReplicaCount"])
             self.assertEqual({"type": "kubernetes-workload", "metadata": {

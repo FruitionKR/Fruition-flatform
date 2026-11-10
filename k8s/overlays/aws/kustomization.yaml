@@ -161,7 +161,7 @@ patches:
                 imagePullPolicy: IfNotPresent
                 env:
                   # MCP 위키 검색(/internal/mcp/wiki/search)의 질의 임베딩. 없으면 검색이 503이다.
-                  # embedding-server는 AI worker가 있을 때만 떠 있어(KEDA) 그 밖의 시간에는 검색이 503(재시도 가능)이다.
+                  # embedding-server는 아래 ScaledObject 패치로 운영에서 상시 1개다.
                   - name: EMBEDDING_SERVICE_URL
                     value: "http://embedding-server:8000"
                 # 실측 Pod 평균 14m, 시간 최대 30m.
@@ -407,6 +407,16 @@ patches:
         path: /spec/template/spec/terminationGracePeriodSeconds
         value: 900
 
+  # MCP 위키 검색(pipeline-api)이 AI worker 유무와 관계없이 질의 임베딩을 받도록 embedding-server를 상시 1개로 둔다.
+  # 그래서 AI Spot 노드도 1대가 상시 켜진다(Cluster Autoscaler가 Pending Pod로 띄움, docs/aws-deployment-costs.md).
+  # trigger(query·agent·ingest·maintenance Pod 수)는 그대로 두며 max 1이라 결과는 늘 1이다. base(로컬)는 0/1 그대로다.
+  - target:
+      kind: ScaledObject
+      name: embedding-server
+    patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 1
   - target:
       kind: Kafka
       name: kafka
