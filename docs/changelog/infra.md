@@ -1,5 +1,9 @@
 # 인프라 변경 기록
 
+## 2026-11-11
+
+- MCP OAuth 클라이언트의 loopback `redirect_uri`(`http://127.0.0.1:<port>/...`, `http://localhost:<port>/...`)가 WAF CommonRuleSet `GenericRFI_QUERYARGUMENTS`·`GenericRFI_BODY`에 막혀 403이던 문제를 고쳤다. 두 규칙을 Count로 바꾸고, 화면 호스트(`app_domain`)의 `GET /oauth2/authorize`·`GET /mcp/authorize`·`POST /oauth2/token` 정확한 경로에만 `fruition:oauth-loopback-redirect` 라벨을 붙여 통과시킨다. 그 밖의 요청은 새 `oauth-loopback-redirect-guard`가 이전처럼 차단한다([정책](../aws-waf-document-content.md#mcp-oauth-loopback-redirect_uri-예외)). 운영 반영에는 `aws_wafv2_web_acl.cost_guard` 대상 Terraform apply가 필요하다.
+
 ## 2026-11-10
 
 - 화면 호스트에서 access가 처리하는 MCP 연결 관리 API(`/api/workspaces/*/mcp-policy`, `/api/workspaces/*/mcp-connections(/*)`, `/api/mcp/connections(/*)`)가 document 와일드카드로 가던 라우팅을 access로 고쳤다. workspace OWNER가 MCP를 켜지 못해 연결을 만들 수 없던 문제다.

@@ -1,0 +1,22 @@
+{
+  "managed_rule_overrides": {
+    "AWSManagedRulesCommonRuleSet": {
+      "GenericRFI_QUERYARGUMENTS": "awswaf:managed:aws:core-rule-set:GenericRFI_QueryArguments",
+      "GenericRFI_BODY": "awswaf:managed:aws:core-rule-set:GenericRFI_Body"
+    }
+  },
+  "routes": {
+    "authorize": {
+      "method": "GET",
+      "path": "/oauth2/authorize"
+    },
+    "consent": {
+      "method": "GET",
+      "path": "/mcp/authorize"
+    },
+    "token": {
+      "method": "POST",
+      "path": "/oauth2/token"
+    }
+  }
+}
