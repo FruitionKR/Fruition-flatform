@@ -1,5 +1,13 @@
 # 인프라 변경 기록
 
+## 2026-11-10
+
+- 운영 출시용 MCP를 AWS 설정에서 켰다. access MCP OAuth(발급자 `https://<app_domain>`, 리소스 `/mcp`, TTL 코드 2분·access 15분·refresh 8시간·대기 5분), document MCP 서버(한도·위키 원문 한도, 위키 검색은 클러스터 내부 `http://pipeline-api:8000/internal/mcp/wiki/search`), pipeline 위키 검색·페이지·초안 한도와 승인 조회·반영 결과 timeout을 공통 ConfigMap에 넣었다. CIMD 64KiB/2초 제한은 유지한다.
+- 가격은 원화 최소 단위 1원 기준으로 문서 수정 승인 0원, 위키 편입 원문 1MiB당 1원, 위키 정리 반영 1회 1원이며 가격 버전은 `mcp-launch-2026-11`이다.
+- 화면 호스트에 `/mcp`(정확히)·`/.well-known/oauth-protected-resource/mcp` → document, `/.well-known/oauth-authorization-server` → access, `/api/mcp-endpoint` → frontend 규칙을 추가했다. `/mcp/*` 승인 화면은 frontend, `/oauth2/*`는 기존대로 access다. frontend에 `MCP_RESOURCE_URI`를 넣었다.
+- 새 비밀값 `MCP_CURSOR_SECRET`(document)·`MCP_WIKI_SEARCH_CURSOR_HMAC_KEY`(pipeline)를 `fruition/app` ExternalSecret 매핑에 추가했다. 배포 전에 운영자가 두 키를 Secrets Manager에 넣어야 한다([절차](../aws-credential-rotation.md#mcp-cursor-서명-키)).
+- MCP 위키 검색 질의 임베딩을 위해 pipeline-api에 `EMBEDDING_SERVICE_URL`과 embedding-server 호출 NetworkPolicy를 추가했다. embedding-server는 AI worker가 있을 때만 떠 있으므로 그 밖에는 검색이 503(재시도 가능)이다. document에는 `SERVER_FORWARD_HEADERS_STRATEGY=native`를 명시했다.
+
 ## 2026-11-09
 
 - Access 내부 MCP reader에 필요한 CIMD 크기/시간 제한(64KiB/2초)을 AWS 설정에 추가했다. 저장소 테스트 설정과 동일하며 OAuth 활성화 값은 변경하지 않는다. 운영 기동 실패를 수정한 설정은 별도 immutable runtime-config 기록으로 남긴다.

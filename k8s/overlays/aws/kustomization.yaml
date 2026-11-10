@@ -115,6 +115,9 @@ patches:
                 env:
                   - name: POSTGRES_HOST
                     value: "REPLACE_ME_CORE_RDS_ENDPOINT"
+                  # MCP는 공개 주소(https, 443)로 온 요청만 받는다. ALB의 X-Forwarded-Proto/Port를 Tomcat이 반영하게 명시한다.
+                  - name: SERVER_FORWARD_HEADERS_STRATEGY
+                    value: "native"
                 # CPU 요청은 실측(2026-10-27~11-02 Container Insights: Pod 평균 7m, 시간 최대 48m)에 맞춰
                 # 일반 노드 2대에 상주하도록 낮춘다. limit이 없어 기동·부하 때는 노드의 남는 CPU를 쓴다.
                 # HPA 목표(api-autoscaling.yaml)는 같은 비율로 올려 확장 시점(Pod당 약 300m)을 유지한다.
@@ -156,6 +159,11 @@ patches:
             containers:
               - name: pipeline-api
                 imagePullPolicy: IfNotPresent
+                env:
+                  # MCP 위키 검색(/internal/mcp/wiki/search)의 질의 임베딩. 없으면 검색이 503이다.
+                  # embedding-server는 AI worker가 있을 때만 떠 있어(KEDA) 그 밖의 시간에는 검색이 503(재시도 가능)이다.
+                  - name: EMBEDDING_SERVICE_URL
+                    value: "http://embedding-server:8000"
                 # 실측 Pod 평균 14m, 시간 최대 30m.
                 resources:
                   requests:
