@@ -66,6 +66,11 @@ locals {
   waf_sensitive_paths             = jsondecode(file("${path.module}/../waf/sensitive-paths.json"))
   # MCP OAuth clients send loopback redirect_uri values (http://127.0.0.1:port/...), which GenericRFI blocks.
   waf_oauth_loopback_redirect = jsondecode(file("${path.module}/../waf/oauth-loopback-redirect.json"))
+  waf_rfi_ssrf_labels         = merge(values(local.waf_oauth_loopback_redirect.managed_rule_overrides)...)
+  # Document text may legitimately contain http://localhost or IP-literal URLs. Only these BODY labels
+  # are also tolerated on document-content contracts; query-argument labels stay OAuth-only.
+  waf_rfi_ssrf_document_body_labels = [for name in local.waf_oauth_loopback_redirect.document_content_body_rules : local.waf_rfi_ssrf_labels[name]]
+  waf_rfi_ssrf_oauth_only_labels    = [for name, label in local.waf_rfi_ssrf_labels : label if !contains(local.waf_oauth_loopback_redirect.document_content_body_rules, name)]
   waf_content_body_overrides = {
     AWSManagedRulesCommonRuleSet = {
       SizeRestrictions_BODY   = "awswaf:managed:aws:core-rule-set:SizeRestrictions_Body"
@@ -437,7 +442,7 @@ resource "aws_wafv2_web_acl" "cost_guard" {
         statement {
           or_statement {
             dynamic "statement" {
-              for_each = toset(flatten([for rules in local.waf_oauth_loopback_redirect.managed_rule_overrides : values(rules)]))
+              for_each = toset(local.waf_rfi_ssrf_oauth_only_labels)
               content {
                 label_match_statement {
                   scope = "LABEL"
@@ -462,6 +467,58 @@ resource "aws_wafv2_web_acl" "cost_guard" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "fruition-oauth-loopback-redirect-guard"
+      sampled_requests_enabled   = false
+    }
+  }
+
+  # RFI/SSRF BODY labels pass only on the OAuth routes and document-content contracts.
+  # Kept separate from the query guard above so each guard stays "label present and exemption label absent".
+  rule {
+    name     = "rfi-ssrf-body-guard"
+    priority = 22
+    action {
+      block {}
+    }
+    statement {
+      and_statement {
+        statement {
+          or_statement {
+            dynamic "statement" {
+              for_each = toset(local.waf_rfi_ssrf_document_body_labels)
+              content {
+                label_match_statement {
+                  scope = "LABEL"
+                  key   = statement.value
+                }
+              }
+            }
+          }
+        }
+        statement {
+          not_statement {
+            statement {
+              label_match_statement {
+                scope = "LABEL"
+                key   = "fruition:oauth-loopback-redirect"
+              }
+            }
+          }
+        }
+        statement {
+          not_statement {
+            statement {
+              label_match_statement {
+                scope = "LABEL"
+                key   = "fruition:document-content"
+              }
+            }
+          }
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "fruition-rfi-ssrf-body-guard"
       sampled_requests_enabled   = false
     }
   }

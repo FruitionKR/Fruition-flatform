@@ -58,14 +58,49 @@ class WafOAuthLoopbackRedirectTests(unittest.TestCase):
     def test_guard_blocks_rfi_labels_outside_contract_after_managed_groups(self):
         rule = rule_block("oauth-loopback-redirect-guard")
         self.assertIn("block {}", rule)
-        self.assertIn("values(rules)]))", rule)
-        self.assertIn("local.waf_oauth_loopback_redirect.managed_rule_overrides", rule)
+        self.assertIn("for_each = toset(local.waf_rfi_ssrf_oauth_only_labels)", rule)
         self.assertIn('key   = "fruition:oauth-loopback-redirect"', rule)
+        self.assertNotIn("fruition:document-content", rule)
         self.assertIn("not_statement", rule)
         priority = int(re.search(r"priority = (\d+)", rule).group(1))
         contract = int(re.search(r"priority = (\d+)", rule_block("oauth-loopback-redirect-contract")).group(1))
         self.assertLess(contract, 10)  # 관리형 규칙(10-13)보다 먼저 라벨을 붙인다.
         self.assertGreater(priority, 13)
+
+    def test_only_rfi_ssrf_body_rules_are_also_tolerated_on_document_contracts(self):
+        # 문서 본문의 http://localhost:3000, http://127.0.0.1:8080 같은 예문은 BODY 규칙만 잡는다.
+        self.assertEqual(["GenericRFI_BODY", "EC2MetaDataSSRF_BODY"], POLICY["document_content_body_rules"])
+        common = POLICY["managed_rule_overrides"]["AWSManagedRulesCommonRuleSet"]
+        self.assertTrue(set(POLICY["document_content_body_rules"]) <= set(common))
+        self.assertIn("waf_rfi_ssrf_document_body_labels = [for name in local.waf_oauth_loopback_redirect.document_content_body_rules", TERRAFORM)
+        self.assertIn("label if !contains(local.waf_oauth_loopback_redirect.document_content_body_rules, name)", TERRAFORM)
+        rule = rule_block("rfi-ssrf-body-guard")
+        self.assertIn("block {}", rule)
+        self.assertIn("for_each = toset(local.waf_rfi_ssrf_document_body_labels)", rule)
+        self.assertEqual(2, rule.count("not_statement"))
+        self.assertIn('key   = "fruition:oauth-loopback-redirect"', rule)
+        self.assertIn('key   = "fruition:document-content"', rule)
+        self.assertGreater(int(re.search(r"priority = (\d+)", rule).group(1)), 13)
+
+    def test_rfi_ssrf_decision_table(self):
+        common = POLICY["managed_rule_overrides"]["AWSManagedRulesCommonRuleSet"]
+        body = {common[n] for n in POLICY["document_content_body_rules"]}
+        oauth_only = set(common.values()) - body
+        self.assertEqual({common["GenericRFI_QUERYARGUMENTS"], common["EC2MetaDataSSRF_QUERYARGUMENTS"]}, oauth_only)
+
+        def blocked(label, oauth=False, document=False):
+            # oauth-loopback-redirect-guard(21) 다음 rfi-ssrf-body-guard(22)를 그대로 옮긴 판정.
+            if label in oauth_only and not oauth:
+                return True
+            return label in body and not oauth and not document
+
+        for label in common.values():
+            self.assertFalse(blocked(label, oauth=True), label)
+            self.assertTrue(blocked(label), label)
+        for label in body:
+            self.assertFalse(blocked(label, document=True), label)
+        for label in oauth_only:
+            self.assertTrue(blocked(label, document=True), label)  # 문서 경로라도 쿼리 인자는 그대로 차단한다.
 
     def test_document_body_guard_does_not_absorb_rfi_labels(self):
         body_overrides = TERRAFORM[TERRAFORM.index("waf_content_body_overrides = {"):]
