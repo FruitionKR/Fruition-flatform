@@ -23,7 +23,7 @@ class WafContentTests(unittest.TestCase):
                 ct, _ = PROBE.body(kind, text)
                 # The query-XSS negative control intentionally has the correct
                 # body contract; the independent managed query rule must block.
-                if name == "control-query-xss":
+                if name in ("control-query-xss", "control-query-loopback"):
                     self.assertTrue(matches(method, path.split("?")[0], ct))
                 else:
                     self.assertEqual(expected == "auth", bool(matches(method, path, ct)))
@@ -61,6 +61,41 @@ class WafContentTests(unittest.TestCase):
                                  ("POST", "/oauth2/authorize/9f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f", "application/json"),
                                  ("GET", "/.well-known/oauth-authorization-server", "")]:
             self.assertFalse(matches(method, path, ct), (method, path, ct))
+
+    def test_upload_contracts_match_real_clients_only(self):
+        ws = PROBE.WORKSPACE
+        speech = ws + "/speech/transcriptions"
+        # 브라우저 MediaRecorder 후보(dictation.ts)와 서버 허용 형식(SpeechController AUDIO_TYPES).
+        for ct in ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg", "audio/wav",
+                   "Audio/WebM; codecs=opus", 'audio/mp4; codecs="mp4a.40.2"']:
+            self.assertTrue(matches("POST", speech, ct), ct)
+        for method, path, ct in [("POST", speech, "audio/ogg"), ("POST", speech, "audio/x-wav"),
+                                 ("POST", speech, "audio/webmx"), ("POST", speech, "application/json"),
+                                 ("POST", speech, "multipart/form-data; boundary=x"), ("POST", speech, ""),
+                                 ("POST", speech, "audio/webm;codecs=opus\r\nx"),
+                                 ("PUT", speech, "audio/webm"), ("POST", speech + "/", "audio/webm"),
+                                 ("POST", ws + "/speech/synthesis", "audio/webm"),
+                                 ("POST", speech.replace("ws_", "bad_"), "audio/webm")]:
+            self.assertFalse(matches(method, path, ct), (method, path, ct))
+        multipart = "multipart/form-data; boundary=----WebKitFormBoundaryabc"
+        for path in [ws + "/icon/image", "/api/auth/me/avatar"]:
+            self.assertTrue(matches("PUT", path, multipart), path)
+            for method, wrong, ct in [("POST", path, multipart), ("DELETE", path, multipart), ("PUT", path + "/", multipart),
+                                      ("PUT", path, "application/json"), ("PUT", path, "image/png"),
+                                      ("PUT", path, "multipart/form-data")]:
+                self.assertFalse(matches(method, wrong, ct), (method, wrong, ct))
+        for wrong in [ws + "/icon", ws + "/icon/image/x", "/api/workspaces/ws_x/icon/image",
+                      "/api/auth/users/u1/avatar", "/api/auth/me/avatar/x", "/api/auth/me"]:
+            self.assertFalse(matches("PUT", wrong, multipart), wrong)
+
+    def test_meeting_notes_and_skill_test_run_carry_document_markdown(self):
+        apply = PROBE.MEETING + "/notes/12/apply"
+        self.assertTrue(matches("POST", apply, "application/json"))
+        self.assertTrue(matches("POST", PROBE.WORKSPACE + "/skills/test-run", "application/json"))
+        for method, path in [("POST", PROBE.MEETING + "/notes/x/apply"), ("POST", PROBE.MEETING + "/notes/1/append-preview"),
+                             ("POST", PROBE.MEETING + "/notes"), ("PUT", apply),
+                             ("POST", apply.replace("mtg_", "meeting_")), ("POST", PROBE.WORKSPACE + "/skills/test-run/x")]:
+            self.assertFalse(matches(method, path, "application/json"), (method, path))
 
     def test_regexes_fit_waf_limit_and_have_explicit_boundaries(self):
         for contract in CONTRACTS.values():

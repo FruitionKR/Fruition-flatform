@@ -7,6 +7,10 @@
       "EC2MetaDataSSRF_BODY": "awswaf:managed:aws:core-rule-set:EC2MetaDataSSRF_Body"
     }
   },
+  "document_content_body_rules": [
+    "GenericRFI_BODY",
+    "EC2MetaDataSSRF_BODY"
+  ],
   "routes": {
     "authorize": {
       "method": "GET",

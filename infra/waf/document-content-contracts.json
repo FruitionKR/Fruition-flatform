@@ -39,6 +39,31 @@
     "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/skills/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
   },
+  "skill-test-run": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/skills/test-run$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  },
+  "meeting-notes-apply": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/meetings/mtg_[0-9a-f]{32}/notes/[0-9]{1,9}/apply$",
+    "content_type_regex": "^application/json([ \\t]*;[ \\t]*charset=[a-z0-9-]+)?[ \\t]*$"
+  },
+  "speech-transcription": {
+    "method": "POST",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/speech/transcriptions$",
+    "content_type_regex": "^audio/(wav|mpeg|mp4|webm)([ \\t]*;[ \\t]*[a-z0-9_.+-]+=(\"[a-z0-9_.,+ -]*\"|[a-z0-9_.+-]+))*[ \\t]*$"
+  },
+  "workspace-icon": {
+    "method": "PUT",
+    "path_regex": "^/api/workspaces/ws_[0-9a-f]{32}/icon/image$",
+    "content_type_regex": "^multipart/form-data;[ \\t]*boundary=.+$"
+  },
+  "profile-avatar": {
+    "method": "PUT",
+    "path_regex": "^/api/auth/me/avatar$",
+    "content_type_regex": "^multipart/form-data;[ \\t]*boundary=.+$"
+  },
   "mcp": {
     "method": "POST",
     "path_regex": "^/mcp$",

@@ -2,6 +2,9 @@
 
 ## 2026-11-11
 
+- WAF 문서 본문 계약 경로에서 `GenericRFI_BODY`·`EC2MetaDataSSRF_BODY`도 통과시킨다. 문서·Markdown·에이전트 질의 본문에 `http://127.0.0.1:8080`, `http://localhost:3000` 같은 개발 메모가 있으면 저장·업로드가 403이던 문제다. 기존 `oauth-loopback-redirect-guard`(21)는 쿼리 인자 라벨 두 개만 보고, 새 `rfi-ssrf-body-guard`(22)가 본문 라벨 두 개를 OAuth 세 경로와 문서 본문 계약 밖에서 차단한다. 쿼리 인자의 loopback URL은 문서 경로에서도 계속 차단한다. Fruition-document·Fruition-ai에 본문 URL을 서버가 가져오는 코드가 없음을 확인했다([정책](../aws-waf-document-content.md#문서-본문의-loopbackip-url)).
+- 8KB를 넘는 본문이 `SizeRestrictions_BODY`에 막히던 업로드 경로를 문서 본문 계약에 추가했다: 채팅 음성 입력 `POST /api/workspaces/ws_*/speech/transcriptions`(`audio/wav|mpeg|mp4|webm` + 파라미터, 2026-11-05 운영 차단 3건), 워크스페이스 아이콘 `PUT /api/workspaces/ws_*/icon/image`, 프로필 사진 `PUT /api/auth/me/avatar`(multipart). 회의록 문서 저장 `POST .../meetings/mtg_*/notes/{버전}/apply`와 Skill 테스트 실행 `POST .../skills/test-run`(JSON에 Markdown 전체)도 같은 종류라 넣었다. WAF 용량 추정은 1,320 → 1,362 WCU(`check-capacity`)다. 운영 반영에는 `aws_wafv2_web_acl.cost_guard` 대상 Terraform apply가 필요하다.
+
 - WAF 로그로 루프백 redirect_uri(`localhost`, `127.0.0.1`, `[::1]`) 차단이 `EC2MetaDataSSRF_QUERYARGUMENTS`·`EC2MetaDataSSRF_BODY`임을 확인해 MCP OAuth 세 경로의 예외 대상에 추가했다. GenericRFI 두 규칙도 유지한다.
 
 - MCP OAuth 클라이언트의 loopback `redirect_uri`(`http://127.0.0.1:<port>/...`, `http://localhost:<port>/...`)가 WAF CommonRuleSet `GenericRFI_QUERYARGUMENTS`·`GenericRFI_BODY`에 막혀 403이던 문제를 고쳤다. 두 규칙을 Count로 바꾸고, 화면 호스트(`app_domain`)의 `GET /oauth2/authorize`·`GET /mcp/authorize`·`POST /oauth2/token` 정확한 경로에만 `fruition:oauth-loopback-redirect` 라벨을 붙여 통과시킨다. 그 밖의 요청은 새 `oauth-loopback-redirect-guard`가 이전처럼 차단한다([정책](../aws-waf-document-content.md#mcp-oauth-loopback-redirect_uri-예외)). 운영 반영에는 `aws_wafv2_web_acl.cost_guard` 대상 Terraform apply가 필요하다.
