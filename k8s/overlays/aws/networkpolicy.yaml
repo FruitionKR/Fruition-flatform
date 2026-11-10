@@ -394,7 +394,8 @@ spec:
     - protocol: TCP
       port: 8000
 ---
-# embedding-server는 질의 임베딩을 요청하는 query·agent worker와 개념 후보 임베딩을 요청하는 ingest·maintenance worker의 호출만 받는다(ai ADR-0026·0037·0038).
+# embedding-server는 질의 임베딩을 요청하는 query·agent worker와 개념 후보 임베딩을 요청하는 ingest·maintenance worker,
+# MCP 위키 검색 질의 임베딩을 요청하는 pipeline-api의 호출만 받는다(ai ADR-0026·0037·0038).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -416,6 +417,7 @@ spec:
         - key: app
           operator: In
           values:
+          - pipeline-api
           - query-task-worker
           - agent-task-worker
           - ingest-worker
@@ -435,6 +437,7 @@ spec:
     - key: app
       operator: In
       values:
+      - pipeline-api
       - query-task-worker
       - agent-task-worker
       - ingest-worker

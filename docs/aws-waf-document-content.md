@@ -17,6 +17,14 @@
 | POST | `skills/author`, `skills/author/publish` | application/json |
 | PATCH | `skills/{UUID}` | application/json |
 
+MCP 서버 요청도 같은 방식으로 예외에 넣는다. 워크스페이스 접두사가 없는 정확한 경로다.
+
+| 메서드 | 경로 | Content-Type |
+|---|---|---|
+| POST | `/mcp` | application/json |
+
+MCP 도구 호출(위키 원문 window 제출, 문서 수정 제안 등)은 문서 원문을 JSON-RPC 본문에 담아 8KB를 넘는다. 기존 계약에 호스트 조건이 없으므로 이 계약도 호스트를 묻지 않는다. `/mcp`는 화면 호스트와 `api.` 호스트 모두 document로 가고, document는 화면 호스트가 아닌 요청을 400(`CANONICAL_ENDPOINT_REQUIRED`)으로 거절한다. `/mcp/*` 승인 화면, `/api/mcp-endpoint`, MCP OAuth(access의 `/oauth2/token`·`/oauth2/authorize`·`/.well-known/oauth-authorization-server`)는 예외가 아니다. 토큰·인가 요청은 작은 form/JSON이라 기본 8KB 검사 안에 든다. access에는 동적 클라이언트 등록(registration) 경로가 없다. 클라이언트 metadata(CIMD)는 access가 밖으로 받아오므로 들어오는 본문이 아니다.
+
 JSON은 선택적인 charset 파라미터를 허용한다. 잘못된 ID·다른 메서드·다른 Content-Type·추가 경로는 예외가 아니다. 이름 변경·삭제·복원·ingest·AI 승인 API는 문서 본문을 받지 않으므로 예외에 포함하지 않는다.
 
 ## 평가 순서
@@ -51,6 +59,7 @@ python3 scripts/aws_waf_content_probe.py \
 - 차단 유지 요청의 기대 결과는 **403**: WAF 로그의 `BLOCK`과 차단 규칙을 추가로 대조한다.
 - 로그의 `x-fruition-waf-probe` 헤더와 결과 파일 `run_id`로 해당 실행만 찾는다. SQLi 등의 예문이 실제 관리형 라벨을 발생시켰는지도 확인한다. 403 상태만으로 WAF 차단을 확정하지 않는다.
 - 프런트엔드 주소로 호출하면 별도의 접근 코드 게이트가 먼저 403을 반환할 수 있다. 이것은 WAF 검증 성공이나 WAF 회귀의 증거가 아니다. 프로브는 API 직접 주소로 수행하며, 로그인 후 실제 저장은 별도 업무 검증이다.
+- 프로브는 `api.` 주소로 보내므로 `/mcp`는 넣지 않았다. document가 화면 호스트가 아닌 `/mcp`를 400으로 거절하기 때문이다. MCP 계약은 단위 테스트로 검사하고, 운영에서는 화면 호스트의 인증 없는 `POST /mcp`(본문 8KB 초과)가 401인지 확인한다.
 
 운영 적용 시 Terraform 계획에서 `aws_wafv2_web_acl.cost_guard` 한 리소스의 변경만 확인한다. 다른 기능의 미병합 Terraform 코드가 있는 경우 전체 apply로 관련 리소스를 제거하지 않도록 검토한 WAF 대상 계획을 사용한다.
 

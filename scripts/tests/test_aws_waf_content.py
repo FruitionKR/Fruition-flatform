@@ -45,6 +45,23 @@ class WafContentTests(unittest.TestCase):
             self.assertFalse(matches("PUT", wrong, "multipart/form-data; boundary=x"), wrong)
         self.assertFalse(matches("PATCH", PROBE.WORKSPACE + "/skills/not-a-uuid", "application/json"))
 
+    def test_mcp_json_rpc_body_is_a_contract_only_on_exact_post_path(self):
+        # MCP 도구 호출(위키 window 제출, 문서 수정 제안)은 문서 원문을 본문에 담아 8KB를 넘는다.
+        for ct in ["application/json", "application/json; charset=utf-8", "Application/JSON;charset=UTF-8"]:
+            self.assertTrue(matches("POST", "/mcp", ct))
+        for method, path, ct in [("GET", "/mcp", "application/json"), ("DELETE", "/mcp", "application/json"),
+                                 ("POST", "/mcp/", "application/json"), ("POST", "/mcp/authorize", "application/json"),
+                                 ("POST", "/mcp/workspaces/ws_1/runs/run_1", "application/json"),
+                                 ("POST", "/api/mcp", "application/json"), ("POST", "/mcpx", "application/json"),
+                                 ("POST", "/mcp", "text/plain"), ("POST", "/mcp", "application/jsonp"), ("POST", "/mcp", ""),
+                                 ("POST", "/mcp", "application/x-www-form-urlencoded")]:
+            self.assertFalse(matches(method, path, ct), (method, path, ct))
+        # MCP OAuth(access)는 예외가 아니다. 토큰·인가 요청은 작은 form/JSON이라 기본 8KB 검사 안에 든다.
+        for method, path, ct in [("POST", "/oauth2/token", "application/x-www-form-urlencoded"),
+                                 ("POST", "/oauth2/authorize/9f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f", "application/json"),
+                                 ("GET", "/.well-known/oauth-authorization-server", "")]:
+            self.assertFalse(matches(method, path, ct), (method, path, ct))
+
     def test_regexes_fit_waf_limit_and_have_explicit_boundaries(self):
         for contract in CONTRACTS.values():
             for key in ("path_regex", "content_type_regex"):
