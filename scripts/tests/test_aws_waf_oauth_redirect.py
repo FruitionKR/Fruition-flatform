@@ -24,7 +24,10 @@ class WafOAuthLoopbackRedirectTests(unittest.TestCase):
         self.assertEqual(
             {"AWSManagedRulesCommonRuleSet": {
                 "GenericRFI_QUERYARGUMENTS": "awswaf:managed:aws:core-rule-set:GenericRFI_QueryArguments",
-                "GenericRFI_BODY": "awswaf:managed:aws:core-rule-set:GenericRFI_Body"}},
+                "GenericRFI_BODY": "awswaf:managed:aws:core-rule-set:GenericRFI_Body",
+                # 루프백 호스트(localhost, 127.0.0.1, [::1])는 SSRF 규칙이 먼저 잡는다(2026-11-11 WAF 로그 확인).
+                "EC2MetaDataSSRF_QUERYARGUMENTS": "awswaf:managed:aws:core-rule-set:EC2MetaDataSSRF_QueryArguments",
+                "EC2MetaDataSSRF_BODY": "awswaf:managed:aws:core-rule-set:EC2MetaDataSSRF_Body"}},
             POLICY["managed_rule_overrides"])
         self.assertIn("lookup(local.waf_oauth_loopback_redirect.managed_rule_overrides, rule.value, {})", TERRAFORM)
 

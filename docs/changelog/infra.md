@@ -2,6 +2,8 @@
 
 ## 2026-11-11
 
+- WAF 로그로 루프백 redirect_uri(`localhost`, `127.0.0.1`, `[::1]`) 차단이 `EC2MetaDataSSRF_QUERYARGUMENTS`·`EC2MetaDataSSRF_BODY`임을 확인해 MCP OAuth 세 경로의 예외 대상에 추가했다. GenericRFI 두 규칙도 유지한다.
+
 - MCP OAuth 클라이언트의 loopback `redirect_uri`(`http://127.0.0.1:<port>/...`, `http://localhost:<port>/...`)가 WAF CommonRuleSet `GenericRFI_QUERYARGUMENTS`·`GenericRFI_BODY`에 막혀 403이던 문제를 고쳤다. 두 규칙을 Count로 바꾸고, 화면 호스트(`app_domain`)의 `GET /oauth2/authorize`·`GET /mcp/authorize`·`POST /oauth2/token` 정확한 경로에만 `fruition:oauth-loopback-redirect` 라벨을 붙여 통과시킨다. 그 밖의 요청은 새 `oauth-loopback-redirect-guard`가 이전처럼 차단한다([정책](../aws-waf-document-content.md#mcp-oauth-loopback-redirect_uri-예외)). 운영 반영에는 `aws_wafv2_web_acl.cost_guard` 대상 Terraform apply가 필요하다.
 
 ## 2026-11-10
