@@ -70,7 +70,7 @@ Claude Code·Codex·VS Code·Copilot CLI·Zed 같은 MCP OAuth 클라이언트�
 | GET | `/mcp/authorize` | 같은 쿼리를 전달받는 동의 화면 | frontend |
 | POST | `/oauth2/token` | form 본문 `redirect_uri` | access |
 
-- 두 규칙만 Count로 바꾸고, `oauth-loopback-redirect-contract`(우선순위 4, Count)가 위 세 메서드+경로에 `fruition:oauth-loopback-redirect` 라벨을 붙인다. `app_domain`이 설정되면 Host 헤더가 그 값과 정확히 같아야 한다(소문자 변환). 경로는 변환 없이 정확히 비교하므로 끝 `/`·하위 경로·대소문자 변형은 예외가 아니다.
+- 위 네 규칙을 Count로 바꾸고, `oauth-loopback-redirect-contract`(우선순위 4, Count)가 위 세 메서드+경로에 `fruition:oauth-loopback-redirect` 라벨을 붙인다. `app_domain`이 설정되면 Host 헤더가 그 값과 정확히 같아야 한다(소문자 변환). 경로는 변환 없이 정확히 비교하므로 끝 `/`·하위 경로·대소문자 변형은 예외가 아니다.
 - `oauth-loopback-redirect-guard`(우선순위 21)가 두 쿼리 인자 라벨 중 하나가 있고 예외 라벨이 없는 요청을 차단한다. 두 본문 라벨은 `rfi-ssrf-body-guard`(우선순위 22)가 예외 라벨과 문서 요청 라벨이 모두 없는 요청을 차단한다. 그 밖의 경로의 차단은 이전과 같다. 문서 본문 계약 경로의 본문 예외는 2026-11-11에 추가했다(다음 절).
 - 보안 영향: 세 경로에서는 `http://169.254.169.254/...` 같은 메타데이터 URL도 쿼리·본문으로 통과한다. access는 `redirect_uri`를 서버에서 가져오지 않고, 서버가 가져오는 `client_id`(CIMD)는 허용 목록 검사 뒤 공인 IP만 허용하는 resolver로 받으므로 SSRF로 이어지지 않는다.
 - `GenericRFI_URIPATH`, `EC2MetaDataSSRF_COOKIE`·`EC2MetaDataSSRF_URIPATH`, LFI·XSS·SQLi 쿼리 검사, KnownBadInputs(`Host_localhost_HEADER` 포함)는 그대로다. Allow를 추가하지 않으며 redirect_uri 일치·PKCE 검증은 access가 책임진다.
@@ -89,7 +89,7 @@ SSRF 점검(2026-11-11, Fruition-document·Fruition-ai 코드): 문서 본문·M
 
 - document: HTTP 클라이언트는 `RestClient`·JDK `HttpClient`·MinIO뿐이며 모든 대상이 설정값(내부 서비스·결제·환율·PostHog) 고정 호스트다. 문서 이미지 참조는 `/api/workspaces/{ws}/assets/{uuid}/content` 관리 자산만 인정하고 외부 이미지 URL은 문자열로 둔다(`DocumentAssetReferenceParser`). 내보내기는 DB·MinIO의 관리 자산만 묶는다. Notion 가져오기는 브라우저가 해석하고 서버는 세션만 관리한다. 링크 미리보기·원격 이미지 가져오기·HTML→PDF 렌더러는 없다.
 - ai: 에이전트 웹 검색은 질문 문자열을 Tavily API(설정 고정 주소)에 보낼 뿐 결과 URL을 가져오지 않는다. PDF 복원은 S3 원본을 로컬에서 렌더링하고 scheme·host가 있는 이미지 링크는 건너뛴다. 그 밖의 호출도 설정 고정 주소다.
-- 따라서 사설·loopback 주소 차단 코드도 없다. 링크 미리보기나 원격 이미지 가져오기를 추가하면 이 WAF 예외와 별개로 서버에서 사설 주소·리다이렉트·DNS rebinding 차단을 먼저 넣어야 한다.
+- 따라서 사설·loopback 주소 차단 코드도 없다. 링크 미리보기나 원격 이미지 가져오기를 추가하거나, 계약 경로(`/mcp`, 에이전트 턴, 질의, Skill 테스트 실행 등)에 URL을 가져오는 도구를 붙이면 이 경로들은 이미 WAF의 본문 RFI·SSRF 검사가 없는 상태다. 그 전에 서버에서 사설 주소·리다이렉트·DNS rebinding 차단을 먼저 넣어야 한다.
 
 ## 검사 한계와 서버 역할
 
