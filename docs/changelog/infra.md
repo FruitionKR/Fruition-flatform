@@ -7,6 +7,7 @@
 - 화면 호스트에 `/mcp`(정확히)·`/.well-known/oauth-protected-resource/mcp` → document, `/.well-known/oauth-authorization-server` → access, `/api/mcp-endpoint` → frontend 규칙을 추가했다. `/mcp/*` 승인 화면은 frontend, `/oauth2/*`는 기존대로 access다. frontend에 `MCP_RESOURCE_URI`를 넣었다.
 - 새 비밀값 `MCP_CURSOR_SECRET`(document)·`MCP_WIKI_SEARCH_CURSOR_HMAC_KEY`(pipeline)를 `fruition/app` ExternalSecret 매핑에 추가했다. 배포 전에 운영자가 두 키를 Secrets Manager에 넣어야 한다([절차](../aws-credential-rotation.md#mcp-cursor-서명-키)).
 - MCP 위키 검색 질의 임베딩을 위해 pipeline-api에 `EMBEDDING_SERVICE_URL`과 embedding-server 호출 NetworkPolicy를 추가했다. embedding-server는 AI worker가 있을 때만 떠 있으므로 그 밖에는 검색이 503(재시도 가능)이다. document에는 `SERVER_FORWARD_HEADERS_STRATEGY=native`를 명시했다.
+- WAF 문서 본문 계약에 `POST /mcp`(application/json, charset 허용)를 추가했다. 이 경로에서만 `SizeRestrictions_BODY`·`GenericLFI_BODY`·`CrossSiteScripting_BODY`·`SQLi_BODY`·`SQLiExtendedPatterns_BODY`가 기존 문서 경로와 같이 Count 후 라벨로 통과한다. MCP OAuth(access) 경로는 예외가 아니며 기본 8KB 검사 안에 든다. 운영 반영에는 `aws_wafv2_web_acl.cost_guard` 대상 Terraform apply가 필요하다.
 
 ## 2026-11-09
 
