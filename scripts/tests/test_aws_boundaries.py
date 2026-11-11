@@ -195,6 +195,10 @@ class BoundaryTests(unittest.TestCase):
         self.assertTrue(all(v > 0 for v in values.values()))
         self.assertGreaterEqual(values["MCP_WIKI_SEARCH_MAX_CANDIDATES"], values["MCP_WIKI_SEARCH_MAX_PAGE_SIZE"])
         self.assertGreaterEqual(values["MCP_WIKI_SEARCH_MAX_SCAN_PAGES"], values["MCP_WIKI_SEARCH_MAX_CANDIDATES"])
+        # document의 pipeline 호출 timeout이 검색 deadline보다 짧으면 deadline까지 기다리지 못하고 끊긴다.
+        self.assertGreater(int(config["MCP_DEPENDENCY_TIMEOUT_SECONDS"]) * 1000, values["MCP_WIKI_SEARCH_DEADLINE_MS"])
+        # unit 상한이 먼저 걸리도록 byte 상한은 unit당 500B 이상을 담는다.
+        self.assertGreaterEqual(values["MCP_WIKI_SEARCH_MAX_CANDIDATE_BYTES"], values["MCP_WIKI_SEARCH_MAX_SCAN_UNITS"] * 500)
         self.assertGreater(values["MCP_WIKI_PAGE_MAX_RESPONSE_BYTES"], values["MCP_WIKI_PAGE_MAX_BODY_BYTES"])
         self.assertLessEqual(values["MCP_WIKI_DRAFT_SOURCE_MAX_TEXT_BYTES"], values["MCP_WIKI_DRAFT_SOURCE_RESPONSE_MAX_BYTES"])
         # ai 원문 한도는 document가 보내는 한도와 맞춘다.
