@@ -70,7 +70,8 @@ data:
   MCP_MAX_SOURCE_BYTES: "1048576"
   MCP_MAX_DOCUMENT_BLOCKS_PER_PAGE: "100"
   MCP_MAX_DOCUMENT_CONTENT_BYTES: "524288"
-  MCP_DEPENDENCY_TIMEOUT_SECONDS: "5"
+  # document → pipeline MCP 호출 read timeout. pipeline 위키 검색 deadline(MCP_WIKI_SEARCH_DEADLINE_MS 8초)보다 길어야 한다.
+  MCP_DEPENDENCY_TIMEOUT_SECONDS: "10"
   MCP_WIKI_MAX_SOURCE_DOCUMENTS: "20"
   MCP_WIKI_MAX_TOTAL_SOURCE_BYTES: "10485760"
   # MCP_PDF_SOURCE_ENDPOINT는 local 저장소 전용이라 두지 않는다(aws 모드는 기본 S3 클라이언트로 서명).
@@ -94,12 +95,16 @@ data:
   # pipeline: MCP 위키 검색·페이지 읽기(mcp_read). 값이 없으면 503으로 닫힌다.
   MCP_WIKI_SEARCH_MAX_STRING_CHARS: "512"
   MCP_WIKI_SEARCH_MAX_PAGE_SIZE: "20"
+  # MAX_CANDIDATES·MAX_SCAN_PAGES는 Fruition-ai #262 이후 읽지 않는다. 배포된 이전 이미지가 요구하므로 새 이미지 배포 뒤 지운다.
   MCP_WIKI_SEARCH_MAX_CANDIDATES: "100"
-  MCP_WIKI_SEARCH_MAX_CANDIDATE_BYTES: "262144"
-  MCP_WIKI_SEARCH_DEADLINE_MS: "5000"
+  # ADR 0046 후보 조회 상한: workspace 검색 unit 본문 UTF-8 byte 합. unit 상한 × 약 500B(≈5MB)보다 넉넉히 둬 unit 상한이 먼저 걸린다.
+  MCP_WIKI_SEARCH_MAX_CANDIDATE_BYTES: "8388608"
+  # 10000 unit 점수 계산(로컬 약 4초)과 질문 임베딩·Jev 판정이 함께 끝나는 시간.
+  MCP_WIKI_SEARCH_DEADLINE_MS: "8000"
   MCP_WIKI_SEARCH_MAX_REQUEST_BYTES: "65536"
   MCP_WIKI_SEARCH_MAX_RESPONSE_BYTES: "1048576"
   MCP_WIKI_SEARCH_MAX_SCAN_PAGES: "100"
+  # ADR 0046 후보 조회 상한: workspace 검색 unit 행 수(문서 약 50개 규모). 넘으면 일부만 검색하지 않고 503.
   MCP_WIKI_SEARCH_MAX_SCAN_UNITS: "10000"
   MCP_WIKI_SEARCH_MAX_VECTOR_DIMENSIONS: "4096"
   MCP_WIKI_PAGE_MAX_ID_CHARS: "255"

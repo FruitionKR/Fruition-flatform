@@ -195,6 +195,10 @@ class BoundaryTests(unittest.TestCase):
         self.assertTrue(all(v > 0 for v in values.values()))
         self.assertGreaterEqual(values["MCP_WIKI_SEARCH_MAX_CANDIDATES"], values["MCP_WIKI_SEARCH_MAX_PAGE_SIZE"])
         self.assertGreaterEqual(values["MCP_WIKI_SEARCH_MAX_SCAN_PAGES"], values["MCP_WIKI_SEARCH_MAX_CANDIDATES"])
+        # document의 pipeline 호출 timeout이 검색 deadline보다 짧으면 deadline까지 기다리지 못하고 끊긴다.
+        self.assertGreater(int(config["MCP_DEPENDENCY_TIMEOUT_SECONDS"]) * 1000, values["MCP_WIKI_SEARCH_DEADLINE_MS"])
+        # unit 상한이 먼저 걸리도록 byte 상한은 unit당 500B 이상을 담는다.
+        self.assertGreaterEqual(values["MCP_WIKI_SEARCH_MAX_CANDIDATE_BYTES"], values["MCP_WIKI_SEARCH_MAX_SCAN_UNITS"] * 500)
         self.assertGreater(values["MCP_WIKI_PAGE_MAX_RESPONSE_BYTES"], values["MCP_WIKI_PAGE_MAX_BODY_BYTES"])
         self.assertLessEqual(values["MCP_WIKI_DRAFT_SOURCE_MAX_TEXT_BYTES"], values["MCP_WIKI_DRAFT_SOURCE_RESPONSE_MAX_BYTES"])
         # ai 원문 한도는 document가 보내는 한도와 맞춘다.
@@ -234,11 +238,14 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn("meetings/*",scopes["document"]["read"])
         self.assertIn("sources/documents/*",scopes["pipeline"]["read"])
         self.assertEqual(["sources/documents/*", "wiki/*", "agent-runs/*", "pipeline-runs/*",
-                          "meetings/*", "tmp/convert/mcp/*"], scopes["pipeline"]["read"])
+                          "meetings/*", "tmp/convert/mcp/*", "tmp/mcp-convert/*"], scopes["pipeline"]["read"])
         self.assertEqual(["wiki/*", "agent-runs/*", "pipeline-runs/*"], scopes["pipeline"]["write"])
-        # 최종 결과는 4MiB 이하 단일 PUT: multipart·삭제 권한을 추가하지 않는다.
+        # MCP PDF 조립 결과는 크기 상한이 없어 multipart가 될 수 있다. 결과 파일 하나에만 쓰고 삭제 권한은 없다.
+        # 승인 계획(1일)보다 오래 남도록 tmp/convert/(1일)가 아닌 tmp/ 7일 lifecycle 아래에 둔다.
         self.assertIn('each.key == "pipeline" ? [', source)
-        self.assertIn('{ Effect = "Allow", Action = ["s3:PutObject"], Resource = ["${aws_s3_bucket.storage.arn}/tmp/convert/mcp/*/*/final.md"] }', source)
+        self.assertIn('{ Effect = "Allow", Action = ["s3:PutObject", "s3:AbortMultipartUpload"], Resource = ["${aws_s3_bucket.storage.arn}/tmp/mcp-convert/*/*/final.json"] }', source)
+        self.assertNotIn("final.md", source)
+        self.assertIn("tmp/mcp-convert/*", scopes["document"]["read"])
         self.assertEqual(["wiki/*","agent-runs/*","pipeline-runs/meeting-transcription/*"],scopes["pipeline"]["delete"])
         # converter(ai ADR 0034)는 원본 읽기와 변환 결과 쓰기만 하고, document는 그 결과를 읽는다.
         self.assertEqual({"read":["sources/documents/*"],"write":["tmp/convert/*"],"delete":[]},scopes["converter"])
