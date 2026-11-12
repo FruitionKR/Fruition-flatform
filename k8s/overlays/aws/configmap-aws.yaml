@@ -143,7 +143,7 @@ data:
   MCP_WIKI_DRAFT_INSTRUCTION_PATTERNS_JSON: '["(?i)ignore\\s+(?:all\\s+)?(?:previous|prior|above)\\s+instructions","(?i)forget\\s+(?:all\\s+)?(?:previous|prior)\\s+instructions","(?i)ignore\\s+(?:the\\s+)?system\\s+(?:prompt|policy)","(?i)(?:reveal|show|print)\\s+(?:the\\s+)?system\\s+prompt","이전\\s*지시(?:를|사항을)?\\s*무시","시스템\\s*(?:정책|프롬프트)(?:을|를)?\\s*무시","시스템\\s*프롬프트(?:를)?\\s*(?:보여|출력|공개)"]'
   MCP_WIKI_DRAFT_VALIDATION_POLICY_VERSION: "mcp-launch-2026-11"
   MCP_WIKI_DRAFT_VALIDATION_EVALSET_ID: "mcp-launch-2026-11"
-  MCP_WIKI_DRAFT_PREVIEW_MAX_ITEMS: "1000"
+  MCP_WIKI_DRAFT_PREVIEW_MAX_ITEMS: "2000"
   MCP_WIKI_DRAFT_PREVIEW_MAX_BYTES: "1048576"
   MCP_WIKI_DRAFT_PREVIEW_MAX_SOURCE_BYTES: "1048576"
   MCP_WIKI_DRAFT_LINT_MAX_OPERATIONS: "50"
