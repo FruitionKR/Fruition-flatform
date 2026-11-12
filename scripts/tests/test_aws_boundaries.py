@@ -204,6 +204,8 @@ class BoundaryTests(unittest.TestCase):
         # ai 원문 한도는 document가 보내는 한도와 맞춘다.
         self.assertEqual(config["MCP_MAX_SOURCE_BLOCKS"], config["MCP_WIKI_DRAFT_SOURCE_MAX_BLOCKS"])
         self.assertEqual(config["MCP_MAX_SOURCE_BYTES"], config["MCP_WIKI_DRAFT_SOURCE_MAX_TEXT_BYTES"])
+        # source-blocks resolve 요청은 원문 전체를 JSON 문자열로 싣는다. 이스케이프로 커지므로 원문 한도의 4배를 받는다.
+        self.assertGreaterEqual(values["MCP_WIKI_DRAFT_MAX_REQUEST_BYTES"], int(config["MCP_MAX_SOURCE_BYTES"]) * 4)
         self.assertEqual(config["MCP_WIKI_MAX_SOURCE_DOCUMENTS"], config["MCP_WIKI_DRAFT_LINT_MAX_SOURCE_SNAPSHOTS"])
         self.assertEqual(config["MCP_WIKI_MAX_TOTAL_SOURCE_BYTES"], config["MCP_WIKI_DRAFT_LINT_MAX_TOTAL_SOURCE_BYTES"])
         self.assertLessEqual(0, float(config["MCP_WIKI_DRAFT_LEXICAL_OVERLAP_THRESHOLD"]))
